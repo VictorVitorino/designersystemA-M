@@ -1,0 +1,33 @@
+{
+  "name": "canteiro-plataforma",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Plataforma online do Canteiro (Design System A&M): API, banco, arquivos, autenticação e cliente web",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node tools/dev.js",
+    "start": "node src/server.js",
+    "db:migrate": "node tools/migrate.js",
+    "db:local:up": "node tools/local-db.js up",
+    "test": "node --test --test-concurrency=1 \"tests/unit/*.test.js\" \"tests/db/*.test.js\" \"tests/api/*.test.js\"",
+    "test:db": "node --test --test-concurrency=1 \"tests/db/*.test.js\"",
+    "test:api": "node --test --test-concurrency=1 \"tests/api/*.test.js\"",
+    "test:e2e": "node tests/e2e/run.js",
+    "test:security": "node --test --test-concurrency=1 \"tests/security/*.test.js\"",
+    "test:load": "node tests/load/run.js",
+    "build:web": "node tools/build-web.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
+    "@aws-sdk/s3-request-presigner": "^3.1146.0",
+    "@hono/node-server": "^1.19.17",
+    "hono": "^4.13.13",
+    "jose": "^5.10.0",
+    "postgres": "^3.4.9",
+    "sharp": "^0.33.5",
+    "zod": "^3.25.76"
+  }
+}

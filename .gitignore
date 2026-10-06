@@ -1,3 +1,10 @@
-studio/inst/work/
-node_modules/
+!.env.example
+*.log
 .DS_Store
+.env
+.env.*
+node_modules/
+platform/.data/
+platform/.tmp/
+platform/dist/
+studio/inst/work/
