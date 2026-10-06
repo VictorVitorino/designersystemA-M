@@ -1,0 +1,332 @@
+{
+  "schema": "canteiro-restore-drill/1",
+  "startedAt": "2026-10-06T20:09:32.348Z",
+  "tools": {
+    "node": "v22.22.0",
+    "pg_dump": "pg_dump (PostgreSQL) 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)",
+    "platform": "Linux 6.18.44-fc-v70 x64",
+    "cpus": 4
+  },
+  "dataset": {
+    "users": 30,
+    "presentations": 200,
+    "versions": 706,
+    "assetsUnique": 448,
+    "files": 300,
+    "thumbs": 148,
+    "uploadsAttempted": 568,
+    "dedupHits": 120,
+    "objectsWritten": 448,
+    "bytes": 9987170,
+    "bytesHuman": "9.52 MB",
+    "comments": 500,
+    "interactions": 800,
+    "audit": 1400,
+    "refs": 2982,
+    "durationMs": 2953,
+    "seed": 42
+  },
+  "backups": {
+    "file": {
+      "name": "canteiro-drill-20261006T200935Z",
+      "dumpEncryptedBytes": 440686,
+      "dumpPlainBytes": 440602,
+      "dbBackupMs": 336,
+      "rows": 7674,
+      "tables": 14,
+      "consistentSnapshot": true,
+      "verified": true,
+      "objects": {
+        "copied": 448,
+        "copiedBytes": 9987170,
+        "ms": 1433,
+        "secondRunCopied": 0,
+        "secondRunSkipped": 448,
+        "sourceObjects": 448
+      }
+    },
+    "s3": {
+      "name": "canteiro-drill-20261006T200939Z",
+      "dumpEncryptedBytes": 440686,
+      "dbBackupMs": 371,
+      "verified": true,
+      "objects": {
+        "copied": 448,
+        "copiedBytes": 9987170,
+        "ms": 4136
+      }
+    }
+  },
+  "disaster": {
+    "at": "2026-10-06T20:09:43.820Z",
+    "lastBackup": "canteiro-drill-20261006T200935Z",
+    "lastBackupStartedAt": "2026-10-06T20:09:35.643Z",
+    "lastBackupFinishedAt": "2026-10-06T20:09:43.767Z",
+    "rpoObservedSeconds": 8.2,
+    "writesAfterBackupLost": 25,
+    "destroyed": [
+      "schema app",
+      "public.schema_migrations",
+      "pasta de arquivos"
+    ]
+  },
+  "restore": {
+    "from": "file",
+    "backup": "canteiro-drill-20261006T200935Z",
+    "rtoMs": 2500,
+    "rtoHuman": "2.5 s",
+    "phases": {
+      "download_decifragem": 7,
+      "preparo": 40,
+      "pg_restore": 596,
+      "migrate_check": 19,
+      "comparacao": 26,
+      "verificar_objetos": 438
+    },
+    "dbRestoreMs": 596,
+    "objectsRestoredMs": 1123,
+    "objectsRestored": 448,
+    "objectsRestoredBytes": 9987170,
+    "objectFailures": 0,
+    "throughput": {
+      "dumpMBps": 0.7,
+      "objectsMBps": 8.5
+    },
+    "s3": {
+      "ok": true,
+      "objectsRestored": 448,
+      "objectsOk": 448,
+      "objectsTotal": 448,
+      "diffs": 0,
+      "totalMs": 1006,
+      "objectsRestoreMs": 2568
+    }
+  },
+  "verification": {
+    "beforeBackup": [
+      {
+        "id": "rls",
+        "status": "ok"
+      },
+      {
+        "id": "grants",
+        "status": "ok"
+      },
+      {
+        "id": "roles",
+        "status": "ok"
+      },
+      {
+        "id": "definers",
+        "status": "ok"
+      },
+      {
+        "id": "guards",
+        "status": "ok"
+      },
+      {
+        "id": "migrations",
+        "status": "ok"
+      },
+      {
+        "id": "data_api",
+        "status": "skip"
+      },
+      {
+        "id": "tls",
+        "status": "skip"
+      },
+      {
+        "id": "storage",
+        "status": "ok"
+      }
+    ],
+    "tables": {
+      "app.asset_refs": 2982,
+      "app.asset_uploads": 565,
+      "app.assets": 448,
+      "app.audit_log": 1400,
+      "app.comments": 500,
+      "app.interactions": 800,
+      "app.invites": 0,
+      "app.presentation_versions": 706,
+      "app.presentations": 200,
+      "app.rate_limits": 0,
+      "app.settings": 5,
+      "app.user_identities": 30,
+      "app.users": 30,
+      "public.schema_migrations": 3
+    },
+    "rowsRestored": 7669,
+    "diffsAgainstManifest": [],
+    "migrateCheck": true,
+    "objects": {
+      "referenced": 448,
+      "ok": 448,
+      "missing": 0,
+      "corrupt": 0,
+      "sizeMismatch": 0,
+      "bytesRehashed": 9987170,
+      "ms": 436
+    },
+    "verifyDeploy": [
+      {
+        "id": "rls",
+        "title": "RLS ligada em todas as tabelas do schema app",
+        "status": "ok",
+        "detail": "13 tabelas com RLS e políticas, nenhuma política aberta"
+      },
+      {
+        "id": "grants",
+        "title": "Nenhuma permissão para anon/authenticated/PUBLIC no schema app",
+        "status": "ok",
+        "detail": "schema, tabelas, colunas, sequências, funções e privilégios padrão sem acesso público"
+      },
+      {
+        "id": "roles",
+        "title": "Papéis do banco: app_api sem poderes e sem pertença a app_system/app_owner",
+        "status": "ok",
+        "detail": "app_api só assume app_user; nenhum papel da aplicação é superuser/BYPASSRLS"
+      },
+      {
+        "id": "definers",
+        "title": "Funções SECURITY DEFINER com search_path fixo e dono sem superpoderes",
+        "status": "ok",
+        "detail": "10 funções verificadas"
+      },
+      {
+        "id": "guards",
+        "title": "Gatilhos de proteção (auditoria só-acréscimo, último admin, campos imutáveis)",
+        "status": "ok",
+        "detail": "5 gatilhos ativos"
+      },
+      {
+        "id": "migrations",
+        "title": "Migrações aplicadas e sem divergência de checksum",
+        "status": "ok",
+        "detail": "3 migrações aplicadas e idênticas aos arquivos"
+      },
+      {
+        "id": "data_api",
+        "title": "Data API do Supabase não expõe o schema app",
+        "status": "skip",
+        "detail": "papel authenticator inexistente (não é um Supabase): nada a verificar no banco"
+      },
+      {
+        "id": "tls",
+        "title": "Conexão com o banco usa TLS",
+        "status": "skip",
+        "detail": "banco local (sem TLS é aceitável só em desenvolvimento)"
+      },
+      {
+        "id": "storage",
+        "title": "Arquivos: bucket/pasta privado (sem leitura pública)",
+        "status": "ok",
+        "detail": "pasta local sem acesso para outros (modo 750)"
+      }
+    ],
+    "isolation": {
+      "memberSeesAcervo": true,
+      "expected": 191,
+      "seen": 191,
+      "suspendedSees": 0,
+      "unknownUserSees": 0,
+      "othersTrashHidden": true,
+      "memberCannotEditOthers": true,
+      "appApiDirectTableAccess": "42501",
+      "adminId": true
+    },
+    "expectedBeforeDisaster": {
+      "users": 30,
+      "pres": 200,
+      "audit": 1425,
+      "assets": 448
+    },
+    "afterRestore": {
+      "users": 30,
+      "pres": 200,
+      "audit": 1400,
+      "assets": 448
+    },
+    "lostByDesign": {
+      "auditRows": 25
+    },
+    "sampleHashesEqual": true
+  },
+  "limits": [],
+  "ok": true,
+  "finishedAt": "2026-10-06T20:09:50.485Z",
+  "totalMs": 18141,
+  "steps": [
+    {
+      "name": "Preparar banco de origem (migrações) e popular dados de demonstração",
+      "ms": 3171,
+      "ok": true
+    },
+    {
+      "name": "Verificação de implantação ANTES do backup (verify-deploy)",
+      "ms": 78,
+      "ok": true
+    },
+    {
+      "name": "Backup do banco (pg_dump → AES-256-GCM → destino) + verificação",
+      "ms": 399,
+      "ok": true
+    },
+    {
+      "name": "Espelho dos arquivos (incremental, cifrado)",
+      "ms": 1436,
+      "ok": true
+    },
+    {
+      "name": "Segundo espelho (nada novo: deve copiar 0)",
+      "ms": 281,
+      "ok": true
+    },
+    {
+      "name": "Backup do banco para S3 (moto) + verificação",
+      "ms": 470,
+      "ok": true
+    },
+    {
+      "name": "Espelho dos arquivos para S3 (moto)",
+      "ms": 4157,
+      "ok": true
+    },
+    {
+      "name": "Gravar dados depois do backup (serão perdidos de propósito)",
+      "ms": 33,
+      "ok": true
+    },
+    {
+      "name": "DESASTRE: apagar o schema app e a pasta de arquivos",
+      "ms": 428,
+      "ok": true
+    },
+    {
+      "name": "Restaurar arquivos do espelho cifrado para pasta nova",
+      "ms": 1123,
+      "ok": true
+    },
+    {
+      "name": "Restaurar o banco em banco novo (+ migrate --check, contagens, amostras, re-hash de todos os arquivos)",
+      "ms": 1156,
+      "ok": true
+    },
+    {
+      "name": "verify-deploy no banco restaurado (RLS, papéis, permissões, gatilhos, migrações)",
+      "ms": 46,
+      "ok": true
+    },
+    {
+      "name": "Isolamento depois da restauração (RLS em ação)",
+      "ms": 63,
+      "ok": true
+    },
+    {
+      "name": "Restaurar a partir do bucket S3 (moto): arquivos + banco + verificação",
+      "ms": 3579,
+      "ok": true
+    }
+  ]
+}

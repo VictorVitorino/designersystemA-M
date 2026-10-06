@@ -1,0 +1,168 @@
+# Publicação em STAGING a cada push na main (depois que o CI do mesmo commit passar).
+# Ordem: (backup opcional) → migrações → verify-deploy do banco → deploy na Vercel → verify-deploy do site → smoke de /api/ready.
+# Staging usa projeto Supabase e variáveis SEPARADOS de produção (veja docs/AMBIENTES.md). Segredos vêm do ambiente "staging" do GitHub.
+name: Deploy staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  VERCEL_CLI_VERSION: 62.5.0   # fixa a versão da CLI (sem "latest")
+
+jobs:
+  esperar-ci:
+    name: Esperar o CI deste commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Aguardar CI verde
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const sha = context.sha, limite = Date.now() + 30 * 60 * 1000;
+            for (;;) {
+              const { data } = await github.rest.actions.listWorkflowRuns({ owner: context.repo.owner, repo: context.repo.repo, workflow_id: 'ci.yml', head_sha: sha, per_page: 10 });
+              const run = data.workflow_runs.find((r) => r.head_sha === sha);
+              if (run && run.status === 'completed') {
+                if (run.conclusion !== 'success') core.setFailed(`O CI deste commit terminou com "${run.conclusion}" (${run.html_url}). Nada foi publicado.`);
+                else core.info(`CI verde: ${run.html_url}`);
+                return;
+              }
+              if (Date.now() > limite) { core.setFailed('O CI não terminou em 30 minutos (ou não foi encontrado para este commit). Nada foi publicado.'); return; }
+              await new Promise((r) => setTimeout(r, 20000));
+            }
+
+  publicar:
+    name: Migrar e publicar em staging
+    needs: esperar-ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    env:
+      PG_CLIENT_MAJOR: ${{ vars.PG_CLIENT_MAJOR || '17' }}
+      STAGING_HOST: ${{ vars.STAGING_HOST }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar o cliente PostgreSQL (mesma versão do servidor)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -q
+          sudo apt-get install -y -q "postgresql-client-${PG_CLIENT_MAJOR}"
+          echo "PG_BIN_DIR=/usr/lib/postgresql/${PG_CLIENT_MAJOR}/bin" >> "$GITHUB_ENV"
+
+      - name: Instalar dependências de produção (ferramentas)
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Backup do banco de staging (opcional, variável STAGING_BACKUP=true)
+        if: vars.STAGING_BACKUP == 'true'
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENV_NAME: staging
+        run: node tools/backup.js db
+
+      - name: Migrações pendentes? (migrate --check)
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+        run: |
+          set +e
+          out="$(node tools/migrate.js --check 2>&1)"; code=$?
+          echo "$out"
+          if echo "$out" | grep -q "o arquivo mudou depois de aplicado"; then
+            echo "::error::Uma migração já aplicada foi ALTERADA (checksum diferente). Crie uma migração nova em vez de editar a antiga."; exit 1
+          fi
+          [ "$code" -eq 0 ] && echo "Banco já está na versão do código." || echo "Há migrações pendentes: serão aplicadas no próximo passo."
+          exit 0
+
+      - name: Aplicar migrações
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          APP_API_DB_PASSWORD: ${{ secrets.APP_API_DB_PASSWORD }}
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+        run: node tools/migrate.js
+
+      - name: Verificar o banco (RLS, permissões, papéis, migrações)
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          STORAGE_DRIVER: s3
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+        run: node tools/verify-deploy.js
+
+      - name: Publicar na Vercel (staging)
+        id: vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          # o projeto Vercel tem Root Directory = platform; a CLI roda na raiz do repositório
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=staging
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" build --target=staging
+          url="$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --target=staging)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Publicado: $url" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$STAGING_HOST" ]; then npx --yes "vercel@${VERCEL_CLI_VERSION}" alias set "$url" "$STAGING_HOST"; fi
+
+      - name: Listar NOMES das variáveis do projeto (para checar variáveis proibidas)
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" env ls staging 2>/dev/null | awk '$1 ~ /^[A-Z][A-Z0-9_]+$/ {print $1}' > "$RUNNER_TEMP/api-env-names.txt"
+
+      - name: Verificar o site publicado (cabeçalhos, HTTPS, rotas protegidas, cookies)
+        working-directory: platform
+        env:
+          SITE: ${{ vars.STAGING_URL }}
+        run: |
+          [ -n "$SITE" ] || { echo "::error::defina a variável STAGING_URL (ex.: https://staging.canteiro.exemplo.com.br)"; exit 1; }
+          args=(--url "$SITE" --expect-env staging)
+          if [ -s "$RUNNER_TEMP/api-env-names.txt" ]; then args+=(--api-env-file "$RUNNER_TEMP/api-env-names.txt"); fi
+          node tools/verify-deploy.js "${args[@]}"
+
+      - name: Smoke test (/api/ready)
+        env:
+          SITE: ${{ vars.STAGING_URL }}
+        run: curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "${SITE%/}/api/ready"

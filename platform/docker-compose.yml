@@ -1,0 +1,155 @@
+# Canteiro online — autohospedagem (alternativa à Vercel + Supabase): API + Caddy (HTTPS automático) + Postgres [+ GoTrue e MinIO opcionais].
+# >>> NÃO EXECUTADO neste ambiente (sem Docker). Revise, teste em uma VM de staging e só então use. <<<
+#
+# Como usar (resumo; passo a passo em docs/CONFIGURACAO.md §"Alternativa autohospedada"):
+#   1. cp infra/env/compose.env.example .env   e preencha (senhas longas e DIFERENTES; o compose recusa variáveis vazias)
+#   2. docker compose build                    (contexto = raiz do repositório)
+#   3. docker compose run --rm migrate         (cria papéis e esquema)
+#   4. docker compose up -d                    (API + Caddy + Postgres)
+# Perfil "completo": adiciona GoTrue (login) e MinIO (arquivos S3) para não depender do Supabase.
+# O Postgres NÃO publica porta no host: só os serviços da rede interna falam com ele. Só o Caddy expõe 80/443.
+
+name: canteiro
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}"
+      POSTGRES_DB: canteiro
+    # TLS no Postgres (a API em produção recusa DATABASE_SSL=disable): gere o certificado com infra/docker/gen-certs.sh
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/certs/server.crt", "-c", "ssl_key_file=/certs/server.key"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/docker/pgcerts:/certs:ro
+      - ./infra/docker/init-gotrue.sql:/docker-entrypoint-initdb.d/10-gotrue.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d canteiro"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interna]
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: platform/Dockerfile
+    profiles: ["ferramentas"]
+    command: ["node", "tools/migrate.js"]
+    environment:
+      DATABASE_ADMIN_URL: "postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/canteiro?sslmode=require"
+      APP_API_DB_PASSWORD: "${APP_API_DB_PASSWORD:?defina APP_API_DB_PASSWORD}"
+      APP_OPS_DB_PASSWORD: "${APP_OPS_DB_PASSWORD:?defina APP_OPS_DB_PASSWORD}"
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [interna]
+
+  api:
+    build:
+      context: ..
+      dockerfile: platform/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_ORIGIN: "https://${CANTEIRO_HOST:?defina CANTEIRO_HOST (ex.: canteiro.empresa.com.br)}"
+      PORT: "3000"
+      DATABASE_URL: "postgres://app_api:${APP_API_DB_PASSWORD:?}@postgres:5432/canteiro"
+      DATABASE_SSL: require
+      DB_POOL_MAX: "10"
+      SUPABASE_URL: "${AUTH_URL:?defina AUTH_URL (URL do GoTrue: http://gotrue:9999 no perfil completo)}"
+      SUPABASE_ANON_KEY: "${AUTH_ANON_KEY:?}"
+      SUPABASE_SERVICE_ROLE_KEY: "${AUTH_SERVICE_KEY:?}"
+      SUPABASE_JWT_SECRET: "${AUTH_JWT_SECRET:?}"
+      ALLOW_SERVICE_KEY_IN_API: "1"
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: "${S3_ENDPOINT:?defina S3_ENDPOINT (http://minio:9000 no perfil completo)}"
+      S3_REGION: "${S3_REGION:-us-east-1}"
+      S3_BUCKET: "${S3_BUCKET:-canteiro-arquivos}"
+      S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?}"
+      S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?}"
+      S3_FORCE_PATH_STYLE: "true"
+      CSRF_SECRET: "${CSRF_SECRET:?defina CSRF_SECRET (48 bytes aleatórios)}"
+      INVITE_ALLOWED_DOMAINS: "${INVITE_ALLOWED_DOMAINS:-}"
+      LOG_LEVEL: info
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [interna, web]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CANTEIRO_HOST: "${CANTEIRO_HOST:?}"
+      ACME_EMAIL: "${ACME_EMAIL:?e-mail para avisos de certificado}"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    networks: [web]
+
+  # ---- perfil "completo": login e arquivos próprios -------------------------------------------------------------------------
+  gotrue:
+    profiles: ["completo"]
+    image: ${GOTRUE_IMAGE:?defina GOTRUE_IMAGE com uma versão FIXA de supabase/gotrue (sem latest)}
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: "https://${CANTEIRO_HOST:?}/auth-interno"
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: "postgres://supabase_auth_admin:${GOTRUE_DB_PASSWORD:?}@postgres:5432/canteiro?search_path=auth&sslmode=require"
+      GOTRUE_SITE_URL: "https://${CANTEIRO_HOST:?}"
+      GOTRUE_URI_ALLOW_LIST: "https://${CANTEIRO_HOST:?}/auth/confirmar"
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_JWT_SECRET: "${AUTH_JWT_SECRET:?}"
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_PASSWORD_MIN_LENGTH: "12"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_HOST: "${SMTP_HOST:?}"
+      GOTRUE_SMTP_PORT: "${SMTP_PORT:-587}"
+      GOTRUE_SMTP_USER: "${SMTP_USER:?}"
+      GOTRUE_SMTP_PASS: "${SMTP_PASS:?}"
+      GOTRUE_SMTP_ADMIN_EMAIL: "${SMTP_FROM:?}"
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/confirmar
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/confirmar
+      GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
+      GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "10"
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [interna]
+
+  minio:
+    profiles: ["completo"]
+    image: ${MINIO_IMAGE:?defina MINIO_IMAGE com uma versão FIXA de minio/minio (sem latest)}
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?}"
+    volumes:
+      - miniodata:/data
+    networks: [interna]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  miniodata:
+
+networks:
+  interna:
+    internal: true     # sem saída para a internet (as imagens que precisam de SMTP/ACME usam também a rede "web")
+  web: {}
+
+# NOTAS
+# • O certificado do Postgres é autoassinado (suficiente para criptografar o tráfego interno). Para verificar a identidade do servidor use uma CA própria e sslmode=verify-full.
+# • A rede "interna" não tem saída: se o SMTP/ACME for externo, acrescente também a rede "web" ao serviço gotrue.
+# • Backups desta alternativa: use tools/backup.js com DATABASE_ADMIN_URL (porta do postgres exposta só temporariamente ou `docker compose run` com a rede interna) — docs/BACKUP-E-RESTAURACAO.md.

@@ -1,0 +1,119 @@
+# Manutenção semanal: expira convites, poda versões antigas, aplica a retenção de auditoria (180 dias), mostra números de uso e faz o RELATÓRIO de arquivos órfãos.
+# Apagar arquivos órfãos de verdade (GC) NUNCA roda sozinho: só por execução manual, digitando APAGAR, e com a aprovação do ambiente "production".
+name: Manutenção
+
+on:
+  schedule:
+    - cron: '30 4 * * 0'      # domingos 04:30 UTC
+  workflow_dispatch:
+    inputs:
+      gc_apply:
+        description: 'Apagar de verdade os arquivos órfãos (GC)? Marque só depois de ler o relatório da última execução.'
+        type: boolean
+        default: false
+      confirmacao:
+        description: 'Para apagar, digite APAGAR'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  rotinas:
+    name: Rotinas e relatório
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: production-ops
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Rotinas (convites, versões, auditoria) e estatísticas
+        working-directory: platform
+        env:
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+        run: |
+          node tools/maintenance.js purge-expired
+          node tools/maintenance.js prune-versions
+          node tools/maintenance.js audit-retention --days 180
+          echo "## Números de uso" >> "$GITHUB_STEP_SUMMARY"
+          node tools/maintenance.js stats --warn-db-gb "${{ vars.WARN_DB_GB || '6' }}" --warn-storage-gb "${{ vars.WARN_STORAGE_GB || '800' }}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Relatório de arquivos órfãos (GC em modo relatório — não apaga nada)
+        working-directory: platform
+        env:
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+          STORAGE_DRIVER: s3
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+        run: |
+          echo "## Arquivos órfãos (relatório)" >> "$GITHUB_STEP_SUMMARY"
+          node tools/gc-assets.js --scan-storage 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+  gc-apagar:
+    name: Apagar arquivos órfãos (GC) — manual e aprovado
+    needs: rotinas
+    if: github.event_name == 'workflow_dispatch' && inputs.gc_apply && inputs.confirmacao == 'APAGAR'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: production      # exige a aprovação dos revisores
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Conferir que existe backup recente ANTES de apagar
+        working-directory: platform
+        env:
+          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+        run: node tools/maintenance.js backup-freshness --max-hours 26
+
+      - name: Aplicar o GC (marca; apaga o que já passou da carência de 24 h)
+        working-directory: platform
+        env:
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+          STORAGE_DRIVER: s3
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+        run: node tools/gc-assets.js --apply --scan-storage 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

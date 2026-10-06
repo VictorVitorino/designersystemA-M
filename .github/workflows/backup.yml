@@ -1,0 +1,123 @@
+# Backup diário: banco (pg_dump → AES-256-GCM → destino externo, relido e verificado) + espelho incremental dos arquivos.
+# O destino é um bucket de OUTRA conta/provedor, com credenciais próprias; a chave de criptografia é um segredo separado das credenciais do bucket.
+# Falha → issue "Falha no backup" + erro (e-mail do GitHub). O frescor também é vigiado por uptime.yml.
+name: Backup
+
+on:
+  schedule:
+    - cron: '15 5 * * *'      # todos os dias às 05:15 UTC (02:15 em Brasília)
+  workflow_dispatch:
+    inputs:
+      podar:
+        description: 'Aplicar a poda de retenção (14 diários, 8 semanais, 12 mensais) depois do backup?'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Backup do banco e dos arquivos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345          # limite do GitHub é 360; a 1ª cópia de ~1 TB pode precisar de mais de uma noite (é incremental e retoma de onde parou)
+    environment: production-ops   # segredos de operação (sem revisores: precisa rodar de madrugada)
+    env:
+      PG_CLIENT_MAJOR: ${{ vars.PG_CLIENT_MAJOR || '17' }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar o cliente PostgreSQL (mesma versão do servidor)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -q
+          sudo apt-get install -y -q "postgresql-client-${PG_CLIENT_MAJOR}"
+          echo "PG_BIN_DIR=/usr/lib/postgresql/${PG_CLIENT_MAJOR}/bin" >> "$GITHUB_ENV"
+
+      - name: Instalar dependências de produção (ferramentas)
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Fazer o backup (banco + arquivos)
+        id: backup
+        continue-on-error: true
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          STORAGE_DRIVER: s3
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENV_NAME: production
+        run: |
+          node tools/backup.js check
+          set +e
+          node tools/backup.js all --json | tee "$RUNNER_TEMP/backup.json"
+          codigo="${PIPESTATUS[0]}"
+          [ -s "$RUNNER_TEMP/backup.json" ] && node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8").trim().split("\n").pop());const d=r.db||{},o=r.objects||{};console.log("## Backup\n\n- banco: "+(d.name||"FALHOU")+" ("+(d.rows??"?")+" linhas, verificado: "+d.verified+")\n- arquivos: "+(o.copied??"?")+" copiados, "+(o.alreadyInDestination??"?")+" já no destino, "+((o.failed||[]).length)+" falhas")' "$RUNNER_TEMP/backup.json" >> "$GITHUB_STEP_SUMMARY"
+          exit "$codigo"
+
+      - name: Poda de retenção (só depois de um backup verificado)
+        if: steps.backup.outcome == 'success' && (github.event_name == 'schedule' || inputs.podar)
+        working-directory: platform
+        env:
+          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+        run: node tools/backup.js prune --apply
+
+      - name: Conferir o frescor (o backup recém-feito aparece no destino?)
+        if: steps.backup.outcome == 'success'
+        working-directory: platform
+        env:
+          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+        run: node tools/maintenance.js backup-freshness --max-hours 2
+
+      - name: Abrir ou atualizar a issue "Falha no backup"
+        if: steps.backup.outcome == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const titulo = 'Falha no backup';
+            const corpo = `O backup diário FALHOU em ${new Date().toISOString()}. Execução: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRoteiro: docs/OPERACAO.md → "Backup falhou". Enquanto isso o último backup bom continua no destino (nada é apagado numa falha).`;
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
+            if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
+            else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
+
+      - name: Terminar com erro se o backup falhou
+        if: steps.backup.outcome == 'failure'
+        run: exit 1

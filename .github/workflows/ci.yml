@@ -1,0 +1,133 @@
+# CI — roda em todo push e pull request. Nada aqui publica nada nem usa segredos de produção.
+# Ações de terceiros ficam FIXADAS por SHA (o comentário diz a versão). Para atualizar: troque o SHA pelo da nova versão e revise o diff.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testes:
+    name: Testes, migrações, build e varredura de segredos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: canteiro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      APP_ENV: test
+      # Banco descartável do serviço acima (somente neste job). Os testes recriam o schema `app` a cada execução.
+      TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
+      DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
+      APP_API_DB_PASSWORD: ci-api-pw-nao-e-segredo
+      APP_OPS_DB_PASSWORD: ci-ops-pw-nao-e-segredo
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar Python (para o S3 falso "moto" dos testes de backup)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Instalar ferramentas de teste (moto e cliente PostgreSQL 16)
+        run: |
+          python -m pip install --disable-pip-version-check "moto[server]==5.2.3"
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-client-16
+          echo "PG_BIN_DIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+
+      - name: Instalar dependências (npm ci falha se o lockfile estiver fora de sincronia)
+        run: npm ci
+
+      - name: Verificar o lockfile (integridade e origem dos pacotes)
+        run: |
+          node -e '
+            const l = require("./package-lock.json"); const bad = [];
+            if (l.lockfileVersion < 3) bad.push("lockfileVersion antigo: " + l.lockfileVersion);
+            for (const [p, m] of Object.entries(l.packages || {})) {
+              if (!p || m.link) continue;
+              if (!m.integrity) bad.push(p + ": sem integrity (hash)");
+              if (!/^https:\/\/registry\.npmjs\.org\//.test(m.resolved || "")) bad.push(p + ": origem fora do registro npm: " + m.resolved);
+            }
+            if (bad.length) { console.error("::error::lockfile reprovado:\n" + bad.slice(0, 20).join("\n")); process.exit(1); }
+            console.log("lockfile OK: " + Object.keys(l.packages).length + " pacotes, todos com integrity e origem registry.npmjs.org");
+          '
+
+      - name: Varredura de segredos no repositório
+        run: node tools/secret-scan.js --root "$GITHUB_WORKSPACE"
+
+      - name: Migrações aplicam do zero e `migrate --check` passa
+        run: |
+          node tools/migrate.js
+          node tools/migrate.js --check
+
+      - name: Testes unitários, de banco e da API
+        run: npm test
+
+      - name: Testes de segurança
+        run: npm run test:security
+
+      - name: Testes de operação (backup, restauração, GC, manutenção, verify-deploy, secret-scan)
+        run: node --test --test-concurrency=1 "tests/ops/*.test.js"
+
+      - name: Gerar o site (build:web)
+        run: npm run build:web
+
+      - name: Conferir que o vercel.json está em dia com o build (CSP por hash)
+        run: node tools/build-web.js --check
+
+      - name: Conferir que o site não carrega segredos para o navegador
+        env:
+          DATABASE_ADMIN_URL: ''     # só a varredura do build; as verificações de banco rodam nos deploys
+        run: node tools/verify-deploy.js --scan-dist dist/public
+
+      - name: Auditoria de dependências (relatório; não bloqueia)
+        continue-on-error: true
+        run: |
+          npm audit --omit=dev --json > "$RUNNER_TEMP/npm-audit.json" || true
+          npm audit --omit=dev || true
+          node -e 'const r=require(process.argv[1]);const v=(r.metadata&&r.metadata.vulnerabilities)||{};console.log("## npm audit (produção)\n\n"+Object.entries(v).map(([k,n])=>"- "+k+": "+n).join("\n"))' "$RUNNER_TEMP/npm-audit.json" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Guardar relatórios (sempre) e saídas de falha
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-relatorios-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/npm-audit.json
+            platform/test-results/
+            platform/dist/public/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,21 @@
+# Caddy: HTTPS automático (Let's Encrypt) e proxy para a API. Variáveis vêm do compose (CANTEIRO_HOST, ACME_EMAIL).
+{
+	email {$ACME_EMAIL}
+}
+
+{$CANTEIRO_HOST} {
+	encode zstd gzip
+	# O corpo máximo do upload direto à API segue o contrato (4 MB); arquivos maiores usam URL assinada do bucket.
+	request_body {
+		max_size 16MB
+	}
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+	reverse_proxy api:3000 {
+		header_up X-Forwarded-For {remote_host}
+		header_up -X-Real-IP
+	}
+}

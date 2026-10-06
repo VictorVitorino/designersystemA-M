@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Redefinir senha do Canteiro A&amp;M</title></head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#1d2b36;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;">
+        <tr><td style="background:#002a46;color:#ffffff;padding:18px 28px;font-size:18px;font-weight:bold;">Canteiro A&amp;M</td></tr>
+        <tr><td style="padding:28px;font-size:15px;line-height:1.55;">
+          <h1 style="margin:0 0 12px;font-size:20px;color:#002a46;">Redefinir a sua senha</h1>
+          <p style="margin:0 0 16px;">Recebemos um pedido para redefinir a senha da sua conta no <strong>Canteiro A&amp;M</strong>.</p>
+          <p style="margin:0 0 20px;">Clique no botão para <strong>criar uma nova senha</strong> (pelo menos 12 caracteres).</p>
+          <p style="margin:0 0 24px;"><a href="{{ .SiteURL }}/auth/confirmar?token_hash={{ .TokenHash }}&amp;type=recovery" style="display:inline-block;background:#e8590c;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:6px;font-weight:bold;">Redefinir a senha</a></p>
+          <p style="margin:0 0 8px;font-size:13px;color:#52606d;">Se o botão não funcionar, copie e cole este endereço no navegador:<br><span style="word-break:break-all;">{{ .SiteURL }}/auth/confirmar?token_hash={{ .TokenHash }}&amp;type=recovery</span></p>
+          <p style="margin:16px 0 0;font-size:13px;color:#52606d;">O link vale por tempo limitado e só funciona uma vez. Se você NÃO pediu a redefinição, ignore este e-mail: a sua senha continua a mesma. Se isso se repetir, avise a TI.</p>
+        </td></tr>
+        <tr><td style="padding:14px 28px;background:#f4f6f8;font-size:12px;color:#7b8794;">Mensagem automática do Canteiro A&amp;M. Não responda este e-mail.</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

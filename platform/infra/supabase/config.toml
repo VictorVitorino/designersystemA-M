@@ -1,0 +1,61 @@
+# Supabase CLI — configuração OPCIONAL (as mesmas decisões de auth-settings.md em arquivo).
+# Para o projeto HOSPEDADO use `supabase link --project-ref <ref>` e `supabase config push` (confira o diff antes de aceitar).
+# NÃO EXECUTADO neste ambiente (sem Supabase CLI nem acesso ao projeto): valide a sintaxe na sua versão da CLI (`supabase --version`).
+# Os valores com env(NOME) vêm de variáveis de ambiente do SEU terminal; nenhum segredo fica neste arquivo.
+project_id = "canteiro"
+
+[api]
+enabled = false                       # o Canteiro não usa a Data API (PostgREST)
+schemas = ["public"]                  # NUNCA incluir "app"
+extra_search_path = ["public"]
+
+[auth]
+enabled = true
+site_url = "https://canteiro.<seu-dominio>"                      # = APP_ORIGIN
+additional_redirect_urls = ["https://canteiro.<seu-dominio>/auth/confirmar"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = false                 # sem cadastro aberto: só convite
+enable_anonymous_sign_ins = false
+minimum_password_length = 12
+password_requirements = "lower_upper_letters_digits"
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = true
+max_frequency = "1m0s"
+otp_length = 6
+otp_expiry = 86400                    # 24 h (máximo permitido)
+
+[auth.email.template.invite]
+subject = "Você foi convidado para o Canteiro A&M"
+content_path = "./templates/invite.html"
+
+[auth.email.template.recovery]
+subject = "Redefinir sua senha do Canteiro A&M"
+content_path = "./templates/recovery.html"
+
+[auth.email.template.confirmation]
+subject = "Confirme seu e-mail no Canteiro A&M"
+content_path = "./templates/confirm.html"
+
+[auth.email.smtp]
+enabled = true
+host = "env(SMTP_HOST)"
+port = 587
+user = "env(SMTP_USER)"
+pass = "env(SMTP_PASS)"
+admin_email = "nao-responda@<seu-dominio>"
+sender_name = "Canteiro A&M"
+
+[auth.rate_limit]
+email_sent = 30                       # por hora; ajuste ao volume real de convites
+sign_in_sign_ups = 300                # por 5 min por IP — a API concentra todos os logins em poucos IPs
+token_verifications = 300
+
+[storage]
+enabled = true
+file_size_limit = "100MiB"

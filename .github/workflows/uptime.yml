@@ -1,0 +1,132 @@
+# Disponibilidade e frescor do backup. COMPLEMENTA (não substitui) um monitor externo gratuito (UptimeRobot/Better Stack: docs/MONITORAMENTO.md),
+# porque o agendamento do GitHub pode atrasar alguns minutos e pausa em repositórios sem atividade por 60 dias.
+# Falha → abre (ou atualiza) uma issue "Indisponibilidade" e termina com erro (o GitHub avisa por e-mail quem acompanha o repositório).
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'     # a cada 5 minutos: /api/health e /api/ready
+    - cron: '17 */4 * * *'    # a cada 4 horas: frescor do último backup
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime-${{ github.event.schedule || 'manual' }}
+  cancel-in-progress: true
+
+jobs:
+  disponibilidade:
+    name: /api/health e /api/ready (produção e staging)
+    if: github.event.schedule != '17 */4 * * *'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      STAGING_URL: ${{ vars.STAGING_URL }}
+    steps:
+      - name: Consultar os endereços
+        id: sonda
+        continue-on-error: true
+        run: |
+          falhas=""; total=0
+          for par in "produção|$PRODUCTION_URL" "staging|$STAGING_URL"; do
+            nome="${par%%|*}"; url="${par#*|}"
+            [ -n "$url" ] || { echo "variável de $nome não definida: pulando"; continue; }
+            for caminho in /api/health /api/ready; do
+              total=$((total+1))
+              codigo="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 5 --retry-all-errors "${url%/}${caminho}" || echo 000)"
+              echo "$nome $caminho -> $codigo"
+              [ "$codigo" = "200" ] || falhas="${falhas}- ${nome} ${url%/}${caminho} respondeu ${codigo}"$'\n'
+            done
+          done
+          [ "$total" -gt 0 ] || { echo "::warning::nenhuma URL configurada (variáveis PRODUCTION_URL/STAGING_URL)"; exit 0; }
+          if [ -n "$falhas" ]; then { echo "falhas<<EOF"; printf '%s' "$falhas"; echo "EOF"; } >> "$GITHUB_OUTPUT"; exit 1; fi
+
+      - name: Abrir ou atualizar a issue "Indisponibilidade"
+        if: steps.sonda.outcome == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          FALHAS: ${{ steps.sonda.outputs.falhas }}
+        with:
+          script: |
+            const titulo = 'Indisponibilidade';
+            const corpo = `Detectado em ${new Date().toISOString()} (execução ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}):\n\n${process.env.FALHAS}\nRoteiro: docs/OPERACAO.md → "Login fora do ar" / "Banco cheio".`;
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
+            if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
+            else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
+
+      - name: Fechar a issue quando voltar ao normal
+        if: steps.sonda.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            for (const i of abertas.filter((x) => x.title === 'Indisponibilidade' && !x.pull_request)) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, body: `Voltou ao normal em ${new Date().toISOString()}. Fechando automaticamente.` });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, state: 'closed', state_reason: 'completed' });
+            }
+
+      - name: Terminar com erro se houve falha (aciona o aviso por e-mail do GitHub)
+        if: steps.sonda.outcome == 'failure'
+        run: exit 1
+
+  backup-fresco:
+    name: O último backup tem menos de 26 horas?
+    if: github.event.schedule == '17 */4 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: monitoring        # ambiente só com credencial de LEITURA do bucket de backup
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Conferir o frescor do backup
+        id: fresco
+        continue-on-error: true
+        working-directory: platform
+        env:
+          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+        run: |
+          set +e
+          saida="$(node tools/maintenance.js backup-freshness --max-hours 26 2>&1)"; codigo=$?
+          echo "$saida"
+          if [ "$codigo" -ne 0 ]; then { echo "relatorio<<EOF"; echo "$saida"; echo "EOF"; } >> "$GITHUB_OUTPUT"; exit 1; fi
+
+      - name: Abrir ou atualizar a issue "Backup desatualizado"
+        if: steps.fresco.outcome == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RELATORIO: ${{ steps.fresco.outputs.relatorio }}
+        with:
+          script: |
+            const titulo = 'Backup desatualizado';
+            const corpo = `Detectado em ${new Date().toISOString()} (execução ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}):\n\n\`\`\`\n${process.env.RELATORIO}\n\`\`\`\nRoteiro: docs/OPERACAO.md → "Backup falhou" e docs/BACKUP-E-RESTAURACAO.md.`;
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
+            if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
+            else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
+
+      - name: Terminar com erro se o backup estiver velho
+        if: steps.fresco.outcome == 'failure'
+        run: exit 1
