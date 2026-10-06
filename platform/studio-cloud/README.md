@@ -1,0 +1,54 @@
+# studio-cloud — extensão de nuvem do editor Canteiro
+
+O editor (`studio/`) é um arquivo HTML único montado por `studio/assemble.py`. **Esta pasta não altera `studio/`**: o build cloud copia as
+fontes para `platform/.tmp/cloud-build`, acrescenta a extensão daqui, aplica uma lista curta de patches de texto e roda o `assemble.py` da cópia.
+Sem `window.AM_CLOUD` o resultado se comporta como o editor original (modo inerte) — é assim que o portão de 35 baterias de `studio/` prova a preservação.
+
+| Arquivo | Para quê |
+|---|---|
+| `cloud-core.js` | Módulo isomórfico (navegador e Node 22, sem dependências): `window.AMCloudCore`. Hash, JSON canônico, trocar imagens `data:` por `asset:sha256:…` e vice-versa, ler `.html`/acervo exportados. Usado pelas páginas (B1), pela extensão e por ferramentas Node. |
+| `ed-50-cloud.js` / `ed-50-cloud.css` | A extensão em si (login por cookie, carregar/hidratar, autosave, fila local, conflito, histórico, visualizar, interações, pílula de estado). Entra no editor como `ed-50-*` (o `assemble.py` inclui qualquer `ed-*.js/.css`). |
+| `patches.json` | Os **6 patches** de texto (cada `antes` precisa existir exatamente 1× — senão o build falha). |
+| `package.json` | Marca a pasta como CommonJS para `cloud-core.js` carregar como script clássico **e** em Node (`import cc from '…/cloud-core.js'`). |
+
+## Construir
+
+```bash
+cd platform
+node tools/build-cloud-editor.js                 # só o editor  → .tmp/cloud-build/cloud-editor.html
+node tools/build-cloud-editor.js --verify-standalone   # + prova que o build autônomo segue idêntico (sha256 dc93ceac…5099)
+node tools/build-web.js                          # o site inteiro → dist/public, dist/csp.json e vercel.json
+node tools/build-web.js --check                  # CI: falha se vercel.json (CSP com hashes) estiver desatualizado
+```
+
+Requer `python3` (o `assemble.py`) e Node 22. Na Vercel: o build precisa enxergar `../studio` e `../am` — ligue
+*Settings › General › "Include source files outside of the Root Directory in the Build Step"*.
+
+## Os patches (studio-cloud/patches.json)
+
+| id | arquivo | o que faz | sem `AM_CLOUD` |
+|---|---|---|---|
+| `a-commit` | editor.js | `commit()` dispara `am:commit` | evento sem ouvinte |
+| `b-undo-redo` | editor.js | `restore()` (desfazer/refazer) dispara `am:commit` | idem |
+| `c-load` | editor.js | `loadDeck()` dispara `am:load` (Abrir…, Novo, importar-substituir, modelos) | idem |
+| `d-pdfjs` | ed-42-import.js | `new Function(…import…)` (proibido pela CSP) → `AM_PDFJS_IMPORT` ou `import()` | `import()` comum |
+| `e-cover` | cover.js | não abre a capa quando `window.AM_CLOUD` existe | idêntico |
+| `f-beforeunload` | editor.js | o aviso de "desfazer" ao sair só vale fora da nuvem | idêntico |
+
+Se `studio/` mudar e um `antes` deixar de bater, **o build falha** (`aparece 0× …`): revise o patch, nunca force.
+
+## Depuração e automação
+
+Na página do editor existe `window.AMCloud` (somente leitura + `saveNow()`/`saveVersion()`): `status` (`loading|saved|saving|offline|reconnecting|conflict|readonly|expired|error`),
+`rev`, `dirty`, `inflight`, `outbox`. Os testes usam isso; não é contrato de produto.
+
+## Testes
+
+```bash
+node --test tests/cloud/cloud-core.test.js     # cloud-core (Node)
+node tests/cloud/editor-cloud.test.js          # editor em nuvem (Chromium real + mock da API, CSP real)   ONLY=03,07 filtra cenários
+node tests/cloud/preservacao.test.js           # prova de preservação   PRESERVE_FULL=1 roda o portão completo de 35 baterias
+node tests/cloud/mock-api.js [porta]           # sobe o mock + o site (platform/dist/public) para ver o editor em nuvem à mão
+```
+
+Documentação completa: [`docs/editor-em-nuvem.md`](../docs/editor-em-nuvem.md).

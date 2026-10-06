@@ -1,0 +1,6 @@
+{
+  "name": "canteiro-studio-cloud",
+  "private": true,
+  "type": "commonjs",
+  "description": "Extensão de nuvem do editor (scripts de navegador). Esta pasta é CommonJS para que cloud-core.js carregue como script clássico e também em Node (require/import)."
+}

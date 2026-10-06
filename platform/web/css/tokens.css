@@ -1,0 +1,78 @@
+/* tokens.css — identidade A&M do Canteiro online (fonte única das cores, tipografia, espaços).
+   Contraste conferido (AA): --ink/--surface 14:1 · --mut/--surface 6,0:1 · --white/--navy 14,6:1 · --navy/--orange 6,1:1 · --orange-ink/--surface 5,2:1. */
+:root {
+  /* marca */
+  --navy: #002a46;
+  --navy-900: #001e32;
+  --navy-700: #0b3a5c;
+  --steel: #7ea1c3;
+  --steel-600: #43698f;
+  --orange: #f78c16;
+  --orange-600: #e07a08;
+  --orange-ink: #a24f00;   /* laranja legível como TEXTO sobre branco (AA) */
+  --orange-wash: #fff3e2;
+
+  /* cinzas frios */
+  --ink: #0b2545;
+  --mut: #566579;
+  --line: #dce3ec;
+  --line-strong: #b9c5d3;
+  --ice: #ebeef1;
+  --bg: #f3f6f9;
+  --surface: #ffffff;
+  --white: #ffffff;
+
+  /* estados */
+  --ok: #1b7f4b;
+  --ok-wash: #e6f4ec;
+  --warn-ink: #7a4a00;
+  --warn-wash: #fff4dc;
+  --danger: #b3261e;
+  --danger-wash: #fdecea;
+  --info: #1f5f99;
+  --info-wash: #e8f1fa;
+
+  /* tipografia */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-display: 'Roboto Condensed', 'Inter', system-ui, sans-serif;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.875rem;
+
+  /* forma e espaço */
+  --r-ctl: 8px;
+  --r-card: 14px;
+  --r-pop: 12px;
+  --r-dlg: 16px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --gutter: 16px;
+  --maxw: 1360px;
+
+  /* profundidade */
+  --sh-1: 0 1px 2px rgba(0, 42, 70, 0.08), 0 1px 1px rgba(0, 42, 70, 0.04);
+  --sh-2: 0 6px 18px rgba(0, 42, 70, 0.12), 0 2px 4px rgba(0, 42, 70, 0.06);
+  --sh-3: 0 18px 48px rgba(0, 30, 50, 0.28);
+
+  /* foco: anel duplo (visível em fundos claros e escuros) */
+  --focus-in: #ffffff;
+  --focus-out: #002a46;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --topbar-h: 56px;
+}
+
+@media (min-width: 720px) {
+  :root { --gutter: 24px; }
+}
+@media (min-width: 1200px) {
+  :root { --gutter: 32px; }
+}

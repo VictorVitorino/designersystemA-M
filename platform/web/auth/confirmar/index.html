@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#002A46">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Roboto+Condensed:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/css/app.css">
+<title>Confirmar acesso — Canteiro · A&amp;M</title>
+</head>
+<body class="page-confirmar">
+<a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+<div class="auth">
+  <aside class="auth__aside on-dark" aria-label="Sobre o Canteiro">
+    <img class="auth__logo" src="/assets/brand/logo-perf.png" width="743" height="134" alt="Alvarez &amp; Marsal Performance Improvement">
+    <div>
+      <h2>Canteiro<i></i> — o acervo de apresentações da A&amp;M</h2>
+      <p>Falta pouco: confirme seu e-mail e defina uma senha para entrar.</p>
+      <ul>
+        <li><svg class="ic" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#lock"/></svg><span>Sua senha não é guardada em texto: só você a conhece.</span></li>
+        <li><svg class="ic" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#key"/></svg><span>Use uma frase longa — mais fácil de lembrar e mais difícil de adivinhar.</span></li>
+      </ul>
+    </div>
+  </aside>
+  <main id="conteudo" class="auth__main" tabindex="-1">
+    <div class="auth__card" id="card">
+      <div class="loading" role="status"><svg class="ic spin" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#spinner"/></svg>Confirmando seu link…</div>
+    </div>
+  </main>
+</div>
+<noscript><p class="page">Este sistema precisa do JavaScript ativado para funcionar.</p></noscript>
+<script type="module" src="/js/pages/confirmar.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "_comment": "Lista curta e explícita de patches de texto aplicados à CÓPIA de studio/ em platform/.tmp/cloud-build. Cada 'before' precisa existir EXATAMENTE UMA VEZ no arquivo; se studio/ mudar, tools/build-cloud-editor.js falha em vez de gerar um editor quebrado.",
+  "patches": [
+    {
+      "id": "a-commit",
+      "file": "editor.js",
+      "before": "histCall('touch', now); /* Minhas obras: grava com atraso próprio, fora do caminho da edição */",
+      "after": "histCall('touch', now); /* Minhas obras: grava com atraso próprio, fora do caminho da edição */ window.dispatchEvent(new CustomEvent('am:commit')); /* nuvem: autosave */",
+      "why": "commit(): avisa a extensão de nuvem que o deck mudou (o evento não tem ouvinte no editor puro; o debounce e o salvamento ficam em ed-50-cloud.js)."
+    },
+    {
+      "id": "b-undo-redo",
+      "file": "editor.js",
+      "before": "freshId = null; $('#title').value = deck.title || ''; renderAll(); }",
+      "after": "freshId = null; $('#title').value = deck.title || ''; renderAll(); window.dispatchEvent(new CustomEvent('am:commit')); }",
+      "why": "restore(): desfazer/refazer não passam por commit(); sem este aviso a nuvem não salvaria um Ctrl+Z."
+    },
+    {
+      "id": "c-load",
+      "file": "editor.js",
+      "before": "if (!noHist) histCall('put', JSON.parse(last)); /* arquivo aberto, projeto pronto ou rascunho entram em Minhas obras */",
+      "after": "if (!noHist) histCall('put', JSON.parse(last)); /* arquivo aberto, projeto pronto ou rascunho entram em Minhas obras */ window.dispatchEvent(new CustomEvent('am:load'));",
+      "why": "loadDeck(): Abrir…, Novo, importar (substituir) e modelos prontos trocam o deck inteiro; a nuvem precisa fixar o id da apresentação e salvar."
+    },
+    {
+      "id": "d-pdfjs",
+      "file": "ed-42-import.js",
+      "before": "new Function('u', 'return import(u)')(base + 'pdf.min.mjs')",
+      "after": "(window.AM_PDFJS_IMPORT ? window.AM_PDFJS_IMPORT(base + 'pdf.min.mjs') : (function (u) { return import(u); })(base + 'pdf.min.mjs'))",
+      "why": "A CSP do editor não admite 'unsafe-eval' (new Function) e, com 'strict-dynamic', o Chromium também recusa import() de módulo vindo de script autorizado só por hash. Na nuvem a extensão define AM_PDFJS_IMPORT, que carrega a versão clássica do pdf.js (vendor/pdfjs-4.10.38/pdf.classic.js, gerada no build) por <script>; sem ela o código usa import() comum (editor autônomo, modo inerte)."
+    },
+    {
+      "id": "e-cover",
+      "file": "cover.js",
+      "before": "if (skip) { cover.classList.add('cv-gone');",
+      "after": "if (skip || window.AM_CLOUD) { cover.classList.add('cv-gone');",
+      "why": "Na nuvem o ponto de entrada é o acervo (/acervo); a capa não abre ao iniciar. Sem window.AM_CLOUD nada muda."
+    },
+    {
+      "id": "f-beforeunload",
+      "file": "editor.js",
+      "before": "function (e) { if (hist.length) { e.preventDefault(); e.returnValue = ''; } }",
+      "after": "function (e) { if (hist.length && !window.AM_CLOUD) { e.preventDefault(); e.returnValue = ''; } }",
+      "why": "O editor pergunta antes de sair sempre que há histórico de desfazer. Na nuvem, com tudo salvo, isso é ruído: a extensão decide quando perguntar (só com alterações ainda não confirmadas). Sem window.AM_CLOUD nada muda."
+    }
+  ]
+}
