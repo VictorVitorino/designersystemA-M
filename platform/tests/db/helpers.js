@@ -10,7 +10,7 @@ export const API_URL = withCreds('app_api', API_PW), OPS_URL = withCreds('app_op
 
 export async function setup() {
   // hermético: recria o schema do zero (o banco de teste é descartável; nunca aponte TEST_DATABASE_ADMIN_URL para dados reais)
-  if (!/canteiro_test|_test\b|test_/.test(base.pathname)) throw new Error('recuso rodar testes destrutivos em ' + base.pathname);
+  if (!/\/canteiro_(test|t_[a-z0-9_]+)$/.test(base.pathname)) throw new Error('recuso rodar testes destrutivos em ' + base.pathname);
   const pre = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
   await pre.unsafe('drop schema if exists app cascade'); await pre.unsafe('drop table if exists public.schema_migrations'); await pre.end();
   await migrate(ADMIN_URL, { apiPassword: API_PW, log: () => {} , roles: true });

@@ -15,6 +15,9 @@ if (cmd === 'up') {
   }
   console.log('Postgres local pronto: postgres://postgres:postgres@127.0.0.1:5432/canteiro_dev (e canteiro_test)');
 } else if (cmd === 'reset') {
-  const db = process.argv[3]; if (!/^canteiro_(dev|test|[a-z0-9_]+)$/.test(db || '')) { console.error('informe o banco: canteiro_dev|canteiro_test'); process.exit(2); }
+  const db = process.argv[3]; if (!/^canteiro_(dev|test|t_[a-z0-9_]+)$/.test(db || '')) { console.error('informe o banco: canteiro_dev|canteiro_test'); process.exit(2); }
   psql(`drop database if exists ${db} with (force)`); psql(`create database ${db}`); console.log('recriado', db);
-} else { console.error('uso: local-db.js up|reset <banco>'); process.exit(2); }
+} else if (cmd === 'create') {
+  const db = process.argv[3]; if (!/^canteiro_(test|t_[a-z0-9_]+)$/.test(db || '')) { console.error('nome do banco de teste: canteiro_test ou canteiro_t_<nome>'); process.exit(2); }
+  if (!psql(`select 1 from pg_database where datname='${db}'`).trim()) psql(`create database ${db}`); console.log('pronto', db);
+} else { console.error('uso: local-db.js up | reset <banco> | create <canteiro_t_nome>'); process.exit(2); }
