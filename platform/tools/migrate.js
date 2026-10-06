@@ -47,11 +47,11 @@ export function listMigrations() {
   });
 }
 
-export async function migrate(url, { check = false, roles = true, apiPassword = process.env.APP_API_DB_PASSWORD, log = console.log } = {}) {
+export async function migrate(url, { check = false, roles = true, apiPassword = process.env.APP_API_DB_PASSWORD, opsPassword = process.env.APP_OPS_DB_PASSWORD, log = console.log } = {}) {
   const sql = postgres(url, { max: 1, onnotice: () => {}, prepare: false });
   try {
     await sql`select pg_advisory_lock(${LOCK_KEY})`;
-    if (roles && !check) await bootstrapRoles(sql, { apiPassword });
+    if (roles && !check) await bootstrapRoles(sql, { apiPassword, opsPassword });
     await sql.unsafe(`create table if not exists public.schema_migrations (version text primary key, name text not null, checksum text not null, applied_at timestamptz not null default now())`);
     const done = new Map((await sql`select version, name, checksum from public.schema_migrations`).map((r) => [r.version, r]));
     const all = listMigrations(); const pending = []; let drift = 0;
