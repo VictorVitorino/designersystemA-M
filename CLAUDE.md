@@ -47,3 +47,12 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 - **Nunca** versionar: PDFs confidenciais (ex.: material ONS), vídeos `.mp4`, `studio/inst/work/`, saídas de teste (`shots/`, `.gate/`, `saved*.html`, `qa/`).
 - Fontes dos testes vêm de `fonts2/` (rota local para Google Fonts); testes não dependem de rede.
 - Testes são Playwright (Chromium) em `studio/test*.js`; ferramentas Python em `test-s23-tools.py` (inspeciona .pptx) e `test-s24-tools.py` (gera .pptx).
+
+## Plataforma online (`platform/`)
+
+- **`studio/` é intocável pela plataforma.** O editor em nuvem é construído por `platform/tools/build-cloud-editor.js` numa cópia temporária, com a extensão `studio-cloud/ed-50-cloud.js` e os patches de texto de `studio-cloud/patches.json` (cada "antes" precisa existir exatamente uma vez; se `studio/` mudar, o build falha em vez de produzir editor quebrado). O build autônomo tem de continuar byte-idêntico ao original (`original/SHA256SUMS`).
+- **Prova de paridade obrigatória** antes de publicar qualquer mudança no build em nuvem: `npm run test:parity` (ou `:quick`) compara o original e o candidato em DOM, raster, quadros do player, transições e exportações, com o mesmo deck de prova (catálogo completo da gaveta). Resultado e envelope de ruído em `docs/evidencias/paridade.md`.
+- **Processo**: implementar → `npm test` (unit, banco com RLS, API, segurança) → suítes afetadas (`tests/web`, `tests/cloud`, `tests/ops`, `tests/e2e`) → `node tools/verify-deploy.js` → commit/push. Produção só pelo workflow com aprovação.
+- **Segurança**: o banco decide permissões (RLS; nunca `if` de papel no JS confiando no cliente); SQL só parametrizado; toda entrada passa por zod; nada de segredo/token/senha em log ou auditoria; CSP estrita (sem script/estilo inline nas páginas; editor com hashes + `strict-dynamic`); uploads validados por magic bytes; `app_api` nunca é membro de `app_system`.
+- **Regras do produto**: acervo comum visível a todos; só o dono (ou admin) altera; cópia para usar; sem cadastro aberto; lixeira reversível. Mudou o contrato → mude `platform/docs/API.md` primeiro.
+- **Nunca versionar**: `.env` reais, `platform/.data/`, `platform/.tmp/`, `platform/dist/` (gerado; só `vercel.json` é commitado), capturas de teste.
