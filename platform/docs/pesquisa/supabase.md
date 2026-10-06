@@ -43,7 +43,7 @@ Data da consulta: 2026-10-06. Moeda de referência: USD. Os números entre colch
 | Spend cap (teto de gasto) | Disponível | Documentado como disponível só no Pro | [6] |
 | Papéis | Owner, Admin, Developer | Inclui Read-only e papéis por projeto | [1][49] |
 
-Pagamento: somente cartão de crédito (alternativas para pré-pagamentos maiores via ticket de suporte); faturas emitidas em USD; sem reembolso no meio de pagamento; rebaixar de plano gera crédito pelo tempo não usado [47][48]. Fatura vencida faz o Supabase pausar os projetos e rebaixar a organização para Free [47].
+Pagamento: somente cartão de crédito (alternativas para pré-pagamentos maiores via ticket de suporte); faturas emitidas em USD; reembolso no cartão: não confirmado (o FAQ trata upgrade por engano como crédito para outra organização); rebaixar de plano gera crédito pelo tempo não usado [47][48]. Fatura vencida faz o Supabase pausar os projetos e rebaixar a organização para Free [47].
 
 ## 3. Computação e conexões
 
@@ -173,8 +173,8 @@ Atenção para API intermediária (BFF): os limites do Auth contam por IP do cli
 
 | Tema | O que a documentação diz | Fonte |
 |---|---|---|
-| SOC 2 Type 2 | Sim, avaliação anual por terceiro. A conformidade não se estende a ambientes fora do produto (modelo de responsabilidade compartilhada). Na lista de preços, SOC 2 aparece só em Team e Enterprise | [1][41] |
-| ISO 27001 | Listado em Team e Enterprise. Certificação ISO/IEC 27001:2022 e acesso ao relatório SOC 2 e certificado ISO para clientes Team e Enterprise (via busca) | [1][51][52] |
+| SOC 2 Type 2 | Sim, avaliação anual por terceiro. A conformidade não se estende a ambientes fora do produto (modelo de responsabilidade compartilhada). Na lista de preços, SOC 2 aparece só em Team e Enterprise. O relatório SOC 2 Type 2 só é disponibilizado a clientes Team e Enterprise, para download em Legal Documents no painel da organização | [1][41] |
+| ISO 27001 | Listado em Team e Enterprise [1]. Versão da norma (ISO/IEC 27001:2022) e acesso ao certificado ISO por plano: não confirmado (páginas [51][52] só vistas em busca, não abertas) | [1][51][52] |
 | HIPAA | Team e Enterprise, como add-on pago, com BAA | [1][42] |
 | DPA (acordo de tratamento de dados) | O Supabase fornece DPA; disponível em supabase.com/legal/dpa. Se há restrição por plano: não confirmado | [43][50] |
 | LGPD | Não mencionada nas páginas lidas. Não confirmado | [43] |
@@ -206,7 +206,7 @@ Cada projeto traz uma instância Postgres dedicada em servidor próprio, e a com
 | Opção | Como funciona | Custo extra do staging | Observações | Fonte |
 |---|---|---|---|---|
 | A. Dois projetos na mesma organização Pro (recomendada) | Projeto de staging separado, com migrações aplicadas por GitHub Actions (`supabase db push`) | Micro ~USD 9,81/mês (0,01344 x 730 h), sem crédito sobrando se produção já usa o de USD 10 | Auth, Storage e chaves próprios. Cotas compartilhadas com produção (inclusive 50 SSO MAU). Permite testar SAML (exige plano pago) | [3][5][46] |
-| B. Branch persistente "staging" (Branching) | Ambiente completo clonado do projeto principal, com credenciais próprias | USD 0,01344/h em Micro (~USD 9,81/mês 24x7). Não usa créditos de computação nem entra no spend cap | Vem sem dados e sem objetos do Storage (usa seed). Gerência por GitHub ou painel (beta). Branches efêmeras de PR só cobram as horas ligadas. Projeto com integração GitHub ativa não pode ser transferido | [44][45][1] |
+| B. Branch persistente "staging" (Branching) | Ambiente completo clonado do projeto principal, com credenciais próprias | USD 0,01344/h em Micro (~USD 9,81/mês 24x7). Não usa créditos de computação nem entra no spend cap | Vem sem dados e sem objetos do Storage (usa seed). Gerência por GitHub ou painel (beta). Branches efêmeras de PR só cobram as horas ligadas. Projeto com integração GitHub ativa não pode ser transferido entre organizações [54] | [44][45][54][1] |
 | C. Organização Free separada para staging | Projeto em organização Free | USD 0 | Banco de 500 MB, 1 GB de Storage, pausa após 1 semana, máx. 2 projetos Free e sem recursos do Pro (senha vazada, SAML, backups, log drains). Paridade ruim | [1][47] |
 | D. Supabase local (CLI) para desenvolvimento | `supabase start` em cada máquina | USD 0 | Complementa A ou B; não substitui staging na nuvem | [46] |
 
@@ -233,7 +233,7 @@ Opcionais: Log Drain USD 60/mês cada; IPv4 USD 4/mês por projeto; domínio pr�
 3. SSO futuro: SAML cria contas separadas das de e-mail/senha [29][30]. Para "preservar contas e dados", mantenha uma tabela de usuários própria da aplicação, com id interno estável, e faça a ligação por e-mail verificado na aplicação. O caminho OAuth com Entra tem vinculação automática por e-mail [30][36] (verificar o comportamento antes de adotar).
 4. E-mail de convite: configure SMTP próprio antes do primeiro convite; o padrão do Supabase só entrega a e-mails da equipe e a 2 por hora [27][28]. Convites expiram em 1 hora por padrão [34].
 5. Conectividade: o pooler compartilhado é IPv4; conexão direta e pooler dedicado exigem IPv6 ou o add-on de USD 4/mês [16][19]. Confirme o suporte a IPv6 do ambiente de execução da API antes de escolher.
-6. Relatório SOC 2/ISO: listado só em Team e Enterprise [1][51][52]. Se o time de risco da A&M exigir o relatório, o Pro pode não bastar. Se o formulário de pedido (forms.supabase.com/soc2, visto na busca) atende clientes Pro: não confirmado.
+6. Relatório SOC 2/ISO: SOC 2 e ISO 27001 listados só em Team e Enterprise [1]; o relatório SOC 2 Type 2 só é liberado a clientes Team e Enterprise [41]. Se o time de risco da A&M exigir o relatório, o Pro não basta. Acesso ao certificado ISO por plano e o formulário forms.supabase.com/soc2 (visto só em busca): não confirmado.
 7. Sem SLA de disponibilidade abaixo do Enterprise [1][2].
 8. Pagamento só por cartão em USD; fatura vencida pausa os projetos [47].
 
@@ -241,7 +241,7 @@ Opcionais: Log Drain USD 60/mês cada; IPv4 USD 4/mês por projeto; domínio pr�
 
 - Valores lidos do repositório oficial, não das páginas renderizadas (ver seção 0).
 - Cotação USD/BRL.
-- Status e histórico de uptime; conteúdo do trust center; acesso de clientes Pro ao relatório SOC 2.
+- Status e histórico de uptime; conteúdo do trust center; acesso ao certificado ISO 27001 por plano (o acesso ao relatório SOC 2 foi confirmado: só Team e Enterprise [41]).
 - Plano mínimo para Network Restrictions.
 - Alertas nativos de infraestrutura e de custo.
 - Tamanho padrão do pool de conexões por tamanho de instância.
@@ -304,6 +304,9 @@ Convenção: a URL pública oficial vem primeiro; entre parênteses, o arquivo-f
 48. https://supabase.com/docs/guides/platform/manage-your-subscription (raw: .../guides/platform/manage-your-subscription.mdx)
 49. https://supabase.com/docs/guides/platform/access-control (raw: .../guides/platform/access-control.mdx)
 50. https://supabase.com/legal/dpa (via busca; página não aberta)
-51. https://supabase.com/blog/supabase-is-now-iso-27001-certified (via busca; página não aberta)
-52. https://supabase.com/security (via busca; página não aberta)
+51. https://supabase.com/blog/supabase-is-now-iso-27001-certified (via busca; página não aberta; não confirmado)
+52. https://supabase.com/security (via busca; página não aberta; não confirmado)
 53. https://supabase.com/docs/guides/platform/manage-your-usage/disk-size (raw: .../guides/platform/manage-your-usage/disk-size.mdx)
+54. https://supabase.com/docs/guides/platform/project-transfer (raw: .../guides/platform/project-transfer.mdx)
+
+Verificado em 2026-10-06 por segunda leitura das páginas oficiais; itens marcados 'não confirmado' ficaram sem prova. (Ressalva: supabase.com seguiu bloqueado pelo proxy e o Firecrawl sem créditos; a segunda leitura foi feita nos mesmos arquivos-fonte oficiais do repositório supabase/supabase, e as fontes [50], [51] e [52] não puderam ser reabertas.)
