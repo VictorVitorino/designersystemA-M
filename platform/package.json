@@ -18,7 +18,10 @@
     "test:e2e": "node tests/e2e/run.js",
     "test:security": "node --test --test-concurrency=1 \"tests/security/*.test.js\"",
     "test:load": "node tests/load/run.js",
-    "build:web": "node tools/build-web.js"
+    "build:web": "node tools/build-web.js",
+    "build:cloud": "node tools/build-cloud-editor.js --verify-standalone",
+    "test:parity": "node tools/parity.cjs --a \"../original/Canteiro-AM (3).html\" --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud",
+    "test:parity:quick": "node tools/parity.cjs --a \"../original/Canteiro-AM (3).html\" --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud-quick --quick"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",
