@@ -1,0 +1,257 @@
+/* S9: Index + Timeline + Slide Summary */
+
+.gx-index-drawer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  background: #f5f5f5;
+  border-radius: 8px;
+}
+
+.gx-index-drawer h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.gx-index-list {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.gx-index-item {
+  position: relative;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.2s;
+  background: white;
+}
+
+.gx-index-item:hover {
+  border-color: #2196F3;
+  box-shadow: 0 2px 8px rgba(33,150,243,0.15);
+}
+
+.gx-index-item.active {
+  border-color: #2196F3;
+  box-shadow: 0 0 0 3px rgba(33,150,243,0.2);
+}
+
+.gx-index-item img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+}
+
+.gx-index-meta {
+  padding: 6px;
+  background: white;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.gx-index-num {
+  font-weight: 600;
+  color: #2196F3;
+  min-width: 16px;
+}
+
+.gx-index-desc {
+  flex: 1;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Timeline Scrubber */
+
+.gx-timeline {
+  padding: 12px;
+  background: #fafafa;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.gx-timeline-track {
+  position: relative;
+  height: 6px;
+  background: #ddd;
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.gx-timeline-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #2196F3, #1976D2);
+  transition: width 0.1s;
+  pointer-events: none;
+}
+
+.gx-timeline-handle {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  background: #2196F3;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(33,150,243,0.4);
+  cursor: grab;
+  transition: transform 0.1s;
+}
+
+.gx-timeline-handle:hover {
+  transform: scale(1.2);
+  box-shadow: 0 2px 8px rgba(33,150,243,0.6);
+}
+
+.gx-timeline-handle:active {
+  cursor: grabbing;
+}
+
+/* Slide Summary Panel */
+
+.gx-slide-summary {
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.gx-summary-header {
+  padding: 12px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.gx-summary-header h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.gx-summary-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.gx-summary-stat {
+  color: #666;
+}
+
+.gx-summary-stat strong {
+  color: #2196F3;
+  font-weight: 600;
+}
+
+.gx-summary-elements {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid #e0e0e0;
+  padding: 0;
+}
+
+.gx-summary-element {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 11px;
+  color: #666;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gx-summary-element:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+/* Dark mode support */
+
+@media (prefers-color-scheme: dark) {
+  .gx-index-drawer {
+    background: #2a2a2a;
+  }
+  
+  .gx-index-drawer h3 {
+    color: #e0e0e0;
+  }
+  
+  .gx-index-item {
+    background: #333;
+  }
+  
+  .gx-index-meta {
+    background: #333;
+    color: #aaa;
+  }
+  
+  .gx-index-desc {
+    color: #999;
+  }
+  
+  .gx-timeline {
+    background: #333;
+  }
+  
+  .gx-timeline-track {
+    background: #555;
+  }
+  
+  .gx-slide-summary {
+    background: #333;
+    border-color: #555;
+  }
+  
+  .gx-summary-header {
+    border-bottom-color: #555;
+  }
+  
+  .gx-summary-header h4 {
+    color: #e0e0e0;
+  }
+  
+  .gx-summary-info {
+    color: #999;
+  }
+  
+  .gx-summary-stat strong {
+    color: #64B5F6;
+  }
+  
+  .gx-summary-elements {
+    border-top-color: #555;
+  }
+  
+  .gx-summary-element {
+    border-bottom-color: #444;
+    color: #999;
+  }
+  
+  .gx-summary-element:hover {
+    background: #444;
+    color: #ccc;
+  }
+}

@@ -1,0 +1,126 @@
+/* S8: Effect Controls Panel */
+
+.gx-effect-timing {
+  padding: 12px 0;
+  border-top: 1px solid #e0e0e0;
+}
+
+.gx-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.gx-control-row label {
+  flex: 0 0 70px;
+  font-weight: 500;
+  color: #333;
+}
+
+.gx-control-row input[type="range"] {
+  flex: 1;
+  min-width: 100px;
+  height: 5px;
+  border-radius: 3px;
+  background: #ddd;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.gx-control-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2196F3;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: background 0.2s;
+}
+
+.gx-control-row input[type="range"]::-webkit-slider-thumb:hover {
+  background: #1976D2;
+}
+
+.gx-control-row input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2196F3;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: background 0.2s;
+}
+
+.gx-control-row input[type="range"]::-moz-range-thumb:hover {
+  background: #1976D2;
+}
+
+.gx-duration-display,
+.gx-delay-display,
+.gx-repeat-display,
+.gx-stagger-display {
+  flex: 0 0 50px;
+  text-align: right;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.gx-easing-select {
+  flex: 1;
+  min-width: 100px;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  background: white;
+  cursor: pointer;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.gx-easing-select:hover {
+  border-color: #999;
+}
+
+.gx-easing-select:focus {
+  outline: none;
+  border-color: #2196F3;
+  box-shadow: 0 0 0 2px rgba(33,150,243,0.1);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .gx-effect-timing {
+    border-top-color: #444;
+  }
+  
+  .gx-control-row label {
+    color: #e0e0e0;
+  }
+  
+  .gx-control-row input[type="range"] {
+    background: #555;
+  }
+  
+  .gx-duration-display,
+  .gx-delay-display,
+  .gx-repeat-display,
+  .gx-stagger-display {
+    color: #aaa;
+  }
+  
+  .gx-easing-select {
+    background: #333;
+    color: #e0e0e0;
+    border-color: #555;
+  }
+  
+  .gx-easing-select:hover {
+    border-color: #777;
+  }
+}

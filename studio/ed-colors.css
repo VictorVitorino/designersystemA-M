@@ -1,0 +1,42 @@
+/* ===== S19 · “Mais cores…”: botão nas linhas de amostras, campos de cor de componentes, cores das séries e o popover (só no editor) ===== */
+.sw button.more{background:conic-gradient(from 200deg,#E4677A,#FDB833,#5DBB82,#3B82C4,#7B5BB3,#E4677A);border-color:rgba(0,30,50,.25)}
+.sw button.more::after{content:"+";position:absolute;inset:3px;border-radius:50%;background:#fff;color:var(--navy);font:700 13px/14px Inter,Arial,sans-serif;text-align:center}
+.sw button.more:hover,.sw button.more[aria-expanded=true]{outline:2px solid var(--orange);outline-offset:1px}
+.sw button:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.sw button.cust{box-shadow:inset 0 0 0 1px rgba(255,255,255,.55)}
+.cfld{margin:0 0 10px}
+.cser-w{margin:2px 0 4px}
+.cser{margin:0 0 10px}
+.cser-n{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--ink);margin:0 0 5px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cser-n i{flex:none;width:10px;height:10px;border-radius:3px;border:1px solid rgba(0,30,50,.2)}
+/* popover */
+.cpop{position:fixed;z-index:78;width:256px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:var(--r-pop,12px);box-shadow:0 18px 40px -12px rgba(0,30,50,.35),0 2px 6px rgba(0,30,50,.08);padding:10px 14px 12px;font-size:12px;color:var(--ink);animation:cpIn .14s var(--e,ease) both}
+.cpop:focus{outline:none}
+@keyframes cpIn{from{opacity:0;transform:translateY(-4px)}}
+.cpop[data-side=above]{animation-name:cpUp}
+@keyframes cpUp{from{opacity:0;transform:translateY(4px)}}
+.cp-hd{display:flex;align-items:baseline;gap:8px;margin:0 0 6px;min-width:0}
+.cp-hd b{font-family:'Roboto Condensed',Roboto,sans-serif;font-size:14px;color:var(--navy);white-space:nowrap}
+.cp-hd span{flex:1;min-width:0;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cp-x{margin-left:auto;width:24px;height:24px;border-radius:6px;font-size:17px;line-height:1;color:var(--mut);flex:none}
+.cp-x:hover{background:var(--ice);color:var(--navy)}
+.cp-sec{padding:6px 0 0}
+.cp-sec h4{margin:0 0 6px;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+.cp-g{display:grid;grid-template-columns:repeat(8,22px);gap:5px;justify-content:space-between}
+.cp-s{width:22px;height:22px;border-radius:5px;border:1px solid rgba(0,30,50,.18);padding:0;cursor:pointer}
+.cp-s:hover{transform:scale(1.12)}
+.cp-s.on{outline:2px solid var(--orange);outline-offset:1px}
+.cp-s:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.cp-empty{margin:0;font-size:11px;color:var(--mut);line-height:1.35}
+.cp-cu{display:flex;align-items:center;gap:6px}
+.cp-hex{flex:1;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#F8FAFC;font:500 12.5px/1 'JetBrains Mono',Consolas,monospace;text-transform:uppercase;letter-spacing:.02em}
+.cp-hex::placeholder{text-transform:none;color:#9AA6B5}
+.cp-hex:focus{outline:none;border-color:var(--orange);background:#fff}
+.cp-hex.bad,.cp-hex.bad:focus{border-color:#D23F55;box-shadow:0 0 0 2px rgba(210,63,85,.18);background:#fff}
+.cp-ok{height:30px;padding:0 10px;border-radius:7px;background:var(--navy);color:#fff;font-size:12px;font-weight:600;flex:none}
+.cp-ok:hover{background:#13315C}
+.cp-nat{flex:none;width:30px;height:30px;padding:0;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer}
+.cp-eye{flex:none;width:30px;height:30px;border:1px solid var(--line);border-radius:7px;display:grid;place-items:center;color:var(--navy)}
+.cp-eye:hover{border-color:var(--orange)}
+.cp-eye svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cp-err{margin:5px 0 0;font-size:11px;color:#B02A3E}

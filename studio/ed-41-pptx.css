@@ -1,0 +1,11 @@
+/* ===== S23 · caixa “Salvar como PowerPoint” (só no editor). Usa o desenho da caixa do PDF (.xp-* em ed-40-export.css) ===== */
+.xk .xp-card b{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.xk-rec{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8A4A00;background:#FEF1E2;border-radius:99px;padding:2px 7px}
+.xk-font{margin:-6px 0 14px;padding:9px 12px 9px 34px;border-radius:10px;background:#FFF8EC;border:1px solid #F6D9AE;font-size:12px;line-height:1.45;color:#5A3A0A;position:relative}
+.xk-font[hidden]{display:none}
+.xk-font::before{content:"";position:absolute;left:12px;top:11px;width:14px;height:14px;border-radius:50%;background:#F78C16}
+.xk-font::after{content:"!";position:absolute;left:12px;top:11px;width:14px;height:14px;font:700 10px/14px Inter,Arial,sans-serif;color:#fff;text-align:center}
+.xk-font b{color:#3E2A07}
+.xk .xk-ck2{margin-top:0;padding-top:4px;border-top:0}
+.xk .xp-ck span{line-height:1.35}
+@media (max-width:560px){.xk .xp-ck{align-items:flex-start}.xk .xp-ck input{margin-top:2px}}

@@ -1,0 +1,1166 @@
+# ARCH — Canteiro architecture map for builders (F1–F11)
+
+Scope: how "Canteiro · Acervo de Apresentações A&M" is built today, where each planned feature plugs in (file + function + line), and what each change can break.
+Sources read in full: `editor.html`, `editor.js`, `runtime.js`, `runtime.css`, `cover.html/css/js`, `assemble.py`, `qa-gate.sh`, `test.js`, `test2.js`, `test-core.js`, `test-cover.js`. Companion specs: `docs/TMG-FEATURES.md` (player índice, rail, chapter card, resumo, ampliar) and `docs/DTS-CONTROLS.md` (effect layers and player dock). This document does not repeat their UI specs; it maps them onto the code and reconciles them.
+
+Every claim marked **(measured)** was checked in Chromium 141 (Playwright) on a private copy of the studio. Probe scripts are in `SP/qa-understand/arch-analyst/` (`p1-model.js` … `p6-f0.js`). Screenshots are in `SHOTS/` = `/tmp/claude-0/-home-user-videosflows/d1659d46-7fc1-552e-ba5d-02ae16117f1f/scratchpad/qa-understand/arch-analyst/shots/`.
+`SP` = `/tmp/claude-0/-home-user-videosflows/d1659d46-7fc1-552e-ba5d-02ae16117f1f/scratchpad`. Line numbers refer to the sources as of this analysis (editor.js 1551 lines, runtime.js 484, runtime.css 387, cover.js 636, editor.html 415).
+
+---
+
+## 0. TL;DR — the 15 rules builders must not miss
+
+1. **Baseline is green.** `qa-gate.sh` gives **GATE PASS**: test.js, test2.js, test-core.js (117 checks) and test-cover.js (100 checks), in **5 min 07 s** (measured). Any feature must end with GATE PASS plus its own `test-sNN-*.js`.
+2. **Never run the gate in the original folder while someone else is testing.** `assemble.py` overwrites `AM-Studio-Editor.html`. The tests write `shots/`, `shots-cover/` and `saved*.html`, and they reload the HTML from disk during the run.
+3. **New deck/slide/anim fields are silently dropped on open, draft restore and slide paste** (measured, §3.4). `safeDeck`/`safeSlide`/`safeEl` (editor.js 137–170) are allow-lists. TMG-FEATURES §4.3 says "export already serialises any slide field". That is true for save and undo, **false for reopen**. Do **F0** first (§10). It is prototyped and verified green.
+4. **Unknown *element-level* keys and any `data.*` keys pass through without checks** (measured). `safeEl` does `o = clone(e)`. Any new element or data string that reaches markup must be allow-listed in `safeEl`/`DATA_TOKENS` **and** escaped at render.
+5. **The exported HTML must never contain the substrings `onerror`, `onmouseover` or `onclick`.** Test CR-04 (test-core) greps the whole export. This includes comments in runtime/xedit code. Use `addEventListener`, never `el.onclick =`.
+6. **`</script` must not appear in runtime/editor/cover/extension code.** `assemble.py` asserts it. Build tags with `var S = 'script'` as `exportHTML` does.
+7. **Ribbon at 1280 px has 7 px free; at 1440 px, 17 px** (measured, §13). test-core asserts no ribbon or top-bar overflow at 1280×720. New ribbon buttons require consolidation (§13).
+8. **Text-based test locators are case-insensitive substrings.** In **Inserir** exactly one item may contain "forma". In the element context menu exactly one may contain "alinhar". In **Editar** exactly one "colar" and one "desfazer". In **Arquivo** exactly one "abrir…". The first three Inserir items must stay Título / Subtítulo / Texto corrido, and the first Arquivo item "Início (capa)" (§9.5).
+9. **Ribbon selectors that tests click must survive:** `[data-add=arrow]`, `[data-menu=mText]`→`[data-text=title]`, `[data-menu=mShape]`→`[data-shape=chevron]`, `#bFx`→`[data-ins=counter]`, `#bModels`→`#mSearch`/`#modelsBody [data-ins=raci|swot]`, `#fxArrow`→`#mVar [data-v=accountable]`, `#bDup #bFront #bSave #bPlay #bNew #bHome #title`.
+10. **Cover is pinned:** exactly 6 `.cv-opt` (keys 1–6, 3-column arrow navigation), exactly **6 templates** (7/7/6/6/6/7 slides; the 6th is the S34b “Apresentação institucional A&M”), home/projects/manual fit **without scroll** at 1024–1440 widths, no horizontal scroll at 390. History (F2) must not add a `.cv-opt` or a cover template (§11 F2).
+11. **Player invariants:** `.amp-pos` text starts with the zero-padded number (`/^01/`). Esc exits present mode when no layer is open. No chapter card on the *initial* `go(start)`, or Shift+F5 → Esc → `#bHome` breaks. `.amp-slide` count = slide count in the export.
+12. **The player key handler swallows Space typed inside a contenteditable** in the exported file (measured: 01/07 → 02/07, `defaultPrevented=true`). This blocks F10 notes editing and F11. Fixed in F0.
+13. **`file://` pages share one origin in Chromium** (measured). The exported decks and the editor see the same `localStorage` (the export saw `amStudio.draft`) and the same IndexedDB. `file://` is a **secure context** and `showSaveFilePicker` exists (measured). Use this for F2/F10/F11.
+14. **Keymap conflict between the two companion specs:** TMG binds **G = Índice**, DTS binds **G = Glow**. Resolution in §12: Glow → **B** ("Brilho").
+15. **The modal (`#modal`) is not a form host.** Its capture handler turns **Enter** into "confirm and close", Tab cycles only buttons, and Ctrl+A is blocked (editor.js 1410–1418). Do not put search inputs or textareas in `#modal` without extending that handler (F2, F10).
+
+---
+
+## 1. Files and build
+
+| File | Role | Shipped in exported deck? |
+|---|---|---|
+| `editor.html` (415 l.) | Editor shell: CSS for the editor UI, DOM skeleton, placeholders `/*%%RTCSS%%*/`, `/*%%RTJS%%*/`, `/*%%EDITOR%%*/`, `%%WM_W%%` | no |
+| `editor.js` (1551 l.) | Editor IIFE → `window.AMStudio` | no |
+| `runtime.js` (484 l.) | Renderer + FX registry + player IIFE → `window.AMRT` | **yes** (copied verbatim) |
+| `runtime.css` (387 l.) | Stage, animations, components, player | **yes** |
+| `cover.html/.css/.js` | Start screen ("capa") → `window.AMCover` | no |
+| `assemble.py` | Builds `AM-Studio-Editor.html` (≈431 KB, logos as base64) | — |
+| `qa-gate.sh` | assemble + all suites | — |
+| `*.v1.*`, `*.v2.*`, `models.js`, `saved*.html` | **Legacy, not in the build** (`assemble.py` never reads them). Do not edit them expecting an effect. | — |
+
+**assemble.py** (19 lines), in order:
+1. Replaces logo placeholders (`%%LOGO_PERF_W%%`, `%%LOGO_PERF_N%%`, `%%WM_W%%`, `%%WM_N%%`) with data URIs in editor.js, cover.js, cover.html and editor.html. Brand PNGs come from `../am/brand/`.
+2. `assert '</script' not in (rt+js+cjs).lower()`.
+3. Inlines runtime CSS/JS and editor JS into `editor.html`.
+4. Injects `cover.css` into `<head>` and `cover.html` after `<body>`. Appends `<script id="am-cover">` before `</body>`.
+
+**Resulting script order** in `AM-Studio-Editor.html`: `<script id="am-runtime">` (AMRT) → editor `<script>` (AMStudio, runs immediately; `buildModels(); buildDrawer(); renderAll()` at editor.js 1520) → `<script id="am-cover">` (boot on DOMContentLoaded or immediately; reads `window.AMStudio`).
+
+**Exported file** (`exportHTML`, editor.js 1475–1480), measured at about 105 KB for 1 slide:
+- `<style>` + runtime.css. **No id** today.
+- `<style>html,body{…background:#00192b}</style>`
+- `<div id="am-player">`
+- `<script type="application/json" id="am-deck-data">` with the deck JSON (`<` escaped as `<`).
+- `<script>` + runtime.js. **No id** today.
+- `<script>AMRT.player(JSON.parse(…), …, {brand: <wordmark data-URI>})</script>`
+- The Google Fonts `<link>` (Inter, JetBrains Mono, Roboto 300–700, Roboto Condensed 400/700).
+
+In the export: `AMRT` is defined, `AMStudio` is undefined, bar buttons are `prev`, `next`, `full` (measured).
+`openFile` (1487) and `cover.readDeck` (cover.js 36) recognise a saved deck **only** by `/am-deck-data/` plus `getElementById('am-deck-data')`. Keep that id and `type="application/json"` forever.
+
+---
+
+## 2. Globals, load order, event ownership
+
+| Global | Defined in | Notes |
+|---|---|---|
+| `window.AMRT` | runtime.js 2–484 | `{W:1280, H:720, FX, FONTS, shapeBody, renderEl, renderSlide, runFx, lineBox, player, esc}` (483). F0 adds `util`. |
+| `window.AMStudio` | editor.js 1529–1550 | Public API (§7.13). test-core "API completa" requires 36 keys. |
+| `window.AMCover` | cover.js 629 | `{open(s?: 'manual'|'tpl'), openManual(), close(), isOpen(), templates[], buildTemplate(i)}` |
+
+**Keyboard listeners, in dispatch order**:
+
+| # | Listener | Where | Behaviour |
+|---|---|---|---|
+| 1 | `window` keydown **capture**, modal | editor.js 1410 | When `#modal.open`: `stopImmediatePropagation`. Esc cancels. **Enter confirms whatever has focus.** Tab cycles `#modal button` only. Space prevented outside the modal. F1/F5/Ctrl+S/O/D/P/A prevented. |
+| 2 | `window` keydown **capture**, cover | cover.js 558 | When the cover is open (and no modal): `stopPropagation`. Handles F5, Esc, F1/?, digits 1–9 (home/tpl), arrows, **Backspace = back** (non-home views), Tab trap. |
+| 3 | `document` keydown, editor | editor.js 1059–1098 | Ignored when a modal or the cover is open. **F5/Shift+F5 handled even while presenting**; everything else returns when `presenting()`. Order: menus → F10/ContextMenu → F1 → Ctrl+S/O/D → contenteditable (Esc blurs) → typing fields → Ctrl+Z/Y/C/X/V/D/A → Esc → focused control (`onControl`) → Delete → Enter → type-to-edit → ? → arrows (nudge or slide). |
+| 4 | `document` keydown, player | runtime.js 460–468 | Added per `player()`, removed in `destroy()`. Ignores only `input|textarea|select` (F0 adds contenteditable and modifiers). |
+
+**Pointer**: `#cv` pointerdown (648) selects, moves, resizes, marquees; `wrap` dblclick (751) edits; `document` contextmenu (1375); `document` pointerdown (602) closes menus.
+
+**Z-index stack (measured)**:
+- `#sel` 30 (inside `#wrap`) < `#drawer` 35 < `.menu` 40 < `#banner` 45 < `#cover` 70 < `.xmenu` 75 < `#presenter` 80 < `#modal` 200 < `#toast` 210.
+- Inside `#presenter`, `.amp` is `position:fixed; z-index:50`.
+- The editor CSS also has `.prevov` 25 (preview overlay inside `#wrap`) and `#marq` 33.
+
+---
+
+## 3. Data model
+
+### 3.1 Deck
+```js
+{ v: 1, app: 'AM Studio', title: 'Nova apresentação', slides: [Slide, …] }   // newDeck(), editor.js 92
+```
+Coordinates are **logical 1280×720** (`AMRT.W/H`). Rendering converts to `%` (position/size, `P()`) and **`cqw`** (font sizes, paddings, `CQ()`) inside `.am-stage{container-type:size}`. The same deck is therefore pixel-proportional at any size: thumbnails, canvas, drawer previews, player.
+
+### 3.2 Slide
+```js
+{ id: 'e…', bg: '#FFFFFF', tr: 'fade'|'slide'|'zoom'|'none', bgImg?: 'data:image/…', bgImgOp?: 0..1, els: [El, …] }   // mkSlide, editor.js 91
+```
+`els` order = z-order (`z-index = index+1`, renderEl 377). Layout presets `LAYOUTS` (editor.js 58–90): `blank-light`, `blank-dark`, `cover`, `content`, `section`, `kpis`, `closing`.
+S21 adds `hidden?: true` (skipped by the player), `layout?: <LAYOUTS key>` (set by `mkSlide`) and `base?: {bg, bgImgOp?, els: {p0: snapshot, …}}` (original geometry/format for “Redefinir slide”; §11 S21 status).
+
+### 3.3 Element (common + per type)
+| Field | Types | Notes |
+|---|---|---|
+| `id` | all | `uid()` = `'e'+7 chars`. Must match `/^[\w-]{1,40}$/` (safeEl). |
+| `type` | — | `'text'|'shape'|'line'|'image'|'fx'` (anything else is dropped by `safeEl`) |
+| `x,y,w,h` | not line | logical px; `w,h ≥ 8` |
+| `x1,y1,x2,y2` | line | Box derived by `lineBox()` (runtime 28): pad = max(14, strokeW·4) |
+| `rot` (deg), `opacity` (0–1) | not line | on `.am-rot` / `.am-fxw` |
+| `html` | text, shape | Sanitised by `cleanHTML` (editor.js 787; tag allow-list B/I/U/S/SUB/SUP/BR/SPAN/DIV/P/FONT/UL/OL/LI/SMALL/MARK; `style` without url/expression) |
+| `font, size, weight, color, align, valign, lh, ls, italic, upper` | text, shape | `TEXT` presets at editor.js 21–28 |
+| `bg, radius` | text | text background box |
+| `shape, fill, stroke, strokeW, radius, shadow, dash` | shape | `SHAPES` (editor.js 465): rect, round, pill, ellipse, triangle, diamond, para, chevron, arrow |
+| `stroke, strokeW, headStart, headEnd, dash` | line | |
+| `src, fit, radius, shadow` | image | `safeSrc`: `data:image/`, `http(s):`, `blob:` |
+| `kind, variant, data` | fx | `kind` ∈ `AMRT.FX`. `variant` ∈ `FX[kind].variants` (else deleted). `data.panel==='white'` wraps a model in a white panel (runtime 367). |
+| `anim` | all | `{in, delay, dur, loop, hover}` (§5.2) |
+| `ph` | all | S21: `'p0'…'p199'` = index of the element when the slide was created/stamped; key into `slide.base.els`. Unique per slide; removed when invalid, duplicated or absent from the base; **not** kept by element copy/duplicate/paste (§11 S21 status) |
+| `pal` | fx | S20 “Cores do componente”: `{p?: '#RRGGBB' (principal), a?: '#RRGGBB' (destaque)}`; `safeEl`/`safePal` keeps only valid 6-digit hex (upper-cased), drops the key when empty and on non-fx elements; the runtime re-validates (§11 S20 status) |
+
+### 3.4 What survives which path (measured, `p1-model.js`)
+| Path | Code | deck.id/nav/comments | slide.notes/sec/title/kind | new `anim.*` keys | unknown el keys (`zoom`, `locked`, `name`) | unknown `data.*` |
+|---|---|---|---|---|---|---|
+| Undo/redo | `restore(JSON)` 122 | kept | kept | kept | kept | kept |
+| Save → file | `exportHTML` 1476 | written | written | written | written | written |
+| Open file / drop .html | `openFile` → `loadDeck` → `safeDeck` | **dropped** | **dropped** | **dropped** | kept | kept |
+| Draft restore (banner, cover option 3) | `loadDeck(getDraft())` | **dropped** | **dropped** | **dropped** | kept | kept |
+| Paste slide (Ctrl+V on thumbnails) | `pastePayload` → `safeSlide` 901 | n/a | **dropped** | **dropped** | kept | kept |
+| Paste elements | `safeEl` 908 | n/a | n/a | **dropped** | kept | kept |
+| localStorage draft (raw) | `commit` 118 | kept | kept | kept | kept | kept |
+
+After F0 (§10), all rows read "kept" for the allow-listed fields (measured, `p6-f0.js`).
+
+### 3.5 Proposed new optional fields (agreed across specs; all backward compatible)
+| Field | Owner | Validation in F0 |
+|---|---|---|
+| `deck.id` | F2 history, F10 notes key, F11 local edits | `/^[\w-]{1,40}$/`. **Assign in `newDeck()` and in `loadDeck()` when missing** (F2). |
+| `deck.created`, `deck.updated` | F2, F11 | finite numbers |
+| `deck.nav = {chapters:bool}` | F9 | normalised to `{chapters: x !== false}` |
+| `deck.comments = [{id, text, author?, slide?, x?, y?, ts, done?}]` | F11 | text ≤4000 and non-blank, author ≤80, x/y clamped to 1280×720, max 2000 |
+| `slide.notes` (≤4000), `slide.sec` (≤80), `slide.secSub` (≤160), `slide.title` (≤160), `slide.kind='section'` | F9, F10 | strings truncated, kind exact |
+| `slide.tr='wipe'` | F9 | already passes (`/^\w{1,12}$/`) |
+| `anim.spd rep step emph emphAt rest lift glow gcol sweep depth` | F8 | DTS-CONTROLS §5.1 lists |
+| line `curve`, `headS`, `headE`, `dashS` | F4 | **add** to `safeEl` with token allow-lists (not in F0) |
+| `data.*` for new kinds (`icon`, `color`, `bg`, `motion`…) | F3/F5/F6/F7 | Add style-affecting keys to `DATA_TOKENS` (editor.js 134) **and** escape at render |
+
+---
+
+## 4. FX registry contract (`AMRT.FX`, runtime.js 58–358)
+
+There are 21 kinds today (measured): **12 models** (`model:true`: bars, timeline, process, raci, riskmap, swot, matrix, cardgrid, maturity, linechart, donut, gauge; 42 variants) and **9 plain components** (counter, progress, beacon, headline, card, holo, glass, quote, amlines). Categories: Matrizes, Riscos, Cards, Evolução, Gráficos, Indicadores (models); Números & dados, Destaques, Cards, Marca A&M (components).
+
+```js
+FX.kind = {
+  name: 'Matriz SWOT',                 // card title, props header, elName()
+  cat: 'Matrizes',                     // drawer group; models: MUST be in buildModels order[] (editor.js 1111) or the card is invisible
+  model: true,                         // true → Modelos tab (+ variants UI, white panel on dark slides); false → Efeitos tab
+  kw: 'swot fofa forças …',            // search keywords (normalised, accent-free) — models only
+  label: function (el) { … },          // optional: per-element name → AMRT.fxLabel(el) (props header + "Ampliar" footer); SmartArt → 'SmartArt · Processo'
+  w: 980, h: 470,                      // default size (logical px) for mkFx
+  variant: 'quadrants',                // default variant (models)
+  variants: [[key, label, description], …],   // chips "Efeito do modelo", #mVar menu, drawer card pills; CSS class fxv-<key>
+  anim: { in: 'fade', hover: 'lift', dur: 1600 },   // defaults merged into el.anim by mkFx (editor.js 49)
+  data: { … },                         // default content (cloned)
+  fields: [[key, label, type?], …],    // props panel "Conteúdo" (editor.js 350–358)
+  tip: 'Clique numa letra…',           // optional hint (props + variant menu)
+  html: function (d, w, h, el) { return '<div class="fx …">…</div>'; }   // pure; d = el.data, w/h = current logical size
+};
+```
+
+**Field types / codecs** (renderProps 350–357, input handler 409–415, `rowsToText`/`textToRows` 426–437):
+| type | UI | stored as |
+|---|---|---|
+| *(none)* / `'text'` | `<input type=text>` | string |
+| `'number'` | `<input type=number step=any>` (`data-n`) | number |
+| `'area'` | `<textarea>` | string (renderers split with `lines()`: `\n` **or `;`**) |
+| `'lines'` | textarea, `data-codec="lines"` | **array of trimmed non-empty lines.** Leading indentation is lost (blocks tree input for F6). |
+| `'rows:a|b:n|*c'` | textarea, one row per line, columns split by `|` | `[{a:'', b:0, c:[…]}]`. `:n` = number (comma decimals accepted). `*c` = rest of the columns as an array. |
+| `'sel:v=Label|v2=Label2'` | `<select>` | string |
+
+Plus the automatic toggle `data.panel` ("Painel branco") for `model:true` (358).
+
+**`html()` rules** (follow the existing models):
+- Root `<div class="fx …">` (`.fx{position:absolute;inset:0;overflow:hidden}`; add `overflow:visible` inline when labels may spill).
+- Style classes `fx-dark|fx-light|fx-ice|fx-clear`.
+- Sizes: `CQ(px)` for fonts and paddings; `P(v,total)` for positions; SVG `viewBox="0 0 w h"` with the current w/h.
+- Text: always `esc()`. Editable-in-place text uses `E(path, txt, cls)` → `<span data-e="path">`. A double-click on it starts `startFxEdit` (editor.js 714), which writes `setPath(el.data, path, text)`. Optional `data-ep="= "` on that span = a prefix hidden on screen that `startFxEdit` puts back when it commits (unless the typed text already starts with it) — SmartArt Venn's `= Interseção` pill uses it so inline editing never loses the marker.
+- Optional `label: function (el) { return 'SmartArt · Processo'; }` = per-element name. `AMRT.fxLabel(el)` returns it (falls back to `name`, then `'Elemento'`) and is what both `elName()` in the editor and the player's "Ampliar" footer show, so the two always agree.
+- Clickable cycling cell: `data-cyc="path"` (RACI letters, startMove `up` 709).
+- Cycling highlight in the presentation: root `data-cycle="g"` plus children `data-g="k"`. `runFx` adds `.cy-active` and rotates `.cy-on` every 2200 ms after 1900 ms.
+- Counters: `data-count`, `data-dec`, `data-from`, `data-pre`, `data-suf`. `runFx` animates 1500 ms (ease-out-expo), starting at `--d` + 250 ms.
+- Variant: `fxv-<variant>` on the root. Helper `VV(el, kind)`.
+- **CSS for internals lives in runtime.css and must be scoped `.am-in …`** with delays `calc(var(--d,0ms) + …)` so the element's start delay applies. The stage switches `am-pre`→`am-in` to (re)play.
+
+**Private helpers inside the IIFE** (used by models): `esc, P, CQ, fmt, fmtN, lines, E, arr, VV, num`. F0 exports them as `AMRT.util` so new kinds can live in separate files (§10.3).
+
+**Where FX definitions surface in the editor**:
+| Surface | Code | Picks |
+|---|---|---|
+| Modelos tab | `buildModels()` 1110–1117 | `model:true`, grouped by `cat` in **`order = ['Matrizes','Riscos','Cards','Evolução','Gráficos','Indicadores']`** |
+| Efeitos tab | `buildDrawer()` 1134–1143 | `!model`, grouped by `cat` in insertion order, after the "Animar o elemento selecionado" chips |
+| Preview slide for a card | `previewSlide(k)` 1102–1109 | Dark background for counter/holo/glass/amlines/quote or `data.style==='dark'`; glass gets 2 blobs |
+| Insert | `insertFx(kind, style, at)` 563–570 | models: `el.variant = default`; on dark slides `data.panel='white'` **except timeline, process, bars** |
+| Props | `renderProps()` 344–359 | variants chips + "▶ Ver efeito no slide" + `tip` + fields |
+| Effect pill on canvas | `drawSel()` 216–222 (`#fxArrow`) → `openVarMenu()` 587–594 (`#mVar`) | variants for models, else `ANIM_IN` |
+| Clipboard plain text | `dataText()` 838, `NOTEXT` 837 | All string data except tokens |
+
+---
+
+## 5. Rendering and animation system (runtime)
+
+### 5.1 DOM of one element (`renderEl`, runtime.js 371–390)
+```
+div.am-el.am-t-<type>[.am-k-<kind>] [data-id] [data-in] style="left/top/width/height:% ; z-index ; --d:<delay>ms ; --t:<dur>ms"
+  div.am-rot                       (transform: rotate(rot))
+    div.am-fxw [data-loop] [data-hover]   (opacity, border-radius = CQ(radius) for image/fx/text)
+      <content(el,w,h)>            text: .am-text>.am-tx | shape: <svg>+.am-text | line: <svg> with .am-hit + .am-ln (+.am-head) | image: img.am-img | fx: FX.html()
+```
+- `--t` defaults to 700 ms (1000 ms for `draw`).
+- The editor queries only `.am-el[data-id]` and `.am-tx` (grep-verified). `.am-fxw` and `.am-rot` are used by runtime.css (lines 6–7, 33–50) and `bindTilt` (426–427).
+- DTS-CONTROLS §5.2 adds a `.am-hv` wrapper between `.am-rot` and `.am-fxw`. If you do this, **also** add `.am-hv` to the size rule at runtime.css line 6 (`.am-rot,.am-fxw{position:relative;width:100%;height:100%}`), or content with `inset:0` collapses to 0 height. Rewrite line 47 `:has(>.am-fxw[data-hover=tilt])` to target `.am-hv`.
+
+### 5.2 Animation vocabulary today
+| Kind | Values | Where defined |
+|---|---|---|
+| Entrance `anim.in` | none, fade, rise, left, right, zoom, focus, wipe, draw | Labels `ANIM_IN` editor.js 318; tips `ANIM_TIP` 317; CSS runtime.css 12–31 |
+| Loop `anim.loop` | none, pulse, float, glow, shimmer | Chips **hard-coded** in renderProps 385; CSS 33–41 (on `.am-fxw[data-loop]`) |
+| Hover `anim.hover` | none, lift, zoom, glow, tilt | Chips hard-coded in renderProps 386; CSS 43–50 (**only under `.am-play`**); tilt JS in `bindTilt` |
+| Slide transition `slide.tr` | fade, slide, zoom, none | seg in renderProps 337; CSS 137–141 |
+| Component internals | 42 model variants + fixed animations of the 9 components | runtime.css 51–132, 159–381 |
+
+The "draw" entrance only animates `.am-ln` paths (lines, `amlines`). The rule "draw only for line/amlines, else wipe" is **hard-coded in 6 places**: editor.js 396 (`applyProp` toast), 441 (`setVariant`), 522 and 531 (`seq`), 590 (`openVarMenu` filter), 1167 (drawer chip). F3 icons with drawable paths should go through a helper `canDraw(el)`.
+
+Known bug (DTS-CONTROLS §4.1, measured there): loop and hover both set `transform` on `.am-fxw`, so a looping element ignores its hover.
+
+### 5.3 Play lifecycle
+- `renderSlide(slide, {play})` (391): `.am-stage.am-edit` (editor canvas, thumbnails: static, everything visible) or `.am-stage.am-play.am-pre` (elements with `data-in` at opacity 0).
+- **To (re)play**: remove `am-in`, add `am-pre`, force reflow (`void st.offsetWidth`), remove `am-pre`, add `am-in`, then `clean = runFx(st)`. Used by `player.go` (453), `previewEl` (459), `playPreviews` (1148).
+- `runFx(st)` (401–423) returns a cleanup that cancels RAFs and timers and strips `cy-*` classes. **Always keep and call the cleanup.** CR-12 asserts zero DOM mutations in `#modelsBody` for 2.5 s once the cover is open.
+- Reduced motion (runtime.css 383–387): every `.am-stage *` animation and transition collapses to 0.01 ms × 1 iteration, and `[data-loop]` and the beacon rings are disabled. Anything outside `.am-stage` (player overlays, editor gallery chrome) needs its own reduced-motion rule.
+
+### 5.4 Player (`player(deck, root, opts)`, runtime.js 437–482)
+- `opts`: `start` (index), `noHash` (editor: true), `brand` (wordmark URI), `onExit` (editor only: adds "Sair (Esc)").
+- Markup (441):
+  - `.amp > .amp-view > .amp-deck` (16:9, `width:min(100vw, (100vh-52px)*16/9)`, CSS 136);
+  - `.amp-prog` (2 px orange, `bottom:52px`, CSS 158);
+  - `.amp-bar` = grid(1fr auto 1fr): `.amp-brand` | `.amp-c` (`prev` · `.amp-pos` · `next`) | `.amp-r` (`exit`?, `full`).
+- **All slides are rendered up front** (444–447): one `.amp-slide[data-tr]` > `.am-stage` each.
+- `go(i)` (449–458): clamp; same index is a no-op; `clean()`; toggle `.on`; replay (§5.3); update `.amp-pos` (`<b>01</b> / 07`), prev/next disabled, progress width, `history.replaceState('#/N')` unless `noHash`.
+- `key(e)` (460–467): → PageDown Space Enter = next; ← PageUp Backspace = previous; Home; End; F = fullscreen; Esc = `onExit`.
+- Click (469–474): `[data-a]` buttons; otherwise clicks on the deck in the right 18 % go next and the left 18 % go previous.
+- `bindTilt(deckEl)`; hash routing `#/N` (`hashchange`); `go(start)`.
+- Returns `{go, destroy}`. **F8/F9/F10/F11 need more**, e.g. `{go, destroy, cur(), deck, list, root, on(evt,fn)}`. Extend the returned object and keep `go`/`destroy` unchanged.
+- Editor present mode: `present(start)` (editor.js 1469): closes the drawer, opens `#presenter`, `RT.player(clone(deck), pr, {start, noHash:true, brand, onExit})`.
+
+---
+
+## 6. Undo / commit rules (editor)
+
+- `commit()` (111–121): `JSON.stringify(deck)` compared with `last`. If different: push `last` to `hist` (max 50), clear `fut`, `updUndo()`, `renderThumb(cur)`, and after a 500 ms debounce write `localStorage['amStudio.draft']` (only if < 4.5 M chars, else a one-time toast).
+- **Mutate the model, re-render, then `commit()` exactly once per user action.** Live edits (typing in a props field, dragging) mutate without committing; the `change` or `pointerup` commits.
+  - `applyProp(path, val, live)` (391): `s.` paths re-render the stage; element paths `rerenderEl`.
+  - `nudge` commits after 400 ms (1021).
+  - `flush()` (124) commits pending nudges/blurred fields before undo, slide change, save and open.
+- `undo()/redo()` (130–131) call `restore(json)` (122), which reloads the deck **without** `safeDeck` (raw JSON) and re-renders all.
+- `loadDeck(d)` (171) **resets history** (`hist.length = 0`) and runs `safeDeck`. `isBlank()` (1447) = 1 white slide, no elements, no bgImg, title "Nova apresentação", **no history**. Used by open/new to decide on confirmation.
+- `holdProps` (319) prevents re-rendering the panel while finishing a text edit from a panel click.
+- `renderAll()` = thumbs + stage + props. `renderStage()` also calls `stopPreview()` and `fit()`.
+- Non-visual slide fields (`notes`, `sec`, `title`) should **not** go through `applyProp('s.…')` (it calls `renderStage()` on every keystroke). Special-case them: `setPath` + commit on `change`.
+
+---
+
+## 7. Editor UI map
+
+Screenshot `SHOTS/a03-props-model-selected.png`: model selected, props panel, `#fxArrow` pill. Other views: `SHOTS/a02-editor-template-slide2.png`, `SHOTS/a12-props-slide.png` (no selection), `SHOTS/a05-props-animation-section.png`.
+
+### 7.1 Layout (editor.html 20)
+`body` grid: rows `54px 50px 1fr`, columns `var(--side-w) 1fr 304px` (`--side-w` default 196px, adjustable since S18), areas `top / rib / side cv props`.
+- `#top` (313–328): brand, `#mbar` (7 menus), `#bHome`, `#title`, `#bUndo` `#bRedo`, spacer, `#bNew` `#bOpen` `#bPlay` `#bSave`, hidden file inputs `#fOpen` `#fImg` `#fBg` (unused).
+- `#rib` (330–353): 4 groups (§7.5).
+- `#side` (386–389): `#sideHd` (« recolher) + `#sideMini` (faixa recolhida) + `#thumbs` + `#addSlide` + `#sideSplit` (divisória; S18).
+- `#cv` (391–394): `#wrap` (`#drophint`, `#sel`, `#marq`; stage inserted first) + `#hint`. `fit()` (180) sizes `#wrap` to `(cv − 56) × (cv − 72)` at 16:9.
+- `#props` (396).
+- `#drawer` (398–404).
+- `#banner`, `#toast`, `#modal`, `#presenter` (405–408).
+
+### 7.2 Selection and zones
+`selIds`/`selId` (95, `pick` 103); `zone` ∈ `canvas|thumbs|panel` (`setZone` 109). Thumbnail focus changes copy/paste/delete/duplicate to act on slides.
+
+### 7.3 Props panel (`renderProps`, 320–389)
+Three branches:
+- **(a) multi-selection** (323–333);
+- **(b) nothing selected = slide panel** (334–340): sections Fundo · Transição ao entrar · Animações do slide + help text. **Add F9 "Capítulo" and F10 "Resumo do slide" here, before the help text.**
+- **(c) one element** (342–388), sections in this order:
+  - header with front/back/dup/del;
+  - *Efeito do modelo* (variants);
+  - *Conteúdo* (fields);
+  - *Posição* (line: X1..Y2) **or** *Posição e tamanho* + *Alinhar no slide*;
+  - *Forma* (shape);
+  - *Texto* (text/shape);
+  - *Imagem*;
+  - *Cantos* (fx);
+  - **Animação** (entrance select, delay, duration, loop chips, hover chips, "▶ Ver animação no slide"). **F8 layers go into this last section.**
+
+Builder helpers (243–253): `fld(label, inner)`, `num(path, v, step, min, max)`, `txtIn`, `area`, `selIn(path, v, opts, isNum)`, `swatches(path, v, none)` (palette `SW`, 9), `seg(path, v, opts)`, `tog(path, v, label)`.
+DOM conventions read by the delegated handlers (409–425):
+- `data-p` (input → `applyProp(live)`, change → commit);
+- `data-n` (number);
+- `data-codec`;
+- `data-set` + `data-v` (+ `data-b` = boolean) for click-to-set;
+- `data-var` (variant);
+- `data-act` → `act(a)` (512–537: del, dup, copy, cut, front/back/top/bottom, al-*, dist-*, seqsel, preset-*, replace, bgimg, bgimgdel, seq, noanim, preview, pvel). **New panel buttons should add `act()` cases.**
+
+### 7.4 Preview overlay
+`previewEl(el)` (451–462):
+- clones `el` into `.prevov` (a transparent play stage over the canvas);
+- hides the real node (`.previewing{opacity:0}`), replays, runs `runFx`;
+- auto-stops after 4.2 s (7.2 s if it cycles).
+
+`stopPreview()` (446) runs on any canvas pointerdown, keydown, `setSel` and `renderStage`. The clone keeps the same `id`, so you can preview **a candidate effect without touching the model**: `previewEl(Object.assign(clone(el), {anim: Object.assign({}, el.anim, {in: 'zoom'})}))`. Note that the z-index uses `slide().els.indexOf(el)`, which is −1 for a clone; pass the index.
+
+### 7.5 Ribbon (`#rib`, editor.html 330–353) and old `.menu` popovers (355–384)
+| Group | Buttons (selector) | Width at 1280 px (measured) |
+|---|---|---|
+| 1 Inserir | `[data-menu=mText]` 87 · `[data-menu=mShape]` 99 · `[data-add=line]` 71 · `[data-add=arrow]` 64 · `[data-add=image]` 85 · `[data-menu=mCard]` 90 · `[data-menu=mBrand]` 124 | 641 |
+| 2 Biblioteca | `#bModels` 91 · `#bFx` 80 (label "Efeitos" ≤1420) | 182 |
+| 3 Editar | `#bFront` 76 · `#bBack` 64 · `#bDup` 70 · `#bDel` 82 | 307 |
+| 4 | `#bPreview` 103 ("Deste slide" ≤1420) | 111 |
+
+Handlers:
+- `#rib` click (575–582): `data-menu` → `toggleMenu`; `data-add` → `line`/`arrow`/`image`.
+- `.menu button` click (604–612): `data-text` → `insertText`; `data-shape` → `mkShape`; `data-fx` (+`data-style`) → `insertFx`; `data-brand`; `data-layout`.
+- `#shapeGrid` is generated from `SHAPES` (603). `#mSlide` comes from `LAYOUTS` (613). `#mVar` is the variant/entrance menu.
+- Old menus have their own keyboard handling (`oldMenuKey` 1034).
+- Responsive label rules: editor.html 299–308. ≤1420 px hides `.lbl` and shows `.lbs`.
+
+### 7.6 App menus (`MENUS`, editor.js 1300–1351) and context menus (1352–1388)
+Item schema (`buildX` 1198):
+- `{t, ic|raw, k, fn, dis, sub: items|fn, keepEdit, id}`;
+- `{sep:1}`;
+- `{hd:'Título'}`.
+
+Icons come from `IC` (261–311; 24×24 stroke paths; `svgI(k)`). Menus are functions, evaluated on open.
+
+| Menu | Current items (order matters for tests) |
+|---|---|
+| `file` | **Início (capa)** · sep · Nova apresentação · **Abrir…** (Ctrl+O) · Minhas obras… · Salvar apresentação · Salvar como PDF… · Salvar como PowerPoint… (S22) · sep · Apresentar · sep · Recomeçar apresentação… |
+| `edit` | Desfazer · Refazer · sep · Recortar · Copiar · **Colar** · Duplicar · sep · Selecionar tudo · Apagar seleção / **Apagar slide** · sep · Limpar slide (text-editing variant at 1309–1318) |
+| `insert` | **Título · Subtítulo em destaque · Texto corrido** · **Forma ▸** (`shapeItems`) · sep · Linha · Seta · Imagem… · Cards ▸ · Marca A&M ▸ · sep · Modelos… · Efeitos… |
+| `slide` | Novo slide ▸ (`layoutItems`) · Duplicar · sep · Copiar slide · Colar slide · Apagar slide · sep · Mover para cima / baixo |
+| `arrange` | Frente/Trás/Topo/Fundo · sep · **Alinhar ▸** · Distribuir ▸ |
+| `present` | Do início (F5) · Do slide atual (Shift+F5) |
+| `help` | Atalhos de teclado (F1) · Manual da obra |
+| ctx element `ctxElItems` 1352 | [Editar texto] · Recortar · Copiar · Colar · Duplicar · Apagar · sep · **Trazer para frente** · Enviar para trás · sep · **Alinhar ▸** · [Distribuir ▸] |
+| ctx canvas `ctxCanvasItems` 1363 | Colar · Inserir texto aqui · Inserir modelo… · sep · Novo slide · Selecionar tudo |
+| ctx thumbnail `ctxThumbItems` 1368 | Novo slide depois · Duplicar slide · sep · Copiar/Colar/Apagar slide · sep · Mover |
+
+The shortcut list `HK` (1425–1430) is **the single source** for the F1 modal and the cover manual (`S.HK`). Add new shortcuts there.
+
+### 7.7 Biblioteca drawer (`#drawer`)
+- Tabs `.dtabs [data-tab=models|fx]`. `setTab` (1126) toggles `#modelsBody` / `#dSearch` / `#drawerBody` and sets title and subtitle.
+- `openDrawer(v, tab)` (1151): open/close/toggle; `playPreviews()` now and **every 5.2 s**; on close calls each card's `_clean`.
+- `playPreviews` (1144) skips when the cover is open or the tab is hidden. It re-renders every card's stage (21 cards ≈ 12 ms, measured).
+- Card markup: `.fxi[draggable][data-k][data-kw] > .pv + .ft(button[data-ins]) [+ .vl pills]`. Drag payload is `text/plain` `'amfx:'+kind`, handled by `wrap` drop (1182–1193).
+- Models click (1161): `insertFx`, then `openDrawer(false)`, then toast, then `previewEl` after 250 ms.
+- Fx tab clicks (1164–1168): `data-ins` → insertFx; `data-anim` → apply to all selected, commit, **then `present(cur)` (opens full presentation)**.
+- Search `#mSearch` (1119): AND of normalised words against `data-kw`; hides empty groups; `#mEmpty`.
+
+Screenshots: `SHOTS/a06-drawer-models.png` and `SHOTS/a07-drawer-fx.png`.
+
+### 7.8 Save / open / draft
+- `save(quiet)` (1481): `endEdit`, `flush`, Blob of `exportHTML()`, download `slug(title).html`.
+- `openPicker` (1449) confirms when not blank. `#fOpen` change → `openFile`. Dropping a deck file on the canvas confirms, then `openFile`.
+- Draft:
+  - written by `commit`;
+  - start banner (1521–1528) shown if the draft has any element;
+  - `newPresentation` clears it;
+  - the cover reads it via `getDraft`.
+- `beforeunload` prompt when `hist.length` (1517).
+
+### 7.9 Public API (`window.AMStudio`, 1529–1550)
+`deck` (getter), `exportHTML`, `present`, `goSlide`, `insertFx`, `addSlide`, `select`, `setVariant`, `previewEl`, `W`, `H`, `BRAND`, `LAYOUTS`, `uid`, `clone`, `toast`, `mk{slide,text,shape,line,image,brand,fx}`, `newDeck`, `loadDeck`, `openFile`, `pickFile`, `openDrawer`, `renderAll`, `commit`, `isEmpty`, `cur` (getter), `HK`, `save`, `getDraft`, `clearDraft`, `hideDraftBanner`, `selected`, `selectMany`, `copy`, `cut`, `paste`, `clearSlide`, `resetDeck`, `showHelp`, `closeMenus`, `confirm(o) → Promise<bool>`.
+**Adding keys is safe. Removing or renaming any of the 36 checked keys fails test-core "API completa".**
+
+---
+
+## 8. Cover (`cover.js`)
+
+- Views: `home` (6 options), `tpl` (6 templates + 7-thumbnail strip), `help` (manual). `cover.dataset.view` is read by tests.
+- `showView(v)` (482) toggles `#cvHome/#cvTpl/#cvHelp`, plays or pauses the crane scene and focuses.
+- `open(opts)` (501) and `close()` (519) handle the `cv-lock` class, focus restore and `clearPreviews()`.
+- `guard(title, fn)` (461) asks for confirmation (`#cvConfirm`) before replacing a non-empty work or a saved draft.
+- `act(k)` (443):
+  - 1 = new;
+  - 2 = templates;
+  - 3 = resume (back to the current work, or draft);
+  - 4 = open file;
+  - 5 = Almoxarifado (blank + Modelos drawer);
+  - 6 = manual.
+- Templates `TPL` (250–349) are built from `S.mk.*` (title/head/capa/fim helpers 205–248).
+- Key handler (558): see §2. Note: **Backspace = back** and **`?`/F1 = manual** in non-home views. A future text input in the cover must be guarded.
+- Layout: `.cv-menu` 3 columns (cover.css 50); `.cv-tgrid` 5 columns (142); `.cv-strip-row` 7 columns (158); top-right `.cv-topr` (24) holds `#cvLog` ("Diário de obra · date") and `#cvResume`.
+
+---
+
+## 9. Tests and the QA gate
+
+### 9.1 Suites
+| Suite | What |
+|---|---|
+| `test.js` | Smoke: text/shape/arrow/counter, layouts, seq animation, undo/redo, present, save, open the export, reopen |
+| `test2.js` | Models drawer, search, RACI interactions, all model kinds on slides, present all, save/reopen |
+| `test-core.js` | 117 checks: clipboard, multi-selection, align/distribute, thumbnails, context and app menus, keyboard, modals, F1/F5, API, resize/guides, save/open, 1280 layout, review regressions (IX/CR/CI/VB) |
+| `test-cover.js` | cover open/keys/views, 6 templates slide by slide (overlap/overflow via `slideCheck`), draft, open/drop, Almoxarifado, viewports 1440/1280/1366/1024/390, reduced motion |
+
+The whole gate runs in 5 min 07 s (measured); per-suite times were not measured.
+
+### 9.2 How the gate decides (qa-gate.sh)
+`run()` marks **FAIL** when the exit code ≠ 0 **or** the output matches `FAIL|pageerror|"errs": \[[^]]|"failed": \[[^]]|FALHAS: [1-9]`. Measured quirks:
+- A pretty-printed non-empty `"errs": [\n …` and the compact `{"errs":["x"]}` are **not** caught by the regex. **Your test must `process.exit(1)` on any failure, including console errors.**
+- The uppercase substring `FAIL` anywhere in the output fails the suite, even inside a passing check name.
+- Each suite gets `timeout 900` s. New suites are picked up by the glob `test-s[0-9][0-9]*.js` (e.g. `test-s01-gallery.js`), in `ls` order, after the 4 core suites.
+
+### 9.3 Template for a new suite (verified with the gate's `run()`: PASS normally, FAIL when a check fails)
+File: `SP/qa-understand/arch-analyst/test-s99-template.js`. Copy it to `studio/test-sNN-<feature>.js`. It includes:
+- local font routing (`AM_FONTS_DIR` or `../fonts2`);
+- a `check(name, ok, info)` collector;
+- a console/pageerror collector;
+- `L(x,y)` logical→screen mapping from `#wrap`;
+- export-and-open of the exported file in a second page;
+- the CR-04 grep;
+- `process.exit(failed?1:0)`.
+
+Helpers worth copying from test-core:
+- `els()`, `selected()`, `center(id)`;
+- `openMenu(k)`;
+- `menuItem(label)`, `subItem(parent, label)`.
+
+From test-cover: `open({vp, reduce, draft, q})` and `slideCheck(p)`, the overlap/overflow detector. **Reuse `slideCheck` for every new model, chart and SmartArt at its default size.**
+
+### 9.4 Running safely
+```bash
+# private copy (never the shared folder): assemble.py needs ../am/brand, fonts routing uses ../fonts2
+W=$SP/qa-understand/<you>/w; mkdir -p $W/studio && cp $SP/studio/{assemble.py,qa-gate.sh,editor.*,runtime.*,cover.*,test*.js} $W/studio/
+ln -sfn $SP/am $W/am; ln -sfn $SP/fonts2 $W/fonts2; cd $W/studio && bash qa-gate.sh
+```
+
+### 9.5 Invariants pinned by tests (do not break)
+| Invariant | Test |
+|---|---|
+| Inserir menu: items 1–3 = Título, Subtítulo em destaque, **Texto corrido** (ArrowDown×2 from Título → "Texto corrido", Enter inserts text) | test-core §10 |
+| Inserir: exactly **one** item whose text contains "forma" (case-insensitive). It opens a submenu whose **first** item containing "Retângulo" creates a `shape`. **Forbidden new labels**: Formas…, Informação, Transformação, Plataforma, Formato… | test-core §1 (strict `hover()`) |
+| Element context menu: exactly one item containing "trazer para frente" and one containing "alinhar" | test-core §9 |
+| Editar menu: exactly one "desfazer", one "colar"; with the thumbnail focused, one "apagar slide" | test-core §10, CR-07, IX-12 |
+| Arquivo menu: first item "Início (capa)"; exactly one item containing "abrir…" (**not** "Reabrir…") | test-core §14, IX-01 |
+| Ribbon/top bar: no overflow at 1280×720; `#bSave` inside the viewport | test-core §16 |
+| Selectors: `[data-add=arrow]`, `[data-menu=mText]`, `[data-text=title]`, `[data-menu=mShape]`, `[data-shape=chevron]`, `#bFx`, `[data-ins=counter]`, `#bModels`, `#mSearch`, `#modelsBody .fxi[data-k]`, `[data-ins=raci|swot]`, `#fxArrow`, `#mVar [data-v=accountable]`, `#bDup`, `#bFront`, `#bNew`, `#bSave`, `#bPlay`, `#bHome`, `#title`, `#thumbs .th[data-i] .box`, `#props [data-p="data.value"]`, `#props .sw button[data-v]` | test.js, test2.js, test-core |
+| `#modelsBody` gets 0 mutations for 2.5 s after the cover opens over an open drawer | CR-12 |
+| Export contains no `onerror|onmouseover|onclick` | CR-04 |
+| Player: `.amp-pos` starts with `01`/`02`; Esc exits; `#presenter.open` toggles | test-core §13 |
+| Exported file: `.amp-slide` count = slide count; ArrowRight navigates | test.js |
+| Cover: 6 `.cv-opt` with keys 1–6; arrows → ↓ ← ↑ = 2,5,4,1 (3-column grid); 6 templates with 7/7/6/6/6/7 slides and no overlap (S34b: the 6th is “Apresentação institucional A&M”; its five institutional slides are exempt from the overlap check — official layered art, fidelity measured in test-s34); fits without scroll ≥1024; no horizontal scroll at 390; option 3 loads the draft; option 5 opens the Modelos tab | test-cover |
+| Player shows only slides without `hidden === true` (all hidden → all shown); `opts.start` is an index into `deck.slides` mapped to the next visible slide | test-s21-ocultar |
+| Save split button (S22): `#bSave` plain click = .html download; `#bSaveMore` ▾ glued to it (menu `.xmenu.xsave`: HTML · PDF · PDF pelo navegador · PowerPoint); export dialog `#xpDlg` (not `#modal`); `window.AMExport.{rasterSlide, rasterEls, fontsCSS, visibleSlides, pick, pdf, preparePrint, openDialog}` | test-s22-pdf |
+| PowerPoint (S23): ▾ “PowerPoint (.pptx)…” and Arquivo “Salvar como PowerPoint…” enabled (they turn disabled with the tip “Disponível na próxima etapa” if `AMExport.pptx` is removed); dialog `#xkDlg` (not `#modal`, not `#xpDlg`); `AMExport.{pptx, pptxBuild, zip}`; hidden slides exported as `show="0"` by default | test-s23-pptx, test-s22-pdf |
+| Zero console errors in all suites | all |
+
+---
+
+## 10. F0 — foundation (do first; prototype verified green)
+
+Patch script: `SP/qa-understand/arch-analyst/f0-patch.py <studio_dir>`. It is anchor-checked: every replacement asserts exactly one match.
+Result on a private copy: **GATE PASS** (see §15). `p6-f0.js` proves the round-trip and the extension mechanism.
+
+### 10.1 Allow-list the new fields (editor.js)
+- Helpers after `numOr` (135): `safeStr(v,n)`, `pickN(v,list,def)`.
+- `safeEl` after line 151: the DTS anim keys (`spd rep step emph emphAt rest lift glow gcol sweep depth`) with value lists.
+- `safeSlide` before 163: `notes` (4000), `sec` (80), `secSub` (160), `title` (160) and `kind==='section'`.
+- New `safeComment(c)`.
+- `safeDeck` (166): `id` (`/^[\w-]{1,40}$/`), `nav.chapters`, `created`, `updated`, `comments` (max 2000).
+
+Measured after the patch: loadDeck and save→reopen keep `id`, `nav`, `comments` (blank and bad-id comments normalised), `notes`, `sec`, `secSub`, `title`, `kind`, `spd`, `step`, `emph`, `glow`. Out-of-list `sweep:7` becomes 0.
+
+### 10.2 Player key guard (runtime.js `key()`, 460)
+```js
+var kt = e.target;
+if (kt && (/input|textarea|select/i.test(kt.tagName) || kt.isContentEditable)) return;
+if (e.ctrlKey || e.metaKey || e.altKey) return;   // Ctrl+S / Ctrl+Z belong to the edit layer (F11)
+```
+Measured: Space inside a contenteditable in the export is no longer prevented and does not navigate.
+
+### 10.3 Extension files and `AMRT.util`
+- `runtime.js` return (483) adds `util: {E, arr, VV, num, fmt, fmtN, CQ, P, lines, textHTML}`.
+- `assemble.py` now:
+  - appends `sorted(glob('rt-*.js'))` to runtime.js and `rt-*.css` to runtime.css, **inside** `#am-runtime` / `#am-runtime-css`, so exports carry them;
+  - injects `xedit.js` as `<script type="text/plain" id="am-xedit">` (inert in the editor; F11 copies its text into the export);
+  - injects `history.js` as `<script id="am-history">` before the cover script;
+  - extends the `</script` assertion to all of them.
+- Without these files the build only differs by the runtime/editor edits (434 KB).
+- Pattern for a new kind (measured working: drawer card, insert, export, render):
+```js
+/* rt-30-charts.js */
+(function (R) { 'use strict'; var U = R.util;
+  R.FX.waterfall = { name: 'Gráfico ponte (waterfall)', cat: 'Gráficos', model: true, kw: 'ponte waterfall bridge variação ebitda', w: 900, h: 380, variant: 'build',
+    variants: [['build', 'Degrau a degrau', 'Cada barra entra a partir da anterior.'], ['total', 'Total em destaque', 'O total final acende em laranja.']],
+    data: { … }, fields: [['items', 'Barras (rótulo | valor)', 'rows:t|v:n']],
+    html: function (d, w, h, el) { var v = U.VV(el, 'waterfall'); return '<div class="fx fxwf fxv-' + v + '">…</div>'; } };
+})(window.AMRT);
+```
+- File naming: `rt-10-shapes.js`, `rt-20-icons.js`, `rt-30-charts.js`, `rt-40-smartart.js`, `rt-50-models.js` (+ matching `.css`). One file per feature lets builders work without merge conflicts in runtime.js. The player (F8/F9/F10/F11 player parts) stays in runtime.js; give it **one owner at a time**.
+- Reduced motion: the global `.am-stage *{…!important}` rule covers stage content in any file; overlays outside the stage need their own `@media (prefers-reduced-motion:reduce)`.
+
+### 10.3b Status: F0 applied in step S0 (what actually shipped, beyond the prototype)
+- **Model** (editor.js `safeEl/safeSlide/safeComment/safeDeck`): everything in §10.1, plus element tokens `EL_TOKENS` (`curve` straight|elbow|curve, `dashS` dash|dot|dashdot|long, `headS`/`headE` arrow|open|dot|diamond|bar, `look` flat|outline|accent|topbar|header|gradient) and `bend` clamped to 0.05–0.95; `DATA_TOKENS` += `name trig accent bg stroke pair layout mode sort` (string values must match `TOKEN_RE` or `COLOR_RE`, so **free text must not use these keys**; render free text with `esc()`/`U.E()`).
+- **deck.id**: `newDeck()` sets it, `loadDeck()` assigns one when missing, cover templates get a fresh one per load (`AMStudio.newId()`).
+- **Runtime** (`AMRT`): `util = {E, arr, VV, num, fmt, fmtN, CQ, P, lines, textHTML, esc, nid}` (`nid(prefix)` = unique id per render for clipPath/mask/gradient); `AMRT.lineSVG` exposed and, like `AMRT.shapeBody`, called **through `AMRT`** by `content()`, so an `rt-*.js` can wrap either; `AMRT.hooks.player` = functions called with the player handle `{go, cur(), deck, root, deckEl, opts, onDestroy(fn), destroy}` before the first slide plays. The player returns that same handle (`go`/`destroy` unchanged).
+- **Key guard**: inputs/textarea/select/contentEditable ignored; Ctrl/⌘/Alt ignored except AltGr. Full map: `docs/KEYMAP.md`.
+- **assemble.py**: `rt-*.js`/`rt-*.css` concatenated (sorted, `;` between JS files) inside `#am-runtime`/`#am-runtime-css`; `ed-*.js` → one `<script id="am-ed-…">` each after the editor script; `ed-*.css` → `<style id="am-ed-css">`; `xedit.js` inert; `history.js` → `#am-history`. Build fails on a syntax error (`node --check`), on `</script`/`</style`, or on `onerror|onmouseover|onclick` (any case) in runtime + `rt-*` + xedit.
+- **Gate**: decided only by exit codes; new suites start from `test-sNN-template.js`; `test-s00.js` proves all of the above.
+
+### 10.4 Recommended (not in the prototype): one registry for animation vocabularies
+Move `ANIM_IN`, `ANIM_TIP` and the hard-coded loop/hover/transition chip lists (editor.js 317–318, 337, 385–386, 1137) into `AMRT.ANIMS = {in:[[k,label,tip,cat]], loop:[…], hover:[…], tr:[…], emph:[…]}`. The editor keeps `ANIM_IN = RT.ANIMS.in.map(...)` so `drawSel`/`openVarMenu`/`buildDrawer` keep working. F1 (gallery), F8 (new effects), props chips and the drawer then read one list.
+
+---
+
+## 11. Feature map — extension points and risks
+
+Notation: `E:` = editor.js, `R:` = runtime.js, `C:` = runtime.css, `H:` = editor.html, `V:` = cover.js. Order recommended: F0 → F1 → F2 → F3 → F4 → F5 → F6 → F7 → F8 → F9 → F10 → F11 (the user's order). Each step ends with `test-sNN-*.js` plus GATE PASS. F1 must be data-driven (§10.4) so F3/F8 additions appear in it automatically.
+
+### F1 — Effects gallery in boxes with live preview + choose/discard
+**What exists.** The Efeitos tab (`#drawerBody`) shows 8 entrance chips **without preview**, which apply immediately and open full-screen presentation (E:1167), plus 9 component cards. Loop and hover chips live only in the props panel (E:385–386), also without preview.
+
+**Extension points**:
+- `buildDrawer()` E:1134: replace the chips row with box groups:
+  - Entrada;
+  - Ênfase contínua (loop);
+  - Ao passar o mouse (hover);
+  - Transição de slide;
+  - later F8: Ênfase / Camadas.
+
+  Keep the component cards and their `button[data-ins]` (**test.js clicks `[data-ins=counter]` after `#bFx`**).
+- `previewSlide(k)` E:1102: add `previewAnim(kind, value)` returning `{bg, els:[sampleEl]}`. Sample = a navy card or KPI filling ~70 % of the box, with `anim` set to the candidate.
+- `playPreviews()` E:1144 and `openDrawer()` E:1151:
+  - **do not** re-render ~40 boxes every 5.2 s;
+  - play a box on `pointerenter`/`focus`/click, and once in a staggered pass when the tab opens;
+  - use an `IntersectionObserver` so off-screen boxes are not played;
+  - store and call `card._clean` (CR-12).
+- Hover demo: runtime.css hover rules are `:hover`-only (C:44–50). Add `:is(:hover,.am-hov)` so a clicked box can show the hover effect. DTS-CONTROLS plans the same selector.
+- Try-then-choose:
+  - click a box →
+    - if elements are selected, `previewEl(candidateClone)` (§7.4) on the real slide;
+    - else play inside the box only;
+  - show a decision bar (`.fxdec`, sticky at the drawer bottom): "**Usar este efeito**" (primary) / "**Descartar**". "Usar" is disabled with the hint "Selecione um elemento no slide" when nothing is selected.
+  - "Usar" mutates all selected elements, then `rerenderEl`, then **one** `commit()`, then toast "Efeito aplicado · Ctrl+Z desfaz".
+  - "Descartar" = `stopPreview()`; the model is untouched.
+  - Remove the `present(cur)` jump.
+- The pill menu `#mVar` (E:587–599) can get a footer link "Ver todos em caixas…" → `openDrawer(true,'fx')` with the current element selected.
+
+**Risks**:
+- (a) CR-12 mutation check. Gallery timers and observers must stop on drawer close **and** when the cover opens (`coverOpen()` guard).
+- (b) `stopPreview()` runs on any keydown and canvas pointerdown. Clicking "Usar" inside the drawer must not stop the preview first (drawer pointerdown only sets the zone, which is fine).
+- (c) The drawer is `min(560px,92vw)` wide. Box grid: 3 columns ≥520 px, 2 columns below; boxes are 16:9.
+- (d) Keyboard: boxes are `<button>`s. The editor ignores keys on focused controls (`onControl`, E:1085), so Enter and Space are native; Esc closes the drawer (E:1084).
+- (e) test2 uses `#modelsBody` only. Keep the Modelos tab untouched.
+
+### F1 status: shipped in step S1 (what actually exists now)
+- **One vocabulary** `AMRT.ANIMS = {in, loop, hover, tr}` in runtime.js, rows `[key, label, what it does, when to use, only?]` (`only`: `'ln'` = drawable strokes via the editor's `canDraw(el)`, `'tx'` = text/shape). The editor derives `ANIM_IN`/`ANIM_TIP` from it; the props chips (loop, hover), the slide-panel transition chips (now chips, not a seg), the `#mVar` entrance menu and the gallery all read it. A new family (e.g. F8 `emph`) only needs `AMRT.ANIMS.emph = [...]` + CSS: the gallery shows it (chip "Ênfase") and "Usar" writes `anim.emph`.
+- **New effects (runtime.css, prefixed `amx*` / `ampx*`)**: entradas `iris diag wipeup drop pop land flip grow words` ("Palavra a palavra" splits `.am-tx` text nodes into `.amx-w` spans **only in play stages** — `renderSlide(…,{play:true})` —, never in `.am-edit`, so saved HTML never changes); contínuos `beacon flow drift breathe wiggle beat`; mouse `spot sheen ring uline lean inzoom`; transições `navy iris up blur` (`.amp-deck:has(>.amp-slide.on[data-tr=…])` drives the outgoing slide). Totals: 17 entradas, 10 contínuos, 10 mouse, 7 transições.
+- **Loop/hover conflict fixed** (DTS §4.1): `amPulse`/`amFloat` and all new loops animate the individual `scale`/`translate`/`rotate` properties, so a hover `transform` composes (test S01-41). F8 may still move hover rules to `.am-hv`.
+- **`.am-hov`** simulates hover: every hover rule is `:is(:hover,.am-hov)` (same specificity as before). The F8 tour can reuse it. `AMRT.bindTilt(root)` is exported. Shapes' `.am-fxw` now carries the same corner radius as their SVG body (ellipse 50 %, pill, round, rect with radius), so Reflexo, Sinalizar, Contorno and Varrer luz follow the shape. FX components without their own `radius` copy the card's corner onto `.am-fxw` (inline radius of the first `.fx` child, or `FX_RAD` for `.fxh .fxg .fxcd .fxq .fx-panel`), so the rings follow the KPI counter, cards and quotes too.
+- **Gallery** (editor.js, "vitrine de efeitos"): items = ANIMS families + `AMRT.FX` (`!model` → "Componentes", one box per kind or per variant; `model` → "Modelos animados", one box per variant). `GX_SAMPLE` picks the sample (card, text, line, badge, photo, bar, trio). IntersectionObserver (root `#drawerBody`) renders a box the first time it is visible and adds `.gx-off` (CSS paused) when it leaves; one 200 ms ticker replays entrances, toggles hover/transition boxes; `gxRun()` stops it when the drawer closes or switches tab, `gxTick` pauses (`.gx-paused`) under the cover or a hidden tab. The old fx-tab chips (`data-anim`, apply + `present()`) are gone; component boxes keep `button[data-ins]` ("Inserir" quick insert, test.js).
+- **Provador** (`#gxProv`, sibling of `#drawerBody`): stage = clone of the current slide with the candidate on the selected compatible elements (others `in:'none'`), or the sample when nothing is selected; transitions play previous slide → current; components/models show the new element in place. "Usar este efeito" = **one** `commit()` (anim path, `slide.tr`, `insertFx(kind,null,null,variant)` or variant swap); "Descartar"/Esc/"‹ Vitrine" change nothing. `renderProps()` → `galSync()` keeps "Em uso" badges and the Provador in sync with selection, slide and undo/redo. Keys while it is open: KEYMAP §5 (`gxKeys`: nothing reaches the slide behind it). The label "Slide N · …" and "Repetir" sit in a caption bar under the stage (`.gp-cap`), never over the slide. Box footer: category chip on its own line, name up to 2 lines, "quando usar" up to 2 lines; component/model boxes carry the quick "Inserir" as a pill over the preview corner (only "+" at rest on hover devices). Dragging a box sends `amfx:kind[:variant]`, so a model-effect box inserts that variant. `'tx'` (Palavra a palavra) needs real text: a text element or a shape whose html is not empty.
+- **API**: `AMStudio.gallery = {open(fam, q), tryFx(id), use(), discard(), current(), items()}`; ids are `in:iris`, `tr:navy`, `cmp:counter`, `model:bars:grow`.
+- **Wide mode** "Ampliar a vitrine" (`#drawer.gxw`, remembered in `localStorage['amStudio.gxWide']`, hidden ≤760 px); the Provador goes side by side via a container query (≥720 px).
+- Suite: `test-s01.js` (52 checks, ~60 s; S01-45…51 cover the QA round 1 fixes).
+
+### F2 — Presentation history (IndexedDB) with reopen/edit
+**Facts (measured)**:
+- IndexedDB works on `file://` with ~1 GB quota in headless, and is **shared with every local HTML file** in Chromium, including exported decks.
+- `localStorage['amStudio.draft']` must keep its current semantics; cover tests pin them.
+
+**Extension points**:
+- New `history.js` (F0 injects it as `#am-history`, editor-only) exposing `window.AMHist`:
+  - `list()`, `get(id)`, `put(deck, json, reason)`, `remove(id)`, `snaps(id)`, `restoreSnap(id, ts)`;
+  - all Promise-based and wrapped in try/catch; it disables itself if `indexedDB.open` throws or errors.
+- DB `canteiro`, v1, stores:
+  - `meta` (keyPath `id`: `{id, title, slides, updated, created, firstSlide}`; small, used for the list);
+  - `decks` (keyPath `id`: `{id, json}`);
+  - `snaps` (autoIncrement, index `deck`, keep the last 20 per deck).
+- `newDeck()` E:92: add `id`, `created`.
+- `loadDeck()` E:171: if `!deck.id` assign one (templates, old files). **Do not write to history on load.**
+- `commit()` E:111–121: after the draft timer, `AMHist.touch(deck, now)` with its **own** ~1500 ms debounce, reusing the already computed `now` string. Skip when `isBlank()`. Flush on `visibilitychange:hidden`/`pagehide`.
+- `save()` E:1481: snapshot reason "Arquivo salvo".
+- UI, editor: `MENUS.file` E:1301–1306, add "Histórico de apresentações…" **after** "Abrir…" (keeps "Início (capa)" first; does not contain "abrir…").
+- UI, cover: a new view `hist` (`#cvHist`, like `#cvTpl`).
+  - Changes: `showView` V:482, `hints()` V:435, `back()` V:557, `window.AMCover.open('hist')` V:629.
+  - Entry point: a ghost button "Obras recentes" in `.cv-topr` (cover.css 24), icon-only below 640 px. **Not** a 7th `.cv-opt`. **Not** a rail on home (home must fit without scroll at 1024×768).
+  - Cards: render `firstSlide` with `RT.renderSlide(…,{play:false})` (same as `stageOf` V:353). Each shows title, slide count, "há 5 min", and the actions Abrir · Duplicar · Baixar .html · Excluir · Versões.
+  - "Abrir" goes through `guard()` V:461 then `load(d, msg)` then `close()`.
+- Search input inside the cover: guard the cover key handler V:558 so that when the target is an input/textarea only Esc and Tab are handled (today Backspace = back and `?` = manual).
+
+**Risks**:
+- (a) Cover pins (6 options, keys, fit, 390 px). Use a panel view with internal scroll (`overflow:auto` on the grid only).
+- (b) **Do not put the list in `#modal`** (Enter closes it, Tab skips inputs).
+- (c) `pageerror` catches unhandled rejections. Every IDB promise needs `.catch`.
+- (d) Large image decks: store the string; never re-stringify in the list path.
+- (e) A file reopened twice shares the same `id` (same entry, last write wins). "Duplicar" assigns a new id.
+- (f) Privacy note for the UI copy: any local HTML in the same browser can read the DB.
+- (g) Firefox gives each file:// file its own origin. Show "Histórico indisponível neste navegador" when the DB is empty and unavailable.
+
+### F2 status: shipped in step S2 (what actually exists now; differs from the proposal above where noted)
+- **Storage** (`history.js` → `<script id="am-history">`, editor only, never exported): `window.AMHist`. IndexedDB `canteiro` v1, **one** store `obras` (keyPath `id` = `deck.id`), record `{id, title, createdAt, updatedAt, slideCount, deck}` (`deck` = plain object). No `meta`/`decks`/`snaps` split and no versions in v1. Fallback `localStorage['canteiro.obras']` = `{v:1, obras:{id: record}}` when `indexedDB` is missing or `open` throws/errs (5 s timeout); records left there are migrated into IndexedDB on the next session that has it (newest wins). Neither available → `kind() === 'none'`: everything resolves `null`/`false`, the UI says "Histórico indisponível neste navegador".
+- **Contract**: every method returns a Promise that never rejects; writes go through one queue (`seq`), so rename/duplicate/delete/import/autosave never interleave. API: `ready` (Promise of the kind), `kind() available() count() metas() recent() has(id) pending()`, `list() get(id) refresh()`, `put(deck) touch(json) flush() saveNow()`, `rename(id,t) duplicate(id) remove(id)`, `exportJSON() importJSON(text)`, `on(fn)` (called with the metas after every change). Quota/write failures toast once per session (S.toast), never throw.
+- **Who writes**: `commit()` → `AMHist.touch(now)` (its own 1200 ms debounce; flushed on `pagehide`/`visibilitychange:hidden`, before the hist view renders and before switching obras); `loadDeck(d, msg, quiet, noHist)` → `put` (open file, drop, template, draft restore, "Retomar obra") unless `noHist` (opening **from** the acervo does not bump `updatedAt`); `save()` → `saveNow()`. A pristine deck (1 white empty slide, title "Nova apresentação") is not stored unless it is already in the acervo. **Deviation from the proposal above**: the task asked to store on open/template load, so loads do write.
+- **Editor API added** (`AMStudio`): `safeDeck` (validation used by import and by the cover before rendering/exporting stored decks), `exportDeck(d)` (= `exportHTML(d)`, which now accepts an optional deck), `slug`, `download(name, text, type)`, `openObras()`, `setTitle(t)` (renaming the open obra from the cover). Arquivo menu: "Minhas obras…" right after "Abrir…" (icon `obras`).
+- **Cover** (`cover.js/.css/.html`): top-right ghost button `#cvHistBtn` "Minhas obras (N)" (icon only ≤640 px, label kept for screen readers; key **M** on home), view `hist` (`#cvHist`): header + count, toolbar (search `#cvHistQ`, sort seg Recentes/Nome remembered in `localStorage['canteiro.obrasOrdem']`, "Importar acervo", "Exportar acervo (.json)"), grid `#cvHistGrid` of `.cv-hcard` (preview = `RT.renderSlide(safeDeck(slide 1))`, lazily via IntersectionObserver; hover/focus plays the entrance with `am-play`/`am-in` + `runFx`; "Aberta no editor" tag; meta "07 slides · editado há 5 min"; actions Abrir e editar · Duplicar · Renomear (inline input, F2 or double-click the name) · Baixar .html · Excluir (white A&M confirm `#cvConfirm`, orange "Excluir")), empty states (none yet / no search match / unavailable) and the honest note "Suas obras ficam salvas neste navegador; use Exportar acervo para levar a outro computador." The grid scrolls inside the panel (`.cv-main` gets `flex:1 1 0` in this view; `grid-auto-rows:max-content`, bottom fade `.cv-hmore`); on phones the page scrolls instead.
+- **Switching obras** from the hist view never asks for confirmation when the current work was just saved to the acervo (`saveNow()` resolved true); it falls back to the old `guard()` when the acervo is unavailable, and warns about a draft only when the draft is not in the acervo. `guard()` now calls `ask(title, desc, ok, fn)`, the same confirm used by "Excluir".
+- **Option 3** keeps its pinned behaviour (resume → draft) and, with no draft, becomes "Retomar obra" for the most recent obra ("7 slides · há 5 min"); when the acervo finishes loading after the cover opened, focus moves to option 3 only if nobody moved it.
+- **Opened from the editor** (`AMCover.openHist()`, Arquivo › Minhas obras…): Esc / "Voltar à obra" closes the cover (like the manual from Ajuda). `AMCover.open('hist')` opens the view without that return.
+- Import accepts the exported acervo, a list of records, one record or a bare deck; every deck passes `safeDeck`; merge by id, newest `updatedAt` wins; dates are preserved. Export file: `canteiro-acervo-AAAA-MM-DD.json` `{app, kind:'canteiro-acervo', v:1, exportedAt, count, obras}`.
+- Suite: `test-s02.js` (59 checks, ~70 s).
+
+### F3 — Icon Motion library
+**Recommended design.**
+- New kind `icon` in `rt-20-icons.js` / `rt-20-icons.css`:
+  - `model:false`;
+  - `cat: 'Ícones animados'` (appears automatically in the Efeitos tab);
+  - `variants` = motions so the existing variant UI (chips, `#fxArrow`, `#mVar`) is the motion picker. Motions: draw (traço se desenhando), pop, pulse, beat, float, spin, shake, bounce, wiggle, ring/ping.
+- `data: {name:'target', color:'#002A46', accent:'#F78C16', bg:'none'|'circle'|'square'|'ring', stroke:2}`.
+- Icons: a map `ICONS[name] = [d1, d2, …]` of 24×24 stroke paths, ~60 consulting icons (≈12 KB):
+  - target, trending-up/down, users, briefcase, building, chart-bar/pie/line, clock, calendar, flag, rocket, lightbulb, gear, shield, lock, globe, coins/R$;
+  - handshake, document, search, megaphone, leaf, bolt, star, check-circle, alert, refresh, cloud, database, cpu, link, layers, puzzle, map-pin, mail, chat, award, compass, scale, truck, factory, cart, money, team, idea, growth, risk, ai/sparkles.
+- Render `<path class="am-ln ic-p" pathLength="1" d="…" stroke="currentColor" fill="none">` so the **existing "Desenhar" entrance and `amDraw` work on icons**. Then generalise the 6 hard-coded "line/amlines only" checks (§5.2) to `canDraw(el)`.
+- Picker:
+  - ribbon "Ícones ▾" (§13) and Inserir › "Ícone animado ▸" (submenu: favourites + "Ver todos…");
+  - a popover grid (`.menu.icmenu`, 6 columns, search box). **Not** in `#modal`.
+- Props: a new field type `'icon'` rendered as a mini grid with `data-set="data.name"` (renderProps E:350–357 adds a branch; the click handler already supports `data-set`).
+
+**Risks**:
+- `DATA_TOKENS` (E:134) lacks `bg`, `accent`, `name`. Add them so pasted or opened values are validated. Escape `name` (a lookup key).
+- Licence: hand-drawn icons, or keep the upstream licence header (ISC/MIT) in the CSS/JS comment. The comment must not contain `onclick`.
+- Infinite loops are cut by reduced motion (fine).
+- Keep icon SVG `overflow:visible` for pop/beat so the scale does not clip.
+
+### F3 status: shipped in step S3 (what actually exists now; follows CATALOG §A, differences noted)
+- **Runtime** `rt-20-icons.js` / `rt-20-icons.css` (exported with every deck): the CATALOG §A.7 data (54 icons, 8 groups, 7 morph glyphs/pairs) **inside** the IIFE (no globals), `FX.icon` and `FX.iconmorph` (`cat:'Ícones animados'`, `model:false`), 17 motions as `variants` (`auto` is labelled **“Padrão do ícone”**, not “Movimento do ícone”, so the chip, the `#fxArrow` pill and the section title don't repeat each other), 8 triggers (`AMRT.IC_TRIGS`). Exposed for the editor: `AMRT.ICONS`, `ICON_GROUPS`, `ICON_MORPHS`, `IC_MO`, `IC_TRIGS`, `iconFind(k)` (own-property lookup), `iconSVG(k, cls)` (static SVG, accent strokes `.ic-ax`), `bindIcons(root)`. FX definitions carry `gal` (`'icon'` = one component box plus one box per motion in the gallery family “Ícones”; `'one'` = a single component box) and `vtitle` (props section title). Keyframes `ic*` only.
+- **Player**: `bindIcons` is registered through `AMRT.hooks.player` (runtime.js unchanged); hover/click play the motion once (`.ic-go` for `data-ms`), the click trigger and the morph `stopPropagation` (18 % zones never advance). The editor stage stays static; `previewEl` and the Provador force `trig:'in-loop'` / morph `loop` **only on the clone** so the motion is visible without hovering.
+- **Differences from §A.5**: strokes use `--is` (falls back to `--ic`): white strokes on an ice plate (`soft`/`circle`) render navy and the navy plate forces white strokes, while the label keeps `--ic` (the prototype made the label white on the navy plate, invisible on white slides). White accent on an ice plate falls back to orange. The label font shrinks so its longest word fits the icon width (`overflow-wrap:anywhere` as last resort).
+- **Editor** (editor.js / editor.html): `isStroke(el)` (lines, Linhas A&M) vs `canDraw(el)` (+ `icon`, `iconmorph`): “Desenhar” is offered for icons, “Fluxo contínuo” is not; `onlyMsg(it)` adapts the Provador message. `mkFx(…, dark)` sets `data.color='#FFFFFF'` for icons. `insertFx(kind, style, at, variant, data)` (5th arg optional, merged before the single commit). Field type `'icon'` (`iconField`: search + 6-column grid with `data-set`, current icon centred, “Ver todos os ícones, com prévia” → picker). For `gal:'icon'` the Conteúdo section comes before the motion chips; Animação shows “Velocidade do traço” (Rápido 500 / Normal 900 / Lento 1600 → `anim.dur`) when the entrance is Desenhar. `elName` = “Ícone · Alvo”.
+- **Picker** `#icMenu.menu.icmenu` (popover; `closeOld()` closes it; the generic `.menu button` click handler skips it): search (accent-free, every word, also matches the theme name), 10 chips with counts (Todos, 8 themes, Transformações), grouped grid when unfiltered, hover/focus preview (`.ic-go`, morph shows state B), footer readout, roving tabindex, drag (`amfx:icon::<k>` / `amfx:iconmorph::<pair>`; the canvas drop reads the 3rd field via `dropData`). Keys: KEYMAP §5. Entry points: ribbon `#bIcons` (`data-menu="icMenu"`), Inserir › “Ícone animado ▸” (8 favourites with their glyph + “Ver todos os ícones…”), props button. API: `AMStudio.icons = {open(opts), close(), isOpen(), favorites}`.
+- **Gallery**: family `icon` (“Ícones”, 18 boxes = `auto` + 17, sample icon per motion in `IC_SAMPLE`, e.g. tick → clock); `cmp` keeps exactly one box per non-model kind (S01-05). Provador: selected icons → variant swap (message names the real trigger); nothing selected → inserts the sample icon with that motion.
+- **Ribbon consolidation (§13 applied)**: “Linha” + “Seta” → split “Seta” `[data-add=arrow]` + ▾ `[data-menu=mLine]` (`#mLine`: Linha · Seta · Seta dupla, `data-line`; dashed options wait for F4's dash fix); “Ícones ▾” after Imagem; “Marca A&M” → “Marca” ≤1420; edit group icon-only **≤1600** (not 1420: with full labels the ribbon needs ~1540 px). Measured: no overflow at 1180–1920 (baseline overflowed at 1180; 1024 still overflows, by 115 px instead of 249). The button is hidden when the runtime has no icons (S00's temp build).
+- Suite: `test-s03.js` (46 checks, ~50 s).
+
+### F4 — More lines, arrows, connectors, rectangles and shapes
+**Extension points**:
+- Shapes:
+  - `shapeBody(el,w,h)` R:13–27 adds cases: snip, callout, hexagon, pentagon (home plate), octagon, plus, star, cylinder, document, frame, bracket, double-chevron, tag, rounded-top tab;
+  - `SHAPES` E:465 feeds `#shapeGrid` E:603, `shapeItems()` E:1286 and the props "Tipo" select E:367. **Keep `rect` first** (test-core "Retângulo") and `chevron` (test.js);
+  - `mkShape` E:36–40 sizes the shape (`sq` list) and defaults the fill;
+  - text inset per shape (callout tail, triangle) via an inset map in `content()` R:362.
+- Lines/connectors:
+  - `lineSVG(el)` R:33–46: `el.curve` = straight | elbow | curve.
+    - elbow: `M x1 y1 H mx V y2 H x2`;
+    - curve: `M x1 y1 C mx y1, mx y2, x2 y2`;
+    - both stay inside `lineBox`.
+  - Heads: `headS`/`headE` = arrow | open | dot | bar | diamond (keep the booleans `headStart`/`headEnd` for old decks).
+  - Dash style `dashS` = dash | dot.
+  - The arrowhead angle must use the **final segment** (elbow: horizontal; curve: tangent `x2 − mx`).
+- **Keep `.am-hit` identical to the drawn path** and `.am-ln pathLength="1"`. Tests IX-04 (click on the stroke selects it, a click far from it selects the shape behind, double-click in the empty box creates text) and the "draw" entrance depend on this.
+- `mkLine` E:41.
+- Line props E:360–362: chips for the style and the head type.
+- `safeEl` E:142: add a token allow-list for `curve|headS|headE|dashS`.
+- `drawSel` p1/p2 handles E:204–205 and `startResize` E:734–737 are unchanged (endpoint-based).
+- Ribbon: turn the "Seta" button into a **split button**:
+  - `button.rb[data-add=arrow]` "↗ Seta" (test.js clicks it);
+  - `button.rb.rb-car[data-menu=mLine]` "▾" with the gallery of lines/connectors;
+  - remove the separate "Linha" button (no test uses `[data-add=line]`).
+- Inserir menu: replace "Linha"/"Seta" with "Linhas e setas ▸" (avoid "forma").
+- Optional phase 2, connectors that follow shapes: `el.from/to = {id, side}`. Recompute in `startMove.mv` E:689–703, `startResize.mv` E:732, `nudge` E:1021, `alignTo`/`distribute` (via `act` E:519–520), and remap ids in `dupSel`/paste/`freshSlide`. High risk; only after the rest is green.
+
+**Risks**: test-cover `slideCheck` measures `svg path` bounds. A callout tail or star outside the element box is flagged when used in templates.
+
+### F4 status: shipped in step S4 (what actually exists now; follows CATALOG §B, differences noted)
+- **Dashed-line bug fixed in `runtime.js` `lineSVG`** (base, used when no `rt-10` is loaded): a dashed line's visible stroke is `.am-lnd` (no `pathLength`, `stroke-dasharray` in real units, `--dp` = one pattern period); “Desenhar” animates a `<mask>` whose path is the `.am-ln` (`pathLength=1`); mask id from `util.nid('lm')`. Solid lines keep exactly the old markup. `runtime.css`: `mask .am-ln` stays full under “Fluxo contínuo”, and the flow loop moves the dashes themselves (`amxDash` on `.am-lnd`); reduced motion stops `.am-lnd` too.
+- **`rt-10-shapes.js`** (no `.css`): replaces `AMRT.lineSVG` (routes `curve` straight/elbow/curve, `bend` 0.05–0.95 clamped at render, 4 `dashS` styles in multiples of the stroke width, 5 head kinds per end via `headS`/`headE`; the old booleans still mean “arrow”; a valid `headS`/`headE` wins), wraps `AMRT.shapeBody` (15 new shapes, then `cardLook` for rect/round/pill) and sets `AMRT.shapeInset` (text inset per shape, applied by `content()` in runtime.js) and `AMRT.shapeText(el, w, h, html)` (hook in `content()`; for `look:'header'` the title gets its own navy background edge to edge, clipped to the card radius, min 26 % of the height, so the band grows with the title). Exposes `SHAPES_X`, `LOOKS`, `LINE_ROUTES`, `LINE_DASHES`, `LINE_HEADS`, `lineBendPt(el)`. Every clip/mask/filter/gradient id comes from `util.nid`. Old decks render pixel-identical (test-s04 compares against the pre-S4 code).
+- **Looks: 8, not 6.** CATALOG's six (`flat`, `outline`, `accent`, `topbar`, `header`, `gradient`) plus `lift` (“Elevado”: white card with its own SVG drop shadow) and `ice` (“Gelo”: white→ice translucent gradient with an inner light edge). `EL_TOKENS.look` gained both. `outline`/`lift`/`ice` only replace the stroke when the element has none (`strokeW` 0), so a user stroke survives.
+- **Editor**: `SHAPES` = 9 base + `RT.SHAPES_X` (labels in pt-BR; `rect` first; the block arrow is “Seta bloco dupla” so it never clashes with the line “Seta dupla”); `SHAPE_GROUPS` (Retângulos e cards · Básicas · Setas · Fluxo · Chaves); `LOOKS`; `mkShape` sizes per CATALOG (brackets/braces: `fill:'none'`, stroke navy or white, `strokeW:3`, text navy on light slides); `mkCard(look, dark)` + `applyLook(el, k)` (keeps the text legible: navy on light looks, white on dark ones; `header` makes the card white with a hairline and puts the title on top). Ribbon “Formas ▾” = `#mShape.gmenu` grouped gallery (6 columns; small neighbouring groups share a row; 24 shapes + 7 ready cards `data-look`). “Seta ▾” (`#mLine`) = `LINE_PRESETS` (8 lines, thumbnails drawn by the runtime, `data-line`). Inserir: “Forma ▸” is a two-column `xmenu.xcols` (items `cls` on the array; ← → ↑ ↓ follow the grid) with “Cards com estilo ▸”; “Linha” + “Seta” became “Linhas e setas ▸” (`xwide`).
+- **Props**: line section `lineSec(el)` (Traçado seg, “Dobra do cotovelo” range, Tracejado seg, Ponta no início / no fim segs, Inverter) through `act('ln-…')` → `lineAct` (one commit; the boolean is always written with the kind; arrow/plain dash don't write `headS`/`dashS`). Shape section: grouped Tipo select, “Estilo do card” tiles (`act('look-…')`), brackets/braces show “Cor do traço” + “Espessura do traço” only; switching to/from them moves the colour between fill and stroke (`shapeSwitch`). Canvas: elbow lines get a third handle `.hdl.bd[data-h=bend]` (drag = one commit).
+- **Pinned assertion changed**: S03-08 compared the whole `#mLine` list with `Linha|Seta|Seta dupla`; it now checks those as the first three (the menu has 8 presets by design).
+- **QA round 2 fixes**: ring (`Anel`) = band of 15 % of the smaller side, text inset to the hole (`INSET.ring='15%'`; the band was 20 %) and the text takes the slide text colour (`mkShape`: navy on light, white on dark; `shapeSwitch`: to ring = slide colour, away from ring = `inkOn`). Star text inset `28% 17% 30% 17%` (the arms band) and `PADX` (star, ring: 4 px side padding via `shapeText`), so common words never break mid-word at the default size. `mkShape` on a dark slide fills with steel `#43698F` (was `#13315C`, nearly invisible on navy); `mkCard` keeps `#13315C` on dark (tone-on-tone cards). Texto › vertical alignment is disabled (top marked) for `look:'header'` (`vaSeg`). Player bar ≤ 480 px: prev/next show only the arrow (`.amp-bw` words hidden, `aria-label` kept) and the deck title hides, so the A&M wordmark fits.
+- Suite: `test-s04.js` (50 checks, ~35 s).
+
+### F5 — More charts + "Ampliar gráfico"
+**Charts.** New models in `rt-30-charts.js/.css` with `cat:'Gráficos'` (already in the drawer order):
+- colunas agrupadas, barras horizontais (ranking), empilhadas / 100 %, ponte (waterfall), área, combo barra+linha, dispersão/bolhas, funil, pizza, radar, bullet (meta vs real), Pareto, mapa de calor (tabela), sparkline KPI.
+
+Multi-series input: `'rows:t|*v'` (label | values…) plus a `series` `'lines'` field. Follow `bars`/`linechart`:
+- SVG `viewBox` = current w,h;
+- values with `fmt` in pt-BR;
+- highlight in orange only;
+- `E()` for category labels.
+
+**Ampliar.** Player-level. See TMG-FEATURES §5.4 (`.amp-zb` button on hover over zoomable elements, `.amp-zm` overlay, key **Z**, ←/→ between zoomables, Esc).
+- Zoomable = `type==='fx'` with cat in Gráficos | Indicadores | Matrizes | Riscos | Evolução | SmartArt, unless `el.zoom === false`.
+- Re-render the element in the overlay through a fresh `.am-stage` (`container-type:size`) sized to the viewport, so `cqw` text scales. Do not CSS-scale a screenshot.
+- Optional editor entry: element context menu "Ampliar" (no "alinhar" in the label).
+
+**Risks**:
+- Player bar width at 390 px (today it exactly fits: `scrollWidth 390`, measured).
+- The zoom overlay must close on every `go()`.
+- The click zones (right/left 18 %) must ignore clicks on `.amp-zb`. It lives inside the deck, so stop propagation, or check `e.target.closest('.amp-zb')` before the zone logic (R:472).
+
+### F5 status: shipped in step S5 (what actually exists now; follows CATALOG §C and TMG-FEATURES §5.4, differences noted)
+- **Charts** `rt-30-charts.js` / `rt-30-charts.css` (exported with every deck): `columns` (Agrupadas / Empilhadas / 100 %, `mode`), `hbars` (ranking), `waterfall`, `bullet` (cat Indicadores), `harvey` (cat Matrizes), `funnel`, `radar` — all `model:true, chart:true`, 3–4 variants each (the prototype's), `anim:{in:'fade'}`, fields through the existing codecs (`rows:t|*v`, `rows:t|v:n|k`, `lines`, `sel:`, `number`). Every chart has a `style` field (`light` / `dark`): on a white panel the series are navy → steel → light steel → orange; with `style:'dark'` (no panel on a navy slide) they become white → light steel → ice → orange and text/grid turn white/translucent. Max 4 series (the 5th is ignored), ≤ 3 on the radar; waterfall negatives are a hatched light-steel `<pattern>` with a `util.nid` id; totals use the typed value or the running sum when 0; the axis always starts at min(0, lowest level). Keyframes are prefixed `ch*`, `wf*`, `hv*`, `rd*`; the rest reuse `amUp/amFade/amBar/amLeft/amDraw/amSeg/amPop`. `AMRT.CHARTS` lists the 11 chart kinds in the order of the editor menu.
+- **Editor**: ribbon “Gráficos ▾” `#bCharts` (`data-menu="mChart"`, `.menu.chmenu`, 3 groups: Colunas e barras · Linhas e composição · Indicadores e comparativos; `data-fx` buttons go through the generic menu handler, then toast + `previewEl`), Inserir › “Gráfico ▸” (`chartItems`, same groups, `raw` icons from `CH_IC`), hidden when the runtime has no `AMRT.CHARTS`. Label shortens with `.lbs` ≤ 1420 and becomes icon-only (caret hidden) ≤ 1240, so the ribbon fits at 1180–1920 (measured: 1180 scrollWidth = clientWidth; 1280 has ~52 px free). `startMove up` cycles `data-cyc` cells with the model's own `data-cyc-seq` (Harvey balls 0 → 4, numbers) and still R → A → C → I → – without it. `safeEl` keeps `el.zoom` only as a boolean. `HK` explains Z in the note of “Apresentar do início” (no new row: test-cover pins 17 manual rows and the manual must fit at 1280×720). `NOTEXT` += `bands`, `k`.
+- **Ampliar (player, runtime.js + runtime.css; editor present mode and exported file)**: `AMRT.zoomables(slide)` = models (`FX[kind].model`) and images ≥ 160×90, minus `zoom:false`, plus components with `zoom:true`, sorted by area; `.amp-zb` (⤢, `visibility:hidden` at rest, so never a Tab stop) follows the zoomable under the pointer (`pointermove` on `.amp-deck`, hides 450 ms after leaving / 300 ms after leaving the button); double-click, **Z** (element under the pointer, else the largest) and the bar button `[data-a=zoom]` (hidden on slides without zoomables) open `.amp-zm` (role dialog): the element is re-rendered alone with `renderSlide({bg, els:[el]}, {play:true})` minus `am-pre` (final state; `runFx` replays counters/cycles) inside a stage of `1280k × 720k` px clipped to `el.w×k × el.h×k` (k ≤ 4, fits 94 vw × 92 vh), so cqw text is crisp at k×; header = `AMRT.slideTitle(slide)` + “n / N”, footer = element name + hint; dark box when the slide bg is dark. Keys while open: Esc closes, ← → cycle, Tab/Shift+Tab trap the 3 buttons, Enter/Space on a focused button act natively, everything else is swallowed; focus goes to ✕ and returns to the previous element (or blurs) on close. `go()` always closes it and hides the button; `destroy()` too. Click zones (18 %) ignore clicks whose target is inside a zoomable `.am-el` or the ⤢ button. KEYMAP rules 4 and 5 are now implemented in `key()`/`mousedown` (Enter/Space on a focused button act on it; bar/zoom buttons `preventDefault` on mousedown, so a mouse click never steals Space). Player handle: `hd.zoom = {open(indexOrId), close(), isOpen(), list(), index()}`; `AMRT` exports `slideTitle`, `zoomables`, `plain`, `isDark`. Props panel: section “Ampliar na apresentação” (toggle `zoom` + “Ver ampliado na apresentação” = `present(cur)` + `player.zoom.open(el.id)`) for models and images.
+- **Deviation**: ARCH proposed “zoomable by `cat`”; shipped rule is “any `model:true` kind or image” (covers Gráficos/Indicadores/Matrizes/Riscos/Evolução/Cards and future SmartArt/Estratégia/Processos automatically) with the per-element `zoom` override.
+- Suite: `test-s05.js` (36 checks, ~70 s).
+
+### F6 — SmartArt
+New models in `rt-40-smartart.js/.css`, `cat:'SmartArt'`:
+- lista de blocos (vertical/horizontal), ciclo (3–6 nós), hierarquia/organograma, pirâmide, funil, degraus, Venn (2–3), radial (hub & spoke), alvo concêntrico, prós × contras (balança), lista com ícones (uses F3 `ICONS`), passos numerados.
+
+Extension points:
+- **Add `'SmartArt'` to `buildModels` `order[]` E:1111, or the cards never show.**
+- Hierarchy input: the `'lines'` codec trims indentation (E:412). Use `'rows:t|p'` (name | parent) or add a codec `'tree'` that keeps leading spaces/`-`, in renderProps E:352 and the input handler E:412–413.
+- Inserir › "SmartArt ▸" lists kinds → `insertFx(kind)`.
+
+Risks:
+- `kw` collisions in search (process, timeline and matrix already exist). Give each a distinct `name`.
+- On dark slides models get the white panel (E:567). Decide per kind.
+
+### F6 status: shipped in step S6 (what actually exists now; follows CATALOG §D, differences noted)
+- **Runtime** `rt-40-smartart.js` / `rt-40-smartart.css` (exported with every deck): **one kind `smart`** (`model:true`, `cat:'SmartArt'`, 1000×420, `anim:{in:'fade'}`), 12 layouts in `AMRT.SMART_LAYOUTS` = `[key, label, group, hint, min, max]` (process, chevron, stepup · cycle, hub, venn · org, blocks, matrix · pyramid, funnel, target), 4 variants (`one` · `level` · `all` · `focus` = `data-cycle="g"` over the level-0 groups, `data-g` on every node for the future dock "Passo"). Data `{layout, items:[{t, lv}]}`; `fields` = `['layout','Layout','smartlayout']` + `['items', …, 'outline']`. Exposed: `smartParse(textOrArray)` (Tab or 2 spaces = 1 level, markers `- • *` ignored, blank lines dropped, **a level never jumps more than one step**, lv clamped 0–2, text ≤ 200 chars, ≤ 60 items; arrays keep the original index in `.i` so `data-e="items.N.t"` always points at the stored item), `smartText(items)`, `smartFind(key)`, `smartIcon(key, cls)` (48×32 thumbnail), `smartSample(key)` (pt-BR example items per layout). `FX.smart.norm(data)` is a **new generic FX hook called by `safeEl`** (`F.norm(o.data)`, after the DATA_TOKENS/variant checks): items become `[{t, lv}]` and an unknown layout falls back to `process`, so old string data and hostile JSON never reach markup unnormalised. Geometry: every node is `% of w/h`, font size `CQ(fs)` where `fs` is fitted per layout to the narrowest box (longest word of the titles, number of bullets; floor 55 % of the base so a rare long word wraps instead of the font vanishing; ×0.9 inside the white panel), ellipse cycle with arcs that start/end at the pill edges, tidy-tree hierarchy in pre-order (boss before team, boxes clamped inside the element), hub spokes on an ellipse with rays cut at the box edges, Venn 2–3 with `=` intersection pill, concentric target with leader lines. Per-layout caps (process 8, chevron 7, stepup 8, cycle 10, hub 1+10, venn 3, org 20 boxes, blocks 8, matrix 4, pyramid/funnel 8, target 6); extra items stay in the text pane. No items → `.sa-empty` reminder shown only in `.am-edit` stages. No new keyframes (amRise/amFade/amZoom/amDraw); classes `.fxsa`, `.sal-<layout>`, `.sa-*`.
+- **Editor**: field type `'outline'` = `<textarea.outl data-codec="outline">` (JetBrains Mono, `smartText` ↔ `smartParse`, live `input`, commit on `change`); a `#props` keydown listener gives it **Tab / Shift+Tab** (indent/outdent the lines touched by the selection, 2 spaces, max level 2) and **Enter** (keeps the indentation), via `execCommand('insertText')` so the field's native undo works; the keys never reach the editor shortcuts. Field type `'smartlayout'` = `smartLayoutField()`: `.lkg.salg` grid of the 12 thumbnails (`data-set="data.layout"`, so switching keeps the items and is one undo step) + the layout hint with its limits. `elName` = "SmartArt · Ciclo". Entry points: **Inserir › SmartArt ▸** (`smartItems`, `xcols xsa`, 4 group headers, thumbnails as `raw`), **"Gráficos ▾" footer entry** "SmartArt · diagramas por texto" (`[data-open=mSmart]`, no `.mh`/`data-fx`/`.mi-ic`, so S05-04 still counts 11/3/11) that swaps to the visual picker **`#mSmart`** (`.menu.gmenu.smenu`, 4 groups × 3 tiles, `data-smart`, draggable `amfx:smart::<layout>`), drawer category **SmartArt** (already in `buildModels` order), gallery boxes `model:smart:<variant>`. `insertSmart(k)` seeds `smartSeed(k)` = layout + `smartSample(k)`; `dropData` does the same for drops. API: `AMStudio.smart = {insert(layout), layouts(), open()}`. No new ribbon button (1180 px budget, S05-22); `#bCharts` title mentions SmartArt.
+- **QA round 1 fixes (S6 fixer)**: every box that reaches markup goes through `box(x, y, w, h)` inside `html()` (width/height clamped to 0…element, position clamped inside it; `.sa-n`, `.sa-sub`, `.sa-bt`) and `w/h` are clamped **before** `fs` is computed, so no layout can write `width:-10%` or `NaN`; the target's column is `lx = min(1.1h, .55w)` with `cx = lx/2.2`, `R = min(.48h, .436·lx)` (identical at 1000×420, shrinks in square/narrow boxes). The Venn intersection pill renders the raw text without the marker but carries `data-ep="= "`, which `startFxEdit` puts back on commit. `FX.smart.label(el)` + `AMRT.fxLabel` make the props header and the zoom footer agree (“SmartArt · Processo”). `[data-e]` spans inside `b`/`li` are `display:block` so a double-click on the blank part of a wrapped line still edits in place; the editor's double-click fallback no longer select-alls a `<textarea>`. `clean()` drops items whose `t` is an object/array/boolean (never “[object Object]”). Suite +5 checks (S06-23…27).
+- **Deviation from CATALOG §D**: the field is called `'outline'` (as decided) but the layout field is a thumbnail grid (`'smartlayout'`), not a `<select>`; `data.items` is stored as `[{t, lv}]` from the start (default data is already an array). Zoomable like every model (F5 rule).
+- Suite: `test-s06.js` (28 checks, ~3 min): registry, codec, drawer, picker, Inserir, panel, layout switch + undo, text pane keys, commit on blur, in-place edit, limits + hostile data, 12 layouts × white/navy × 100 %/50 % with `stageCheck` and palette check, 4 variants, navy panel, drag/drop, gallery, presentation + Ampliar, safeEl/norm, export (CR-04) and reopen, ribbon budget.
+
+### F7 — More consulting models
+New models in `rt-50-models.js/.css`:
+- PDCA;
+- Gantt/cronograma (`rows: tarefa | início | fim | marco?`; accepts `S1..S52`, `jan/26`, `dd/mm`), with a today/"hoje" marker and milestones as diamonds;
+- roadmap por ondas/swimlanes;
+- 5 Forças de Porter, Cadeia de valor, 7S, BCG, Ansoff;
+- matriz de stakeholders (poder × interesse; reuse the matrix renderer);
+- Balanced Scorecard, Business Model Canvas, Ishikawa, árvore de problemas/MECE, árvore de KPIs, OKRs, SIPOC, 5W2H, AS-IS × TO-BE, curva de mudança.
+
+Each gets ≥2 variants, a `tip`, `kw`, and a default size ≤ 1172×470 (fits the content area y=190–650 under `head()` of the templates).
+
+Risks:
+- Do **not** add cover templates beyond the 6 pinned (test-cover `EXPECT`; the 6th, “Apresentação institucional A&M”, is the only one that depends on an extension — ed-45).
+- Drawer performance with ~60 model cards: 21 cards re-render in 12 ms, so ~60 cost ~35 ms every 5.2 s plus RAF counters. Use an `IntersectionObserver` to play only visible cards. CR-12 still applies.
+- Run `slideCheck` on each new model at its default size, on white and on navy.
+
+### F7 status: shipped in step S7 — part A (what actually exists now; follows CATALOG §E, differences noted)
+- **Runtime** `rt-models2.js` / `rt-models2.css` (exported with every deck; sorted after `rt-40-smartart` by `assemble.py`): seven `model:true` kinds — `pdca` (Processos, 1040×460; variants cycle · spin · ramp · focus; data `names`, `letters`, `p d c a` lines, `center`), `gantt` (Evolução, 1160×440; bars · phase · today · critical; `periods` lines, `tasks` **`rows:t|s|e|k`** kept as text, `today` text), `asistobe` (Evolução, 1100×420; reveal · rows · flip · focus; `rows:t|a|b`, `from`, `to`), `porter` (Estratégia, 1000×470; converge · pressure · focus; `forces` `rows:t|n:n|x`, `center`, `cn`), `roadmap` (Evolução, 1160×440; lanes · waves · path · focus; `cols`, `lanes` lines, `items` `rows:t|l:n|s:n|e:n|k`), `issuetree` (Estratégia, 1100×440; branch · path · grow · focus; `items` `[{t, lv 0–3, v?, hl?}]`, field type **`outline:3`**), `bcg` (Estratégia, **900×470** instead of CATALOG's 900×500 so it fits the F7 ≤ 1172×470 rule; drop · grow · move · quadrants; `items` `rows:t|x:n|y:n|s:n|tx:n|ty:n`, `q` lines, `xlab`, `ylab`). Every text goes through `esc()`/`E()` (double-click edits in place), every number through `num()` + clamp, the row type `k` is reduced to one letter before it becomes a class, lists/rows keep their original index (edit paths such as `tasks.3.t` always hit the stored row; invalid entries render empty instead of shifting). With `data.panel === 'white'` `dims()` scales `w/h` by 0.9 (the `.fx-pin` inset) so fonts shrink with the panel. Keyframes are prefixed `m7*` (`m7Spin m7Roll m7Chock m7Sweep m7Fut m7Crit m7Ms m7Pulse m7Wave m7Light m7MsIn m7Hot m7Ring m7Ghost m7WipeR m7WipeL`); dashed arrows/connectors are revealed with a `clip-path` wipe (`m7WipeR/L`), never with `amDraw` (which would turn them solid).
+- **Gantt positions** (`AMRT.ganttPos(v, periods, end)`): a number (comma or dot), a period label (end = index + 1), `S5` / `semana 2`, `jan/26` / `março` (3-letter prefix of a label, optional 2-digit year) or `dd/mm[/aa]` (day inside the month whose label matches); `null` when unknown (start falls back to 0, end to start). `today` accepts the same forms; empty hides the line. Critical bars are `#13406A` at rest and turn orange only in the `critical` variant; the "hoje" pill sits in a 1.6 em padding below the rows.
+- **Issue tree codec** (`AMRT.treeParse(text|array)` / `AMRT.treeText(items)`): Tab or 2 spaces = one level, max level 3, a level never jumps more than one step, markers `- • *` ignored, ` = valor` → `v` (mono, right-aligned, editable as `items.N.v`), `[*]` suffix → `hl` (path variant). The tree is a transposed tidy tree (x = depth, y = leaf slots, elbow connectors), ≤ 40 nodes; the root never gets `data-g` (stays lit in `focus`); `.it-hl` on the root class only when some node is marked, so the `path` variant never dims everything. Hooks `FX.issuetree.norm` (safeEl), `outlineParse`, `outlineText`.
+- **Editor (3 small edits, backward compatible)**: field type `'outline:N'` renders the same `.outl` textarea with `data-maxlv="N"` (Tab/Shift+Tab indent up to N; the hint says "até N"); `renderProps` uses `FD.outlineText(v)` when the model defines it (else `RT.smartText`); the props `input` handler uses the selected model's `FX.outlineParse(text)` when defined (else `RT.smartParse`). SmartArt is untouched (max level 2 as before).
+- **Drawer**: categories `Estratégia` and `Processos` were already in `buildModels` `order[]`; no new ribbon button, no new menu entry (models live in the Biblioteca de modelos and in the effects gallery as `model:<kind>:<variant>`). 27 model cards now re-render every 5.2 s in `playPreviews` (still well under the CR-12 budget; the IntersectionObserver suggested above is not implemented yet).
+- Suite: `test-s07.js` (32 checks, ≈4 min; S07-27…31 cover the QA round 1 fixes): registry, `ganttPos`, tree codec, drawer categories + 8 searches, insert + props codecs for the 7 kinds, Gantt render/labels/variants/in-place edit, PDCA, AS-IS→TO-BE, Porter, roadmap, tree and BCG pieces + every variant's animation names and delays, `stageCheck` (test-cover's `slideCheck`) for 7 kinds × white/navy × 100 %/50 % + palette check, hostile `html()` data, gallery, navy panel + resize, presentation + Ampliar, safeEl/norm on open, export (CR-04) and reopen, outline:3 Tab + in-place title/value edit, ribbon budget. Screenshots `shots/s07-*.png`.
+- **QA round 1 fixes (S7 fixer)**: text-fit helpers in `rt-models2.js` — `nlines(chars, em, fs, width, max)` estimates wrapped lines (Inter ≈ .53 em/char, Roboto Condensed ≈ .45, uppercase ≈ .5; a line ≤ 92 % full never wraps, beyond that 12 % slack for word breaks; calibrated with `qa/S7/f-calib.js`) and `shrink(fs, floor, over)` lowers one font factor in .04 steps until `over()` stops reporting overflow. **Porter** budgets each card (padding 1 em + name × 1.265 + dots .85 + comment × 1.08) against `bh·h`, shrinks the four cards together (floor .62, inline `font-size:<k>em`) and what still does not fit ends in an ellipsis through `-webkit-line-clamp` driven by `--nl` (name) / `--cl` (comment lines that still fit); `.am-el.editing .pt-f` lifts the clamp while editing; the centre text takes up to 80 chars (3-line clamp) and `.pt-f/.pt-c` wrap unbroken strings (`overflow-wrap:anywhere`) so nothing is ever cut at the card edge. **PDCA** keeps every list inside a 46 % band (`.pd-l{max-height:46%;overflow:hidden}`, top lists at `top:2%`, bottom at `bottom:2%`) and shrinks the four lists together (floor .6) until the fullest fits; the tip now promises 5 short actions (≈30 chars). **BCG** labels pick a slot: preferred side (opposite the target arrow) centred/top/bottom, then the other side, then above (`.u`) / below (`.d`); the first slot with no collision against bubbles, ghost bubbles (`move`), quadrant-name corners, labels already placed or the plot edge wins (least conflict area otherwise); a fully empty row (`{}` from a null item) keeps its index but draws no bubble. **Hand-edited files**: `normer(lists, rows)` gives `pdca gantt asistobe porter roadmap bcg` a `norm` hook (runs in `safeEl`) that turns list fields stored as text (`a;b`, one per line) into arrays and row fields stored as text (`nome | início | fim | tipo`, `prow`) into objects, so in-place edit paths always hit an array; `startFxEdit` additionally wraps `setPath` in try/catch and toasts instead of leaving the span stuck in edit mode. Tips state the practical limits (tree ≤ 20 nodes, Gantt ≤ 14 tasks → Ampliar (Z); Porter ≈ 60-char comments; PDCA 5 short actions).
+- Still per CATALOG §E but **not** in this step (part B): stakeholders, value chain, BMC, journey, OKRs, BSC, change curve, 7S, Ishikawa and the cheap presets (Ansoff, Eisenhower, Kano, SCR, Minto, Iceberg, 5W2H, SIPOC).
+
+### F7 status: shipped in step S7b — part B (what actually exists now; follows CATALOG §E.3/§E.4, differences noted)
+- **Runtime** `rt-models3.js` / `rt-models3.css` (exported with every deck; sorted after `rt-models2` by `assemble.py`; keyframes prefixed `m8*`: `m8WipeR m8WipeL m8Ghost m8Flow m8Walk m8Win m8Pain m8Trail m8Ring`): seven `model:true` kinds — `stake` (Estratégia, 900×470; drop · move · quadrants · focus; `items` `rows:t|x:n|y:n|st|tx:n|ty:n` with stance `a` navy / `n` white + navy ring / `r` white + orange ring + “!”, `q` lines, `xlab`, `ylab`; legend; label placement reuses the BCG slot search, `data-g` = quadrant), `valuechain` (Processos, 1100×420; build · flow · focus; `support`/`primary` lines, `hl` positions 1–n, `notes` `rows:n:n|x`, `margin`; the classic Porter arrow: support bands with slanted ends, chevrons, the last primary activity following the lower slope, “Margem” rotated along the upper slope; `flow` = a white gradient sweep clipped by the chevrons in a static `<g clip-path>` (the clip must not sit on the moving rect), `m8Flow` infinite; `data-g` = activity 0…n), `bmc` (Estratégia, 1160×470; blocks · sides · focus; keys `kp ka kr vp cr ch cs cost rev` + `titles` lines; CSS grid 10 columns × `minmax(0,…)` rows, storytelling order CS → VP → CH → CR → REV → KR → KA → KP → COST; one font factor (floor .6) until the fullest block fits), `journey` (Evolução, 1160×470; walk · draw · stages · focus; `stages` lines, `rows` **`rows:k|*v`** (one cell per stage), `emo` lines −2…+2; emotion band after the 2nd row with a Catmull-Rom curve, area filled to the neutral line, dots navy/steel/orange by sign, `walk` = per-segment avatars (`m8Walk` left/top + `m8Win` window) plus a final avatar, 800 ms per stage), `okr` (Indicadores, 1000×420; cascade · fill · focus; `obj`, `eyebrow`, `owner`, `krs` `rows:t|v:n|tg:n|u|c` with confidence `o/r/c` → navy / steel / orange and anything else “Sem status”; `data-count` counters only in `fill`; title clamp 2 lines, 1 when rows are short; the objective shrinks its own font), `bsc` (Estratégia, 1160×470; bottomup · perspectives · focus; `persp` lines, `objs` `rows:p:n|t`, `links` `rows:a:n|b:n` by objective number; cards numbered, tones l0–l3 by band, elbow connectors drawn bottom-up with arrowheads, same-band links horizontal; per-card line clamp `--cl`), `change` (Processos, 1100×420; draw · walk · focus; `mode` `sel:curve|adkar`, `stages` lines, `pos`, `marker`, `adkar` `rows:t|v:n`; Kübler-Ross profile `[.62 .7 .45 .12 .35 .62 .88]` interpolated for 2–9 stages, labels on the free side (peak above, valley below, slope above anchored away from the curve, ends inward), “Estamos aqui” pill below on slopes/peaks and above in valleys, `walk` = 19-dot trail; ADKAR = 5 columns A D K A R with 1–5 bars, lowest = orange “ponto de barreira”, score inside the bar when ≥ 4; `label` hook “Curva da mudança” / “ADKAR (curva da mudança)”). All seven have a `norm` hook (`normer`), `dims()` for the white panel, text through `esc()`/`E()`, numbers through `num()` + clamp, one-letter tokens before they become classes, and the shared helpers `nlines`/`shrink`/`place`/`spline`/`at` (`AMRT.spline` exposed).
+- **Presets** (`AMRT.PRESETS`, CATALOG §E.4): `ansoff eisenhower kano` on `matrix` (quadrants in the standard orientation — Ansoff: Desenvolvimento de mercado / Diversificação / Penetração / Desenvolvimento de produto with x = produtos, y = mercados; Eisenhower: Agendar / Fazer agora / Eliminar / Delegar with x = urgência, y = importância; Kano: Encantadores / Desempenho / Indiferentes / Básicos — the CATALOG table lists the names, not the TL/TR/BL/BR order), `scr w5h2` on `cardgrid`, `minto iceberg sipoc` on `smart` (org / pyramid / process). Inserting writes `data.preset = key`; `FX.matrix/cardgrid/smart.label` are wrapped so the panel header and the “Ampliar” footer show the preset name (SmartArt keeps “SmartArt · Layout” when no preset); `AMRT.presetOf(el)` validates key + kind. Presets are not gallery items (S01-05 count unchanged).
+- **Editor**: `buildModels` renders one card per preset after the engines of its category (`.fxi.fxi-pre[data-k=<engine>][data-preset=<key>]`, subtitle “Preset · <engine>”, pills = engine effects, `_slide` from `previewSlide(k, null, preset)`); Inserir / drag (`'amfx:<engine>:<variant>:<preset>'`) / drop (`dropData` → `presetData`) clone the preset data. `#mCats` chips (one per category, with counts) under the search scroll the drawer to the category and follow the scroll. **Previews** (ARCH risk “~60 cards”): `playPreviews` now re-renders only cards within 160 px of the `#modelsBody` viewport (`cardVis`), draws the others once statically (so every card has `.pv .am-stage`), and a debounced `scroll` handler (`playVisible`) starts cards that enter and stops (`_clean`) cards that leave; the search also re-syncs. `pvOn()` also requires the drawer to be open (CR-12 unaffected). Measured: 6 of 42 cards redraw per 5.2 s cycle.
+- Suite: `test-s07b.js` (24 checks): registry + codecs + presets + hooks, drawer (preset cards, chips, visible-only redraw, chip jump, 15 searches), insert + props codecs, preset insert / drag payloads / drops (valid, unknown, wrong engine, S06 layout), stakeholders, value chain (flow sweep moving), canvas (shrink), journey, OKR (counters), BSC, change curve + ADKAR, `stageCheck` 7 kinds × white/navy × 100 %/50 % + ADKAR + palette + text overlaps, hostile `html()` data, gallery, navy panel + resize, presentation + Ampliar (preset name in the footer), safeEl/norm on open (text lists/rows, invalid preset), export (CR-04) + reopen, in-place edit (stakeholder, journey cell, rows field), ribbon + chips budget at 1280. Screenshots `shots/s07b-*.png`.
+- Not in this step (still per CATALOG §E): 7S, 3 Horizontes, Ishikawa (P2) and the Iceberg “linha d'água” option; the DTS “Varredura” layer (S8) can later drive the value-chain `flow` sweep instead of its own `m8Flow`.
+
+### F8 — Effect layers and controls (speed, pause, step, restart, tour, glow, sweep, depth, rest)
+Full spec: **DTS-CONTROLS.md**. Code map:
+- Data: `anim.*` keys (F0 already allow-lists them).
+- DOM: `renderEl` R:371–390 (`.am-hv`, `.am-sh`, `.am-glow`, `.am-sweep`); CSS C:6–7, 32–50, 383–387.
+- Engine: `runFx` R:401–423 becomes a pausable clock. **Keep the signature `runFx(st) → cleanup`**, because `previewEl` E:459, `playPreviews` E:1148 and the player use it.
+- Speed: WAAPI `getAnimations({subtree:true}).forEach(a => a.playbackRate = k)`.
+- Player dock: markup R:441, click R:469–474, key R:460–467.
+- Editor panel: the Animação section E:383–387; chips from `AMRT.ANIMS` (§10.4).
+
+Risks:
+- The loop/hover transform conflict fix rewrites `amPulse`/`amFloat`. Check the existing loop visuals.
+- `--d` pre-scaling changes component timing math.
+- Builds (`step`) change what "next" means: Space/→ reveal a group before changing slide. test.js and test2.js press ArrowRight expecting a slide change; decks without `step` must behave exactly as today.
+- Keymap: **G is taken by Índice** (§12).
+
+### F9 — Player índice + section timeline (rail) + chapter cards
+Full spec: **TMG-FEATURES.md** §1–3, §6.5, §9 (`sectionsOf`, `slideTitle`, `dividerOf`). Code map:
+- Player markup R:441 (rail row between `.amp-view` and `.amp-bar`; `.amp-pos` becomes a button but **keeps its text format `<b>01</b> / 07`**).
+- `go()` R:449 (rail fill, card, wipe); `key()` R:460; click R:469.
+- CSS C:133–158: `.amp-deck` width C:136 and `.amp-prog` `bottom:52px` C:158 must subtract `--amp-rail-h`.
+- Editor:
+  - slide panel (E:334–340) fields "Capítulo" (`s.sec`), "Subtítulo do capítulo" (`s.secSub`), "Título no índice" (`s.title`);
+  - `mkSlide('section')` E:91 sets `kind:'section'`;
+  - optional chapter labels in `#thumbs`, as non-`.th` nodes so test indexes stay intact.
+
+Risks:
+- **No chapter card on the initial `go(start)`.** test-core does Shift+F5 → Esc → `#bHome`; a card would eat the Esc.
+- `.amp-pos` regex `/^01/`.
+- The rail is rendered only with ≥2 chapters, so existing decks look unchanged.
+
+### F9 status: shipped in step S15 — rail + índice (chapter cards and the wipe are NOT shipped)
+- Runtime (`runtime.js`): `dividerOf`, `sectionsOf`, `dataStrings`, `autoNotes` exported on `AMRT`; `AMRT.hooks.show` (called from `go(i)` with `(i, hd)`) and `AMRT.hooks.key` (called from `key()` after the focused-button rule, before `Z`; a hook returning `true` consumes the key); `.amp-pos` is a `<button data-a="index">` with a caret span and is in the `mousedown → preventDefault` list; `runtime.css` subtracts `--amp-rail-h` from `.amp-deck` width and `.amp-prog` bottom.
+- Player UI lives in **`rt-150-nav.js` / `rt-150-nav.css`** (so it ships inside every exported file): `.amp-rail` with `button.amp-rs[data-sec]` (flex ∝ slide count; a segment narrower than 64 px gets `.tight` and hides its label unless active/hovered/focused), `.amp-pop.amp-idx` (groups `Parte n · name`, or the plain name when `num === 0`), `.amp-pop.amp-note`. Hooks and the document `pointerdown` / window `resize` listeners are registered per player instance and removed in `hd.onDestroy`. `hd.nav = {index(bool), notes(bool), sections, isIndexOpen(), isNotesOpen()}`.
+- **Chapters (`sectionsOf`)**: a divider slide always opens a chapter (6 unrenamed "1 · Nome do capítulo" dividers = 6 chapters); `Parte n` is unique and increasing (the divider's own number is used when it is larger than the previous one, else previous + 1); named chapters before the first divider and the intro get `num 0` (no "Parte"). `dividerOf` returns early for light slides without `kind:'section'` (60-slide deck: 22 ms → 0.1 ms per call).
+- **Counter**: `.amp-pos` textContent is exactly `NN / MM`; the ▾ is CSS (`.amp-pos::after`), so `/^01/` and exact matches both hold.
+- **Focus rules (Space must keep advancing)**: closing the índice/resumo returns focus to the counter/notes button **only if the keyboard opened it from there** (Tab + Enter); otherwise focus is released (blur). Mouse buttons in the panels never keep focus. With the índice open, Tab cycles inside it, and Enter/Space with focus outside the items refocuses the current item instead of reaching the slide.
+- **Notes edited in the player**: stored as `{t, b}` per `'s:' + slide.id` (duplicates get `#index`) in a prototype-less map; `b` = hash of the source text (editor `notes` or auto text). When the source changes the override is dropped, so the editor stays the source of truth. The edit belongs to the slide where it started (`editIdx`), even if Next/rail/hash navigation ends it. Unknown keys and non-conforming values in localStorage are pruned on load.
+- **autoNotes** is reader-facing (no presenter coaching): title · `Parte n · capítulo · slide i de N` · Visual · `Neste slide:` (≤ 3 points) · Números-chave; dividers list the chapter's slides. Optional 4th arg `secs` avoids recomputing chapters.
+- **Bar layout**: ≤ 860 px the deck title, and the labels of "Sobre este slide", "Ampliar" and "Sair" hide (icon buttons); ≤ 480 px the bar becomes `auto 1fr auto` with compact buttons; ≤ 420 px buttons are 30 px. Verified at 390–1280 px in the editor player and the exported file: wordmark never clipped, no button wraps, no overflow.
+- Editor: `mkSlide('section')` sets `kind:'section'`; the slide panel (no selection) starts with **Sobre este slide**: `s.title` (Título no índice), `s.sec` (Capítulo), `s.notes` (Resumo), buttons `autonotes` and `viewnotes`; `applyProp` special-cases `s.title|sec|secSub|notes` (no `renderStage`, empty string deletes the key); after `change` on those fields the panel re-renders once focus has left it (header shows the chapter). `present()` blurs the focused field and destroys a previous player first. `safeSlide` rejects the ids `__proto__`/`constructor`/`prototype`; `safeDeck` re-issues duplicated slide ids.
+- Tests: `test-s15-nav.js` (46 checks: editor fields, undo, reopen, rail fills, índice keys/focus/Tab, resumo auto/deck/override + localStorage + invalidation + edit-slide binding, Space after closing layers, double `present()`, F5 from the textarea, chapter numbering, reserved/duplicate ids, 60-slide performance, bar at 390–1280 px, exported file, print, deck without chapters).
+- Review: an adversarial workflow (4 lenses: correctness, security, UX vs the TMG reference, regression) produced 24 findings; every one was reproduced or checked and fixed above, except: **Z with the índice open closes the índice** (zoom takes focus; Esc then closes the zoom and the next Esc exits) — accepted, the zoom layer is the topmost.
+
+### Status of the "lote 3/4" modules (S8, S9, S11, S12, S13, S14) — NOT wired (moved to `_unwired/` in S15)
+`rt-80-effects-panel`, `rt-90-index`, `rt-110-export-html`, `rt-120-bpmn`, `rt-130-project-builder` and `rt-140-pptx-export` were written as isolated `window.gx*` modules that no editor menu, drawer, player hook or export path ever called (0 references in editor.js / editor.html / cover.js / runtime.js), and their suites `test-s08 … test-s14` print a fixed "✅ PASS" header and test the modules in isolation (`test-s08`/`test-s09-merged` were already failing). They were removed from the build in S15 (kept under `studio/_unwired/`, and in git history) so the exported file and the gate reflect what users can actually use. Rebuilding those features for real means: effect timing controls in the element panel (F8), editable exported file + comments (F11), BPMN/templates/PPTX as proper `rt-*` kinds and `Arquivo` menu entries, each with a suite made from `test-sNN-template.js`.
+
+### F10 status: shipped in step S15 (with F9, see above)
+- `AMRT.autoNotes(s, i, deck)` per TMG-FEATURES §9 (title · "Neste capítulo" on dividers · Visual · Pontos principais · Números-chave · closing hint; ≤ 700 chars). The player panel `.amp-note` (key **I**, bar button "Sobre este slide") shows the override (only while its source hash matches) > `slide.notes` > auto text; "Restaurar original" (not "Restaurar automático") because the original may be the editor's text. Overrides: `localStorage['amPlayer.notes:' + (deck.id || deck.title)]`, parsed defensively. While editing, the tag hides and the footer reads "Ctrl+Enter ou clique fora salva · Esc cancela".
+- Editor: textarea `data-p="s.notes"` + "Gerar resumo automático" (`act('autonotes')`) + "Ver na apresentação" (`present(cur)` then `player.nav.notes(true)`). No `#modal` involved (§0.15).
+
+### S18 status: resizable / collapsible slide panel (shipped)
+- **Layout**: `editor.html` body grid uses `grid-template-columns: var(--side-w) minmax(0,1fr) 304px`; `--side-w` (default 196px) is set on `<body>` by `applySide()` (editor.js, block “painel de slides: largura ajustável e recolher (S18)” right after the thumbnail drag handlers). `#side` is `position:relative; z-index:6` and now starts with `#sideHd` (“SLIDES n” + « `#sideCollapse`), then `#sideMini` (collapsed strip: » `#sideExpand`, `#sidePos` “3/14”, + `#sideAdd`), `#thumbs`, `#addSlide`, and the divider `#sideSplit` (7 px hit area at `right:-4px`, `col-resize`, 1 px line → 3 px orange on hover/drag/focus; `role=separator`, `aria-orientation=vertical`, `aria-valuemin/max/now/text`, `tabindex=0`).
+- **Range**: 132 … `min(440, innerWidth − 304 − 520)` (the canvas column keeps ≥ 520 px); `sideClamp()` re-clamps on window `resize` (the old `resize → fit(); drawSel()` handler now calls `applySide()`, which ends with `fit(); drawSel()`). Drag = pointer capture on the divider + `requestAnimationFrame` (`sideLater`), so the stage (`#wrap`, 16:9) grows/shrinks live; `toLogical()` already reads `#wrap`'s rect, so selection, handles, drag and resize stay exact (test S18-16/17).
+- **2 columns** at ≥ 380 px (was 340 until the review fixes below) (`#side.cols2` → `#thumbs` grid); slide number, hover Duplicar/Apagar, HTML5 drag reorder (drop indicator becomes a left bar) and the thumbs keyboard zone work; ↑ ↓ move by one row in that mode.
+- **Collapse**: `body.side-off` → `--side-w: 40px`, hides header/thumbs/“+ Novo slide”/divider and shows `#sideMini`; expanding restores the stored width. `#sideAdd` opens the same layout menu `#mSlide` to its right (added to the `closeOld` exception list). Menu **Slide** gained a last item (after a separator) “Ocultar painel de slides” / “Mostrar painel de slides” (`IC.side`). No new global shortcut (Ctrl+Alt+B etc. avoided).
+- **Persistence (UI preference, not deck data)**: `localStorage['amStudio.sideW']` (integer px, re-clamped on load) and `['amStudio.sideOff']` (`'1'`/`'0'`), read/written in try/catch. No deck/slide/element field was added, so `safeDeck/safeSlide/safeEl`, undo, save/reopen and the exported file are unchanged (the runtime does not know about the panel).
+- **Side effects fixed**: `#banner` (draft notice) is now centred over the canvas column (`left: calc(var(--side-w) + (100vw − var(--side-w) − 304px)/2)`, `max-width` = canvas − 24 px, wraps) so it never covers «; `#hint` gets `max-width: calc(100% − 24px)` + ellipsis so it does not slide under a wide panel. `sidePos()` (called from `renderThumbs` and `goSlide`) keeps “SLIDES n” and the strip position current.
+- **Tests**: `test-s18-lateral.js` (29 checks, real mouse/keyboard: splitter drag 320/400/limits, ←/→/Shift/Home/End/Enter, double-click, Ctrl+wheel, « » and menu Slide, “+” in the strip + Ctrl+Z, reload persistence, element drag/resize mapping after width changes, 2-column drag-reorder/hover buttons/keys, save→reopen, export, 1100/1280/1440 widths without overflow, banner/hint placement, zero console errors). Screenshots `shots/s18-*.png`.
+- **Caveats**: the width is per browser (file:// origin shares localStorage across decks, by design); the divider is hidden while collapsed (expand first); touch drag works via pointer events but was only tested with a mouse.
+- **Review fixes** (after the S17–S20 adversarial review; checks R01–R13 at the end of `test-s18-lateral.js`, real mouse/keyboard): **R01 performance** — the cost was layout of every thumbnail `.am-stage` (container-type:size + cqw text) on each `--side-w` change, off-screen ones included. Now `.th .box .am-stage{content-visibility:auto}` (off-screen thumbnails are skipped; their height still comes from `aspect-ratio`), and while the divider is dragged `#thumbs.frz` keeps each thumbnail slide at its start width (`--tw0`, `position:absolute`) and only scales it (`--tk`, set in `applySide` from the box width), so a frame lays out the boxes, not the slides; `freezeThumbs(false)` on release/Esc does one real layout. 40 template slides at 1440×900, 40 real pointermoves: frame p95 200–233 ms → 33 ms, max 267–300 → 50–67 ms, whole drag 7.3–8.2 s → 1.8–2.2 s (R01 asserts p95 < 150 ms plus the freeze geometry). **R02** « » clicked with the mouse blur instead of moving focus to the twin button (keyboard = `e.detail===0` still moves it); collapsing hands the `thumbs` zone to the canvas. **R03** `applySide` anchors the current thumbnail: when the applied width/column key (`sideKey`) changes it keeps `.th.on` at the same offset in `#thumbs`, clamped into view (drag, keys, wheel, window resize). **R04** drop position comes from the pointer (`dropIndex`): on a thumbnail = before it (unchanged); in a gap = before the next thumbnail of that row/column; below the last row or in the empty cell after the last slide = end, shown by `.drop-after`. **R05** Ctrl+wheel is proportional (−deltaY × 0.16 px, ≤ 16 px per event, remainder kept), applied through `sideLater` (rAF) and saved 300 ms after the wheel stops. **R06** `SIDE_COLS2` 340 → 380: in 2 columns each thumbnail is never smaller than at the default width (147 px). **R07** the drop indicator is a `::before`/`::after` bar on `.th`, so the focus halo of the current thumbnail no longer hides it. **R08** Shift+F10 in the `thumbs` zone with the panel collapsed opens next to the strip. **R09** `#sideAdd` from the keyboard focuses the first layout; Esc returns focus to it (`menuFrom`, read by `oldMenuKey`). **R10** `loadDeck` resets `#thumbs.scrollTop`. **R11** 2-column ↑/↓ stay put on the first/last row. **R12** Esc during the divider drag restores the start width without saving (window capture listener). **R13** while the Biblioteca drawer is open the panel shows at most 196 px (`sideNow`; the stored width is untouched and comes back when the drawer closes; adjusting the divider with the drawer open is respected via `sideFree`). **R14 (test-cover “títulos das opções alinhados por linha”)** was not a timing flake: with no local font copy (`../fonts2` missing, as in the reviewer's scratch copy) the label face falls back, “Projetos prontos” wraps at 1280×720 and the row gives exactly `[74,53,74,53,53,53]`; with the fonts it is `[53×6]` at any delay (the page load event waits for the routed fonts). The check now waits for `document.fonts.load("700 18px 'Roboto Condensed'")`, reports whether that face is in use, and the suite prints a notice when the font folder is missing; run the gate with `fonts2` linked (§9.4).
+
+### F11 — Editable exported HTML (move cards, edit texts, save copy) + comments panel
+**Architecture**:
+- **(1)** `xedit.js` (F0 ships it inert as `#am-xedit`).
+- **(2)** Move the export template from `exportHTML` E:1475 into the runtime as `AMRT.buildHTML(deck, {css, js, xjs, brand})`. The editor and the exported file then generate **the same** file.
+  - Give the parts ids in the output: `<style id="am-runtime-css">`, `<script id="am-runtime">`, `<script id="am-xedit">`.
+  - The export rebuilds itself from those nodes' `textContent` plus the edited deck.
+  - Keep `<script type="application/json" id="am-deck-data">`, the `<`→`<` escaping and the `S='script'` trick.
+- **(3)** Boot line: `AMRT.player(deck, root, {brand, editable:true})` then `AMX.boot(player)`.
+  - The player must return a richer handle (§5.4) plus a way to swap the current slide's stage for a static `am-edit` render while editing.
+
+**Edit mode** (export only, button "Editar" + key **E**):
+- banner "Modo edição — arraste os cards · duplo clique edita o texto · Ctrl+S salva · Esc sai";
+- click zones, tilt and cycles are off; the current slide renders as `RT.renderSlide(slide,{play:false})`.
+- Drag moves `.am-el` in logical coordinates (`dx/rect.width*1280`; lines move x1..y2); arrows nudge 1 px / Shift 10 px.
+- Double-click a text or shape: `.am-tx` contenteditable. Double-click a `[data-e]` span: plaintext-only, then `setPath`.
+- Sanitise like `cleanHTML` (move it to `AMRT.util.cleanHTML` and share it).
+- Undo: a local JSON stack (Ctrl+Z / Ctrl+Shift+Z).
+- No delete or resize in v1 (scope: "mover os cards, mexer nos textos").
+
+**Save**:
+- **Ctrl+S / "Salvar cópia"**: `showSaveFilePicker` when available (Chromium on file:// is a secure context, measured), otherwise download `slug-editado.html`.
+- Also autosave to `localStorage['amPlayer.edit:'+deck.id]`. On load, if that is newer than `deck.updated`, show the banner "Há alterações locais — Restaurar / Descartar".
+
+**Comments** (button "Comentários" + badge, key **C**):
+- right panel 360 px: per-slide list plus "Todos"; author name remembered in `localStorage['amPlayer.author']`; "Novo comentário" textarea (Ctrl+Enter adds); resolve checkbox; delete;
+- optional pin ("Marcar no slide", click on the slide → `x,y` logical) shown as numbered orange dots in a layer above the stage;
+- stored in `deck.comments` (F0 schema), autosaved locally and written by "Salvar cópia";
+- the editor keeps them on open/save (F0) and can list them read-only in the slide panel.
+
+**Risks**:
+- **CR-04**: no `onclick|onerror|onmouseover` text anywhere in `runtime.js`/`xedit.js`/`rt-*`, comments included.
+- `</script` assertion.
+- Key routing: textareas, contenteditable and modifiers must bypass `key()` (F0 done). In edit mode, arrows nudge when an element is selected, else navigate.
+- The F0 key guard returns on Ctrl/⌘ combos, so Ctrl+S in the export must be handled by xedit's own listener (`preventDefault`).
+- The exported file is opened in the editor via `openFile`. Edited copies must stay valid decks (`safeDeck`).
+- Export size grows by xedit (budget ≤ 40 KB).
+
+### S17 status: “Girar e inverter” direto no quadro (shipped in step S17)
+- **Data** (`safeEl`): `el.rot` is normalised on open/paste to an integer in (−180, 180] (`normRot`: 270 → −90, −180 → 180, 0 → field removed); `el.flipH` / `el.flipV` are kept **only when `=== true`** and only where a flip exists (`AMRT.flipOK(el)`: image, shape, fx whose def has `gal === 'icon'` or `flip: true` — `icon` and `iconmorph`). Text and other fx never carry the flags. Lines get **no new fields**: rotate/flip move the endpoints (`x1,y1,x2,y2`) around the midpoint (rotation kept to 2 decimals, so 4 × 90° returns exactly); elbow lines keep `curve` and `bend`. The `Rotação (°)` field also normalises through `applyProp('rot')`.
+- **Runtime** (`runtime.js` `content()`, ships in exports, thumbnails, player and “Ampliar”): image → `<img data-flip style="scale:-1 1">` (the `scale` property composes with the “Zoom interno” hover `transform`; with `shadow` + flipV the box-shadow offset is inverted so it still falls down); shape → the body is wrapped in `<g data-flip="h|v|hv" transform="matrix(sx 0 0 sy tx ty)">` **inside** the `<svg>` (the svg's drop-shadow filter stays downward; `.am-text` is untouched and readable) and the text inset of asymmetric shapes (`shapeInset`: balão, triângulo-retângulo, cilindro…) is mirrored with it; card look `header` ignores flipV (the title band stays on top); icon fx → `svg.ic` gets `scale` (the label `.ic-l` is not mirrored). Nothing is ever put on `.am-rot` or `.am-fxw`. `AMRT.flipOK` is public.
+- **Editor frame** (`drawSel`): the 8 `.hdl` handles sit at the rotated corners (`rotFrame(el).p` = c + R(θ)(p − c)) with the nearest of the 8 resize cursors (`hdlCur`); a round `.rhdl` (data-h="rot", **not** `.hdl`, so “8 alças” checks still hold) + `.rstem` 26 screen px above the top-centre, rotating with the element (moved below the frame when it would leave the canvas area). `startRotate`: rotation around the centre by pointer delta, live `.rottip` (“45°”), Shift = 15° steps, otherwise magnet to 0/90/180/270 within ±3°, `body.am-rotating` cursor grabbing, one `commit()` on pointerup. `startResize` converts the pointer delta into the element frame (R(−θ)) and re-centres the new box with R(θ), so the opposite handle stays put (±1 px); **for rot = 0 the code path is unchanged**. `busy` (move / resize / rotate / marquee) hides the frame bar. `fitArrow()` moves `#fxArrow` beside the rotation handle when a narrow frame would put it on top of it.
+- **Frame bar** `#frBar.frbar` (role toolbar, buttons `[data-fr=rot-l|rot-r|flip-h|flip-v]`, title = aria-label, mousedown preventDefault, click → `act()`): `placeBar()` measures and tries, in order, above-left of the frame, above ending left of the rotation handle, below-left, below-right, left side; each candidate is clamped inside the stage and scored by overlap with `#fxArrow`, `.rhdl` and the group label (`.gbox span`), then by how much the clamp moved it. Multi-selection: on the group box (above-right, then below). Hidden while editing text and while busy. **Only applicable buttons** (`barBtns`, review fix): a single element that cannot flip (text, charts/models with text) gets **no bar** (rotation stays on the handle, Alt+arrows, panel row and context menu); a multi-selection gets rot-l/rot-r plus the flip pair only when some member can flip. The disabled-with-reason flip buttons (`class="off" aria-disabled="true"`, title = reason, click → toast; Playwright needs `{force:true}`) remain in the props row and menu.
+- **Actions** (`act('rot-l'|'rot-r'|'flip-h'|'flip-v'|'rot-0')` → `frameAct`): each selected element turns/flips on its own centre; flipping a rotated element also negates `rot` (PowerPoint). One `commit()` per click. Props panel: row “Girar e inverter” under Rotação/Opacidade (4 buttons + Zerar rotação, `.frseg`), lines: the 4 buttons in “Posição”, multi: section “Girar e inverter”. Context menu and **Organizar**: one item “Girar e inverter ▸” (the 4 actions + “Zerar rotação”; no label contains “alinhar” or “forma”). Keyboard: **Alt+← / Alt+→** = −/+15°, with Shift 1° (canvas zone, selection, not typing; AltGr excluded), one undo step per press; in `HK` (“Mover e selecionar”, as the note of the arrows row “Mover 1 px / 10 px” — “Alt+← / Alt+→ giram 15° · com Shift, 1°” — because test-cover pins the cover manual at 17 rows that fit 1280×720 without scrolling (a separate row or a third key combo overflowed by 21–27 px)) and KEYMAP §5.
+- **Hit-testing in the editor stage** (editor.html CSS only): `.am-el:not(.am-t-line)` has `pointer-events:none` and its `.am-rot` child `auto`, so clicks and the hover outline follow the rotated drawing instead of the unrotated box.
+- Tests: `test-s17-girar.js` (35 checks, real UI: handle drag 45°/Shift/magnet, rotated handles and cursors, rotated resize keeps the opposite corner within 2 px, click on the rotated part, panel row + Zerar, frame buttons on image/shape/icon/text/chart with DOM proof, lines and elbow, Alt+arrows + undo, F1 list, context submenu, multi-selection, text editing hides the bar, thumbnails, save → reopen + normalisation, exported player, CR-04, bar vs `#fxArrow`/handle/stage in 9 cases × 1280×720 and 1440×900, ribbon overflow, zero console errors).
+- Caveats: the `lift` card look draws its own SVG shadow inside the flipped group, so with flipV that soft shadow points up; flip is per element (a multi-selection does not mirror the group's layout); rotating a line with Alt+arrows by 15° stores endpoints with up to 2 decimals.
+- **Review fixes** (adversarial review of S17, checks S17-27…35): (1) **frame bar pinned under the pointer** — a click on any `#frBar` button stores its left/top (`barPin`, keyed by the selection); `placeBar` re-applies it while the pointer stays on the bar, so a second/third/fourth click lands on the same button even though a 90° turn changes the frame's box; a document `pointermove` outside the bar (or a different selection) drops the pin and re-places the bar away from `.rhdl`/`#fxArrow`. (2) **Rotation-aware geometry everywhere**: `groupBox` (multi `.gbox`, multi bar, keyboard context menu), `alignTo`, `distribute`, the marquee hit test and the drag snap guides (`b0` and `others`) use `aabb()` (the axis-aligned box of the rotated drawing; lines/unrotated = `bbox`), and move by the delta between the target and the aabb, so `x/y` stay the unrotated origin; unrotated results are identical to before. (3) **Ampliar** (`runtime.js openZoom`, ships in exports): the viewport is the rotated bounding box (`|w cos|+|h sin|` × `|w sin|+|h cos|`), the element is centred in it and the zoom stage gets `overflow:visible` only when rotated — nothing is clipped and a photo keeps its chosen orientation (not unrotated); `showZb` places ⤢ from the `.am-rot` rect. (4) **Rotated text growing while typing** (`growText`, used by `tx.oninput` and `fitTextEl`): the local top-mid point (the first line) stays fixed in the slide — `x −= dh/2·sin θ`, `y += dh/2·(cos θ − 1)` (rot 0 = unchanged path); still one undo step per edit. (5) **Rotation drag** only updates the `.am-rot` transform and the frame (no `rerenderEl` per move; a 4000×3000 JPEG went from 3.3 s to 0.34 s for 20 moves), one `commit()` on pointerup. (6) `fitArrow`: when the pill fits on neither side of the handle inside `#wrap` (narrow stage + long “Efeito: …” label, e.g. side panel 440 px at 1280×720 or a 1024 px window), it goes beside the handle in the `#cv` gutter, else above the handle. (7) `safeEl`: a line carrying `rot` (old/hand-edited file) gets it baked into the endpoints (`turnEl`) and the field removed, so drawing and handles agree. (8) Bar shows only applicable buttons (above). Not changed: in the player, a double click on an empty corner of a rotated element's unrotated box still counts as the element (player hit-testing is per `.am-el`).
+
+### S19 status: “Outras cores” — colour picker everywhere, component colour fields, chart series colours (shipped)
+- **Picker (editor only)**: `ed-colors.js` / `ed-colors.css` (assemble.py's `ed-*` hook: `<script id="am-ed-colors">` after editor.js, CSS in `<style id="am-ed-css">`; not in the exported file). `window.AMColorPop.open(btn, {value, title, brand, onPick, onLive, onCancel, onClose})`: a `position:fixed` popover appended to `body` (never `#modal`, rule 15), clamped into the viewport (opens above the button when there is no room below; `max-height` = viewport − 16), follows the button while `#props` scrolls and closes when it scrolls out, on resize, click outside, Esc (focus back to the button) or after a pick. Sections: **Cores A&M** (SW), **Mais cores** (`AMColorPop.EXT`, 6 families × 8 tones light → dark: blues, greens, reds/pinks, oranges/yellows, purples, greys/neutrals), **Recentes** (last 8 custom colours, brand colours excluded, `localStorage['amStudio.recentColors']`, try/catch), **Personalizada** (hex field `#RRGGBB`/`RGB`, Enter applies, invalid → red outline + `aria-invalid`; native `<input type=color>` = live preview on `input`, pick on `change`; “Conta-gotas” only when `window.EyeDropper`). Keys: KEYMAP §4.
+- **Editor wiring** (`editor.js`): `swatches(p, v, none, list)` now renders [current custom colour as the first swatch `.cust.on` when it is not in the list] + [none] + list + `button.more[data-cpick=p]` (“Mais cores…”, no `data-v`, so `#props .sw button[data-v]` selectors are unchanged). The old 24 px native input is gone. `openColorPop()` applies through the same path as a swatch click: `applyProp(path, c)` + `renderProps()` = one undo step; native-picker live preview uses `applyProp(path, c, true)` and is committed on `change` (or `flush()` on cancel). All callers get it: `s.bg`, shape `fill`/`stroke`, line `stroke` (both line sections), text `color`, text `bg`. Mouse clicks inside `.cpop` keep focus (added to the click-blur exclusion list).
+- **Text colour = whole box**: `applyProp('color')` strips inline colours from `el.html` first (`stripColor`: `style` `color` and `<font color>`), so pasted coloured spans follow the panel colour; other inline styles (bold…) stay.
+- **Component colour fields**: a fx field `sel:…` whose option values are all `#hex` (`colorOpts`) renders as quick swatches (its options, title = option name) + “Mais cores…”; values stay in `el.data[key]` (`color`, `tcolor`, `c1`, `c2`, `accent` are in `DATA_TOKENS` + `COLOR_RE`). Runtime renderers now pass these through `U.colOr(v, default)` (hex / colour name / rgb[a] only): timeline `tcolor` (`.on-dark` also when luminance > .6), beacon `tcolor`, headline `color`, amlines `c1/c2`; icons already used `col()`.
+- **Chart series colours**: new field type `['colors', label, 'colors:N', names]` where `names` is a fixed label array or the key of the rows whose `.t` names the series; every chart FX has `cols(d)` = effective colour per position (used by the panel). Panel: “Cores das séries” = one row per series (name + 8 quick colours `QUICK` + “Mais cores…”) and a **Cores A&M** button (`act('colors-reset')`, deletes `data.colors`, disabled when nothing is custom). Stored as `data.colors = ['#RRGGBB' | '', …]` (≤ 6, `''` = keep the A&M colour of that position, trailing `''` trimmed; `applyProp('data.colors.k')` builds it; `safeEl` keeps only `#rrggbb`, invalid entries → `''`, nothing valid → key deleted). `AMRT.util.ucols(d)` is the runtime-side reader (invalid → default), plus `colOr`, `lumHex`, `mixHex`.
+  - rt-30-charts: `theme(d)` returns a **copy** of `TH[light|dark]` with `pal[k] = colors[k]`, and with `colors[0]` the funnel `ramp` = tints of it (dark → light); `th === TH.dark` checks became `th.dk`. Mapping: columns 4 series (legend same colours; labels inside bars keep `inkOn`); hbars Barras/Destaque (`--chh`); waterfall Totais/Aumentos/Reduções (reductions = hatch colour, connectors stay A&M); bullet Realizado/Meta (`--cht`); harvey Bolas; funnel Etapas (tones of one colour); radar 3 series (legend same colours). The chart `style` select label is now “Paleta” (was “Cores”, confusing next to “Cores das séries”).
+  - runtime.js built-ins: bars Barras/Destaque (`--bc` feeds `@keyframes amHl`, so “Destaque depois” starts from the custom bar colour); linechart Linha e pontos/Último ponto (area = line colour at 14 %; the last value label falls back to navy on very light colours); donut 6 slices named by `items` (legend same colours).
+- **Defaults unchanged**: nothing changes until the user picks a colour (no `data.colors` = exactly the S5 rendering).
+- Tests: `test-s19-cores.js` (25 checks through the real UI at 1280×720: popover sections/position/focus, extended colour on text, undo/redo, hex valid/invalid, keyboard arrows/Esc focus return, click outside, pasted inline colours, popover above the button at the panel's foot, shape fill/stroke, line stroke, icon field, A&M Lines c1, columns series + legend + quick swatch + Cores A&M + undo, bars highlight, slide background via the native input, Recentes order and after reload, save→reopen, hostile `data.colors`/`tcolor` via `loadDeck` and directly through `AMRT.renderSlide`, exported player colours, CR-04).
+- Caveats: the native colour input and the eye-dropper are browser UI (Playwright drives the native input with `fill`; the eye-dropper is not automated). Series beyond the 6th (donut slices 7+) keep A&M colours. Undo inside the popover's hex field is the field's own (editor Ctrl+Z is not reached while focus is in the popover).
+- **Review fixes** (after S17–S20 review; `test-s19-cores.js` S19-25…29): F5 / F1 / Ctrl+S / Ctrl+O pressed with focus inside the popover now close it (as a cancel) and reach the editor's handler (present / help / save / open), always `preventDefault` (never Chrome's reload, “Salvar página como”, help, open); Ctrl+P/D/A (A outside the hex field) are swallowed. `openColorPop` calls `flush()` before opening and a native-picker preview cancelled by Esc or an outside click is reverted with `restore(last)` (no commit, no undo step; before, the last dragged tone was committed). `place()`: when the popover fits neither below nor above, it opens to the left of the anchor's row (`o.row` = `.cser` or the `.sw` line, `data-side="left"`), otherwise on the larger side with a shorter scrolling `max-height` — it no longer covers its own button. Hex field: `maxlength` 40 and `norm()` drops whitespace and accepts `rgb(r, g, b)`, so pasted “ #1F66A8 ” works. Popover title = the field name without its `<small>` hint (“Cor principal”). Funnel ramp: with a light `colors[0]` (lumHex > .7) on a light-style chart the tones shade toward black (`mixHex(c, −0.8f)`), dark colours keep tinting toward white exactly as before.
+
+### S20 status: “Cores do componente” (recolour any component with a principal + an accent colour)
+- **Data**: `el.pal = {p, a}` on `type:'fx'` elements, either key optional (§3.3). `safeEl` → `safePal()`: object only, `p`/`a` must match `/^#[0-9a-f]{6}$/i` (stored upper-case), unknown keys dropped, empty → `pal` deleted; never kept on text/shape/line/image.
+- **Runtime** (`rt-05-pal.js`, concatenated into the runtime → ships in every exported file; `runtime.js` only got two guarded calls, so **elements without `pal` cost nothing**): `content()` → `if (el.pal && API.palHTML) inner = API.palHTML(el, inner)`; `renderEl()` → `if (el.pal && el.type === 'fx' && API.palTag) API.palTag(n, el)`. Exposed: `AMRT.palHTML`, `AMRT.palTag`, `AMRT.pal = {norm, key, family, map(hex, pal), recolor(str, pal), index(), contrast(hexA, hexB)}`.
+  - *Colour families* (classified by HSL, not a fixed list, so future tints are covered): **blue** = hue 195–225° and saturation ≥ 0.26 (navy `#002A46`, `#001E32`, `#13315C`, `#13406A`, `#43698F`, `#4A6FA5`, `#7EA1C3`, `#A3B8D6`, `#C9D6E8`, `#DCE5F0`, `#E3EAF2`, `#EEF2F7`, `#3D5A74`, the `rgba(0,30,50,…)` shadows…) → hue of the principal, saturation × (principal S / navy S), and the **same relative luminance** as the original (binary search on L) — navy becomes the dark version of the principal, ice becomes a pale one, and every contrast between these tones, white and the greys is identical to the A&M one. **Orange** = hue 20–45°, S ≥ 0.5 (`#F78C16`, `#B35F00`, `#F9C48A`, `#FEF1E2`, `#FFF1E3`, `#FFF8F0`, `rgba(247,140,22,a)`) → the accent exactly for `#F78C16`, tints/shades keep their HSL lightness position relative to `#F78C16`. White, black, the low-saturation text greys (`#3E4C5E`, `#566579`, `#6B7A90`, `#8A97A8`…) and anything else stay. Alpha preserved.
+  - *Markup*: only colour attributes inside tags (`style`, `fill`, `stroke`, `stop-color`, `flood-color`, `lighting-color`, `color`) of the string `FX[kind].html` returned (panel wrapper included); text nodes are never touched (a label “#123” stays). Colour mapping is memoised per palette; markup is not cached (the regex pass is cheaper than hashing the string).
+  - *Stylesheets*: lazily (first element with `pal`) an index of the runtime sheet (`#am-runtime-css`; the export now writes `<style id="am-runtime-css">`, older exports are found by content) is built from the CSSOM: every style rule (also inside `@media`/`@supports`) that declares a property of a **group** in which some brand colour appears (`background*`, `border*-color`, `color`, `fill`, `stroke`, `box-shadow`, `filter`, `outline*`, `text-decoration*`, custom properties…, plus `animation*` because of the keyframes). **All** declarations of those groups are copied (also the non-brand ones), so the cascade order inside the scoped copy is the original one. Per distinct palette ONE `<style id="am-pal-<key>" data-am-pal>` is inserted right after the runtime sheet: each selector gets `:where([data-pal="<key>"],[data-pal="<key>"] *)` appended to its subject compound (before any `::pseudo-element`/legacy `:before`), so specificity is unchanged and the copy wins by source order; values go through the same colour map; keyframes that contain brand colours are cloned as `<name>--<key>` (recoloured) and the scoped `animation` declarations are renamed to them, so animation end states (Gantt “crítico”, bars “Destaque depois”, `amGlow` halo…) use the new colours too. A root rule `:where([data-pal=k]){color:<map(#002A46)>}` replaces the navy inherited from `.am-stage`. `<key>` = 12 chars `[0-9a-f]|x` (`1b7f3bc0392b`, `xc0392b`…). The 12 most recent styles are kept, older ones are removed when no `[data-pal]` uses them (the system colour picker emits one palette per drag step). Size ≈ 120 KB of CSS per palette, built in ≈ 40 ms the first time (measured, 20-element slide: 51 ms first render vs 14 ms without palette; re-renders 11 ms).
+  - Thumbnails, the stage, the player, the “Ampliar” layer, gallery previews and exported files all go through `renderEl`, so they all show the same colours (measured in the test).
+- **Editor**: for a selected fx element whose category is not “Marca A&M” and that is not an icon (`palOk(el)`), the props panel shows **“Cores do componente”** right after “Conteúdo”: “Cor principal” = `swatches('pal.p', …)`, “Cor de destaque” = `swatches('pal.a', …)` (plain `applyProp` → `setPath`; S19's colour popover arrives through `swatches()` after the merge), a strip of the resulting tones (`AMRT.pal.map`), a note, a warning when accent vs. the dark principal contrast < 3 (`AMRT.pal.contrast`), and **“Restaurar cores A&M”** (`act('palreset')`: deletes `el.pal`, one undo step; disabled without `pal`). Element context menu: **“Cores do componente…”** (icon `palette`, after Alinhar/Distribuir, only for `palOk` elements) scrolls to the section, flashes it (`.sec.flash`) and focuses the first swatch. No ribbon button, no new key.
+- **Caveats**: (1) the accent is used exactly, so accent-coloured text on the dark principal (e.g. the SWOT “Forças” header) or on white can lose contrast with clashing pairs — the panel warns (see Review fixes); (2) keyframes inside `@media` are cloned outside it (none today); (3) shadows/halos written as `rgba(0,0,0,…)` stay black; (4) the navy of the *slide* and player chrome is not part of the element and never changes; (5) a component that later writes colours from JS after render (none today) would not be remapped; (6) superseded by the review fixes: `data.colors` picked by the user are never remapped.
+- Suite: `test-s20-recolor.js` (21 checks, ≈ 50 s): Modelos › SWOT, section order, swatch click + `input[type=color]` for both colours, computed colours of every descendant (no `rgb(0,42,70)` / `rgb(247,140,22)`), neighbour unchanged, thumbnail, context menu (+ alinhar/trazer invariants), text has no section, Restaurar + Ctrl+Z/Ctrl+Y, save → reopen, hostile `pal` via `loadDeck` and directly in the runtime, 12 kinds (SWOT, card light + navy, bars, SmartArt, Gantt, roadmap, BCG, Canvas, timeline, donut, columns, PDCA) with the counted-colour assertion + text contrast (≥ 4.5 or ≥ 95 % of A&M, accent text excluded), exported file: 7 slides at the end of their animations (Gantt crítico, bars highlight, roadmap, OKR fill, SWOT, BCG, SmartArt) + Ampliar by double-click, CR-04, render time of 20 components without `pal` vs. without the extension, no style injected without `pal`, Marca A&M without the section, ribbon at 1280. Screenshots `shots/s20-*.png`.
+
+- **Review fixes** (after S17–S20 review; `test-s20-recolor.js` S20-21…28):
+  - *One rule for charts with `el.pal` + `data.colors`*: explicit series colours render exactly as picked, unpicked series follow the palette. The renderers write a picked colour as `#RRGGBBFF` (`AMRT.util.ukeep(el)` / `kcols(d, el, cols)`, only when `el.pal` is set — without it the markup is byte-identical to S19); `palHTML`'s regexes skip 8-digit hex by construction. Applied in rt-30-charts `theme(d, el)` (pal, funnel ramp), hbars `--chh`, bullet `--cht`, waterfall reductions, radar, and runtime bars / linechart / donut; `inkOn` accepts the suffix. “Cores das séries” shows the drawn colour: picked → itself, default → `AMRT.pal.map(default, el.pal)` (dot and `.on` swatch), plus a note when `el.pal` is set.
+  - *Light/dark accent*: in the scoped CSS, a rule whose background is a solid orange-family colour gets a readable ink when the remapped pair would fall below 3:1 **and** below the A&M pair (`ink()`: the declared colour, or the white/navy A&M uses on orange, becomes the better of white and the dark principal) — e.g. roadmap `.rm-ch.c` with #FFE7A3 (1.22 → 12.1), RACI “A” with #5E141F (1.12 → 13.2); an accent at least as dark as #F78C16 changes nothing. The panel warning now measures **this component**: `palProbe(el)` renders it with and without `pal` off-screen (static `.am-edit`), compares every text node against its opaque background and warns, naming the text, when one falls below 3:1 and below A&M (counter “+18%…” with #FFE7A3, SWOT “Forças” with #5E141F); memoised by kind/data/palette.
+  - *CSS size*: the scoped sheet holds only the rules whose identifying class (subject compound, else the nearest classed compound to its left; state classes ignored, `am-*`/`amp-*` context classes = generic) is present in the element — palTag now runs after the element's children exist. One `<style id="am-pal-<key>">` per palette = union of what its elements need (rebuilt in source order when a new kind joins), keyframes only when used. Measured: 5 kinds × 5 palettes 602 KB → ≈ 105 KB; exported 20 slides × 20 palettes 2.41 MB → 0.46 MB. The “keep 12” GC is replaced by `palSweep()` (called from every `renderEl`/`renderSlide`, debounced 1.2 s): styles whose key no `[data-pal]` in the document uses are removed (colour changes, picker drags, slide change, undo, new deck).
+  - `safeEl` keeps `pal` only where the panel offers the section (`palOk`: not icons, not “Marca A&M”); `DATA_TOKENS` values that are not strings (`c1: ['x']`) are dropped. Panel rows mark navy / orange when the key is unset; clicking that A&M colour (or `none`) deletes only that key (`applyProp('pal.p'|'pal.a')`; `pal` removed when empty) — one undo step.
+
+### S21 status: “Ocultar slide” e “Redefinir slide” (PowerPoint semantics, shipped)
+- **Data** (`editor.js`): `slide.hidden` (kept only `=== true` by `safeSlide`); `slide.layout` (a `LAYOUTS` key, set by `mkSlide`, kept only together with a valid base); `slide.base = {bg, bgImgOp?, els: {ph: snapshot}}`; `el.ph` (`/^p\d{1,3}$/`). A snapshot holds **no content**: geometry `x y w h rot flipH flipV opacity radius` (lines: `x1 y1 x2 y2 bend curve` + `stroke strokeW dash headS headE headStart headEnd dashS`), text/shape format `font size weight color align valign lh ls bg italic upper fill stroke strokeW dash shadow look shape`, image `fit shadow`, fx `variant pal` + `cols` (= `data.colors`) + `ds` (= `data.style`, only when the kind has a `style` field). Booleans are stored only when true; absent keys mean “absent originally”. `safeBase`/`safeSnap` (called from `safeSlide`) re-validate everything: numbers finite and clamped (`SNAP_NUM`: x/y/x1…y2 ±10000, w/h 8…10000, size 1…400, weight 100…900, lh .5…5, ls −1…3, strokeW 0…200, radius 0…2000, opacity 0…1, bend .05….95), `rot` via `normRot`, colours via `COLOR_RE`, words via `TOKEN_RE`/`EL_TOKENS`, `pal` via `safePal`, `cols` only `#rrggbb` (≤ 6), keys only `p0…p999`, at most `PH_MAX` = 200 entries; unknown keys (html, src…) dropped. `ph` survives only when unique on the slide and present in the base.
+- **Stamping** (`stampSlide`): `mkSlide(layout)` for every layout (new deck, “+ Novo slide”, menus, Recomeçar); `loadDeck` stamps every slide that arrives without a base (opened files, cover templates — the 5 *Projetos prontos* go through `loadDeck` —, drafts, Minhas obras, hand-made JSON); pasted slides from an older version are stamped too. Duplicate / copy-paste slide (`freshSlide`) keep `base`, `layout`, `ph` and `hidden` with fresh element ids. Element duplicate (Ctrl+D) and element paste **drop `ph`** (the copy is a user element, as in PowerPoint), so `ph` stays unique.
+- **Redefinir slide** (`resetSlide(i)`, one `commit()`): every element whose `ph` is in the base gets the snapshot back (`applySnap`: keys absent from the snapshot are deleted — rotation, flips, `pal`, `data.colors` — except required geometry, which is kept if a hand-edited base lacks it; a `variant` the kind does not know is dropped); text, image source and data stay. Placeholders the user deleted come back from `LAYOUTS[slide.layout].els()` (same generation order = same `ph`), with the layout's default content, inserted before the next original in z-order. `slide.bg = base.bg`; `bgImgOp` only when the slide still has a background image (the image itself is content). Elements without `ph` are untouched. Text boxes whose kept text is taller than the original box grow downward (`fitTextEl`, like typing). Toast: “Slide redefinido: posições e formatos originais, textos mantidos [· n elementos do layout voltaram] · Ctrl+Z desfaz”. Template slides have no `layout`, so deleted elements are not re-created there (the base holds no content by design).
+- **Ocultar / Reexibir** (`toggleHidden(i)`, one `commit()`): thumbnail `.th.hid` (slide at 45 % opacity on a light hatch, number struck through, `.hb` eye-off badge under the number with title “Slide oculto: não aparece na apresentação”); `#hidBan` pill “Slide oculto na apresentação” centred above the stage (`pointer-events:none`, `role=status`). Editor-only CSS in **`ed-slide.css`** (new `ed-*` file, not exported).
+- **UI**: thumbnail context menu and **Slide** menu get, after “Duplicar slide”: “Ocultar slide” / “Reexibir slide” (`IC.eyeoff` / `IC.eye`) and “Redefinir slide” (`IC.slreset`, disabled with a `title` when the slide has no base — menu items now accept `tip` → `title`); the thumbnail menu header reads “Slide n de N · oculto”. The slide panel (no selection) starts with **Exibição e layout**: switch `button.swt[role=switch][aria-checked][data-act=hideslide]` “Ocultar na apresentação” (focus stays on it after a keyboard toggle) + `[data-act=slreset]` “Redefinir slide” (disabled + title without base) + a note. No new keys (KEYMAP note only). Applies to the current slide (the editor has no multi-selection of slides).
+- **Player** (`runtime.js player()`, ships in exports): the player builds a shallow copy of the deck with the visible slides only, so the counter, `.amp-slide` list, índice (G), rail, autoNotes and hash `#/N` all count visible slides; `hd.map` = original index of each visible slide, `hd.allHidden`. `opts.start` (an index into `deck.slides`) maps to the same slide, or the next visible one, else the previous. All hidden (or `opts.showHidden`) → every slide is shown. Editor: `present(start, all)` toasts “Todos os slides estão ocultos — mostrando todos” or “Slide n está oculto — a apresentação começa no próximo slide visível”; “Ver na apresentação” (resumo) and “Ver ampliado na apresentação” on a hidden slide pass `all = true` so that slide is shown.
+- **Size**: the base is metadata only. 30-slide deck of the 7 layouts: exported `.html` +1.4 % (deck JSON +4 %, the brand logos dominate); text-heavy decks grow more in JSON terms but stay far below the runtime size.
+- **Tests**: `test-s21-ocultar.js` (25 checks, ≈ 70 s, real UI at 1280×720 + screenshots at 1440×900): stamping, thumbnail menu hide + visuals + banner, labels/headers, Ctrl+Z/Y, Slide menu, panel switch (mouse + Space, focus), F5 counter/content, índice + rail, Shift+F5 on a hidden slide (+ hidden last slide → previous), all hidden + toast, 3× undo, exported player + índice, reopen (file and JSON), CR-04, Redefinir on a `content` slide after move/resize/rotate/recolour/text edit/flip/size/delete/user arrow/background (thumbnail menu), Ctrl+Z/Y, Slide menu + panel button, duplicate/copy-paste slide and Ctrl+D element, cover template slide, hand-made deck stamped on load + disabled state without base, hostile base, file size, ribbon/top at 1280, zero console errors. Screenshots `shots/s21-*.png`.
+- **Caveats**: a hidden slide is still listed in the editor thumbnails and in “Minhas obras” counts; `#/N` in an exported file counts visible slides; the player-side notes override key for duplicated slide ids uses the visible index; reset re-creates deleted placeholders only for slides made from a layout (not template slides or opened files); a cut-and-pasted original becomes a user element (no `ph`), so on a layout slide Redefinir re-creates the placeholder next to it (PowerPoint does the same).
+
+### S22 status: export engine + PDF + “Salvar como…” (shipped)
+- **Files**: `ed-40-export.js` / `ed-40-export.css` (editor-only `ed-*` hook: `<script id="am-ed-40-export">`, CSS in `#am-ed-css`; **not** in exported files — the exported .html is exactly what S20 wrote; editor file 1020 → ≈ 1075 KB). `editor.js` only got the menu wiring; `editor.html` only the ▾ button.
+- **Engine** — `window.AMExport` (stable API for S23 PowerPoint):
+  - `rasterSlide(slide, {scale=1, type:'png'|'jpeg', quality=.92, bg, texts})` → `Promise<{canvas, blob, width, height, texts}>`. Builds the static stage with `AMRT.renderSlide(slide, {play:false})` (final state; counters already show their final value — the editor stage never runs `runFx`), mounts it off-screen in `#amxHost` (`position:fixed; left:-40000px`, 1280×720 CSS px, so it inherits the same `body` styles as `#wrap`'s stage and its `am-pal-*` sheets exist), serialises it with `XMLSerializer` into `<svg><foreignObject>` together with: the inherited font/colour of the editor body, a `*{box-sizing}` + `button` reset, the `#am-runtime-css` text (runtime + every `rt-*.css`, XML-escaped once and cached), every `style[data-am-pal]` (S20 recolour) and `@font-face` rules with the woff2 embedded as `data:`. The SVG (`data:image/svg+xml`, `width/height` = 1280·scale × 720·scale, `viewBox 0 0 1280 720`, so text is laid out vectorially at the target resolution) is drawn into a canvas. `http(s):`/`blob:` images are fetched and inlined as `data:` first (slide images are normally `data:` already; no taint). `texts` = the slide's text lines `[{t, x, y, w, h, fs}]` in logical px (Range rects per word, grouped by line; `text-transform: uppercase` applied), used by the PDF text layer and available to S23.
+  - `rasterEls(slide, els|ids, box|null, {scale=2})` → `Promise<{canvas, blob(PNG, transparent), width, height, box}>`: only those elements (z-order = given order) on a transparent stage, cropped to `box` (logical px; default `boxOf(els)` = union of the elements' boxes, rotated ones by their rotated AABB, lines by `lineBox`).
+  - `fontsCSS({text, families})` → `Promise<string>`: parses the page's own Google Fonts `<link>` CSS (fetch; CORS is open on fonts.googleapis/gstatic), merges weights that share one variable-font file into one rule (`font-weight: 400 700`), embeds each woff2 once per session (`FileReader` → `data:font/woff2`). With `text`: only the `latin` subset + subsets whose `unicode-range` hits a character of the text; with `families`: only those (lower-case). rasterSlide passes the families the stage actually uses (first family of each computed stack) → ≈ 150–450 KB of fonts per SVG. **Offline / blocked**: continues without embedding (editor and canvas then use the same fallback font, so they still match), shows the toast “Sem acesso às fontes da internet: o arquivo pode sair com outra fonte” **once per session**, retries the CSS after 60 s.
+  - `visibleSlides(deck, includeHidden)` → slides in order without `hidden === true` (S21's field; S22 never writes it). `pick(deck, {range:'all'|'cur'|'span', from, to, cur, includeHidden})` → `[{slide, index}]` (1-based `from/to`, clamped and swapped; `'cur'` returns the current slide even when hidden — it was asked for explicitly). `boxOf(els)` and `textRuns(stage)` are exposed too.
+  - Fidelity (measured, `test-s22-pdf.js`, Chromium with `--disable-lcd-text`): the canvas equals a Playwright screenshot of the same slide rendered visibly at 1280×720 — 100 / 100 / 99.98 / 100 / 100 % of pixels within ±24 on the coverage deck (text with bold/colour, rotated + flipped shapes, arrows, cover-fit rounded flipped photo, icon, A&M lines, 3 charts with custom series colours + waterfall, SmartArt, SWOT with `el.pal`, BCG, PDCA, dark slide with background photo + counter). A one-off probe over the 5 cover templates (32 slides) and every `AMRT.FX` kind at default size (47 slides) found **no** slide under 99.5 %: container-query units, CSS variables, gradients/`url(#id)`, `mix-blend-mode`, `backdrop-filter`, `::before/::after` and masks all rasterise identically inside the foreignObject, so no per-element fallback was needed. Speed: ≈ 60–160 ms per slide at 1×, ≈ 120–200 ms at 2× (longest main-thread task ≈ 60–90 ms).
+- **PDF (direct)** — `AMExport.pdf(deck, {list | range…, scale=2, quality=.9, signal:{cancelled}, onProgress(i, n)})` → `Promise<Blob|null>` (null = cancelled): hand-written PDF 1.4 (no library). Objects: 1 Catalog (`DisplayDocTitle`), 2 Pages, 3 Helvetica (`/WinAnsiEncoding`), 4 Info (`/Title` = deck title as UTF-16BE hex, `/Creator`, `/Producer`, `/CreationDate`), then per page `5+3i` Page (`MediaBox [0 0 960 540]` = 13.333 × 7.5 in), `6+3i` content, `7+3i` JPEG XObject (`DCTDecode`, 2560×1440 at 2×, 3840×2160 at 3×) drawn full-bleed; xref + trailer. **Invisible text layer**: `3 Tr`, one `Tj` per line at its position (1 logical px = 0.75 pt; baseline ≈ middle of the line box + 0.35 em; size = min(font-size, line height); width matched with `Tz` from Helvetica AFM widths), bytes in WinAnsi (cp1252: Portuguese accents = Latin-1 codes; “ ” ‘ ’ – — … • € mapped; anything else → base letter or `?`), octal-escaped so the file is ASCII except the image streams. `pdftotext` returns the slide texts with correct accents; `pdfinfo` shows the title and `960 x 540 pts`. Slides are rendered one at a time with `setTimeout` yields (keeps going in a background tab); each canvas is released after its page. Size ≈ 170 KB/page at 2× and ≈ 300 KB at 3× on the templates (+ photos).
+- **PDF via the browser** — `preparePrint(deck, opts)` → `{count, el, cleanup()}` appends `#amPrint` (one `.amx-pg` 1280×720 per slide, static `renderSlide`) and `<style id="am-print-css">` (`@media screen` hides it; `@media print`: `@page{size:1280px 720px;margin:0}`, `body.am-printing>*:not(#amPrint){display:none}`, a page break after each page, `print-color-adjust: exact` so backgrounds print without the “Gráficos de fundo” checkbox). `print(deck, opts)` waits for images, `document.fonts.ready` and 2 frames, calls `window.print()` and cleans up right after (also on `afterprint`). Vector, selectable text; Chrome's “Salvar como PDF” keeps 960 × 540 pt pages.
+- **UI**
+  - Top bar: `#bSaveMore` (▾, `.tb.pri.tcar`, 26 px, glued to `#bSave` as a split button; `title`/`aria-label` “Salvar como… PDF, PowerPoint ou HTML”, `aria-haspopup="menu"`, `aria-expanded`). **`#bSave`'s click is untouched** (download .html). No top-bar overflow at 1024–1536 (the title field gives up ≈ 17 px).
+  - ▾ opens an app menu (`openX`, class `xsave`, 404 px wide, right-aligned under the button; `buildX` now accepts `it.tip` → `title`): “Salvar como” · **HTML interativo (.html) — com efeitos** (Ctrl+S) · **PDF (.pdf) — imagem em alta resolução, idêntico** · **PDF pelo navegador — texto selecionável** · **PowerPoint (.pptx)…** (enabled only when `window.AMExport.pptx` is a function, otherwise disabled with title “Disponível na próxima etapa”). Keyboard: Enter/↓ on ▾ opens it with the first item highlighted.
+  - Arquivo: after “Salvar apresentação”, **Salvar como PDF…** and **Salvar como PowerPoint…** (same enable rule). No label contains “abrir”; the first item is still “Início (capa)”.
+  - `AMStudio` gained `flush`, `exportAs(kind, opener)` (`'html'|'pdf'|'print'|'pptx'`) and `saveAsItems`. **S23 hook**: define `AMExport.pptx = function (deck, {opener}) {…}` in its own `ed-*.js` (loaded after `ed-40-export.js`, e.g. `ed-50-pptx.js`); both menus pick it up on their next open (menus are functions).
+  - Export dialog `#xpDlg.xp` (own element, z-index 190 — above menus/cover/presenter, below `#modal` 200 and `#toast` 210; ARCH rule 15): format cards (Imagem em alta resolução / Pelo navegador — both menu items open the same dialog, in either mode), summary, **Slides**: Todos (n) / Slide atual (k[, oculto]) / De … a … (typing a number selects that option; clamped to 1…n), **Incluir slides ocultos (h)** (disabled when there are none), **Qualidade** Padrão 2× / Máxima 3× (PDF mode only; kept for the session), page count + estimated size, progress “Gerando slide 3 de 14…” + % bar (`role=progressbar`, `aria-live`), footer Cancelar / **Exportar PDF** (“Abrir impressão” in print mode). Range and the hidden checkbox reset to “Todos, sem ocultos” on every open. While generating, the form is disabled and Cancelar reads “Cancelar exportação”; cancelling keeps the dialog open and idle, toast “Exportação cancelada”, no download. Done → `AMStudio.download(slug(title) + '.pdf', blob, 'application/pdf')`, dialog closes, toast “PDF salvo: nome.pdf · N páginas · 1,2 MB”; `AMExport.last = {name, size, pages, ms}`. Responsive: 600 px box, `max-height: 100dvh − 24px` with a scrolling body; ≤ 560 px the cards stack, the box sits at the bottom and the buttons share the width (checked at 390×800, 1280×720, 1440×900). Keys: KEYMAP §4.
+- **Data**: no new deck/slide/element fields. Exporting never mutates the deck and adds no undo step.
+- Suite `test-s22-pdf.js` (40 checks, ≈ 50 s; Chromium with `--disable-lcd-text`; fonts routed with `Access-Control-Allow-Origin: *`; screenshots `shots/s22-*.png`, temp files in `.gate/s22/`): per-slide identity screen × canvas, 2× size, rasterEls crop/transparency (+ rotated auto box), fontsCSS, top bar at 1280, ▾ menu labels/ARIA/disabled PowerPoint, Arquivo invariants, PDF through the real UI (▾ → PDF → dialog → Exportar → download), progress labels, long tasks, `pdfinfo`, `pdftoppm -r 96` page × screen, `pdftotext` accents, deck unchanged, hidden slides out/in (via Arquivo › Salvar como PDF…), range 3–4, Slide atual, cancel mid-way (15 slides at 3×), keyboard (Enter on ▾, ↓ Enter, Tab trap, Delete/Ctrl+Z don't leak, Esc returns focus), dialog at 390/1440/1280, print mode through the UI (stubbed `window.print`) + `page.pdf({preferCSSPageSize, printBackground})` on `preparePrint` (pages, 960 × 540 pts, selectable text, pixels), `AMExport.pptx` hook, `#bSave` = .html without `AMExport` in it, reopen + export again, offline fonts warning + identity, zero console errors.
+- **Caveats**: (1) the screen comparison needs grayscale text (`--disable-lcd-text`); with LCD subpixel text the same canvas scores ≈ 97.8–99.4 % (colour fringes only). (2) `pdftoppm -r 96` draws the 2× image with a phase offset of up to 1 px, so page comparisons search the best global registration within ±1 px (measured 97.9–99.7 % for the direct PDF, 97.0–99.9 % for the print PDF — the densest slide is the tight one: poppler hints vector glyphs differently from Skia). (3) The invisible text layer is positional, not typographic: Helvetica metrics stretched with `Tz` to each line box, rotated text sits on its axis-aligned line box, characters outside cp1252 become their base letter or `?` (the image still shows them). (4) Fonts are fetched from the internet at export time (cached for the session); offline exports use the same fallback font the editor shows. (5) The print path depends on the browser dialog: the user must pick “Salvar como PDF”. (6) `rasterSlide` renders the **editor** stage, so editor-only placeholders (empty SmartArt/issue-tree hints) appear as on the canvas.
+
+### S23 status: “Salvar como PowerPoint” (.pptx), Idêntico + Editável (shipped)
+- **Files**: `ed-41-pptx.js` + `ed-41-pptx.css` (editor-only `ed-*`: `<script id="am-ed-41-pptx">` after `ed-40-export.js`; not in exported files). Test helpers: `test-s23-pptx.js` (suite), `test-s23-tools.py` (python: `fonts` = static TTFs for LibreOffice from `../fonts2`, `inspect` = python-pptx + zip/XML/relations report). `test-s22-pdf.js` S22-11/12/33 updated: the PowerPoint items are now **enabled**; S22-33 removes the hook to prove the disabled state + tip, then restores it. No `editor.js` / `editor.html` change.
+- **API** (`window.AMExport`, S22 hook): `pptx(deck, {opener})` opens the dialog (▾ “PowerPoint (.pptx)…” and Arquivo “Salvar como PowerPoint…” enable automatically); `pptxBuild(deck, {list | range, from, to, cur, includeHidden, mode:'image'|'edit', notes=true, signal:{cancelled}, onProgress(i, n)}) → Promise<Blob|null>` (null = cancelled; MIME `application/vnd.openxmlformats-officedocument.presentationml.presentation`); `zip(files[{name, data: Uint8Array|string}], mime) → Promise<Blob>`; `crc32(u8)`; `pptxDialog {open, close, isOpen}`; `last` gains `mode` and `hidden`.
+- **Package** (hand-written OOXML, no library): `[Content_Types].xml` (first entry) · `_rels/.rels` · `docProps/core.xml` (dc:title = deck title, creator Canteiro, W3CDTF dates) + `app.xml` (Slides/Notes/HiddenSlides) · `ppt/presentation.xml` (sldSz 12192000×6858000, notesSz, defaultTextStyle) + rels · `presProps` · `viewProps` · `tableStyles` · `theme/theme1.xml` (A&M colours, Roboto/Inter) · `slideMasters/slideMaster1.xml` + rels · `slideLayouts/slideLayout1.xml` (blank) + rels · `slides/slideN.xml` + rels · `notesMasters/notesMaster1.xml` + `theme2.xml` · `notesSlides/notesSlideN.xml` (only slides with `slide.notes`; one paragraph per line) · `media/imageN.(jpeg|png|gif)`. Hidden slides → `<p:sld show="0">`. ZIP = STORE, CRC-32 (table), UTF-8 flag (bit 11), DOS date, local + central headers + EOCD; CRC in 4 MB slices with `setTimeout` yields (100 MB: ≈ 1 s, CRC equals zlib). XML text: `& < > "` escaped, control chars and lone surrogates removed. 1 logical px = 9525 EMU, font px → pt × 0.75 (sz = px × 75), rotation = deg × 60000 (normalised 0…360).
+- **Mode “Idêntico” (default, recommended)**: each slide = one `p:pic` full-bleed, JPEG from `AMExport.rasterSlide(slide, {scale:2, type:'jpeg', quality:.92})` (2560×1440), `descr` = slide text (accessibility/search), slide background colour kept under it; ≈ 135 KB per slide.
+- **Mode “Editável”**: the slide is mounted off-screen (`#amkHost`, 1280×720 CSS px, static `renderSlide`) and every text is read from the **computed styles** of the rendered DOM (so `<b>`, `<span style>`, `<font>`, `<u>`, `<s>`, `<sub>/<sup>`, `<mark>`, lists… come out exactly as the browser resolved them):
+  - *Text* → `p:sp txBox="1"`: paragraphs split at `<br>` and block elements (div/p/li; a trailing `<br>` in a block adds no line), whitespace collapsed; runs merged by format; `rPr` sz/b (weight ≥ 550)/i/u/strike/baseline/cap (uppercase)/spc (letter-spacing)/colour + alpha/highlight/latin-ea-cs typeface. Typeface = first family of the computed stack (Inter, Roboto, Roboto Condensed, JetBrains Mono; others as named); weight ≤ 349 on Roboto → **“Roboto Light”** (the only light face the page loads; `<b>` inside a 300 title is “bolder” = 400 → Roboto Regular, as on screen). Paragraph: algn, exact line spacing `spcPts` = computed line-height (px × 75), spcBef/After from block margins (CSS margin collapsing approximated; the first/last ones go into the box insets), bullets for `<ul>/<ol>` (buChar • ◦ ▪ / buAutoNum). Body: insets from the DOM (`.am-text` inset + padding: 0 for plain text, 16 px with a text background, 14 px in shapes, `shapeInset` %), anchor from `valign`, `wrap="square"`, `<a:noAutofit/>`. **Baseline compensation**: the browser centres each line in its line-height, PowerPoint/LibreOffice put the extra leading above → tIns −= d, bIns += d with d = (line-height − (ascent+descent)·size)/2 (metrics table `MET`: Inter .969/.241, Roboto .928/.244, JetBrains Mono 1.02/.30).
+  - *Shapes* → `prstGeom` + `avLst` matched to the runtime geometry: rect (radius > 0 → roundRect), round/pill → roundRect, ellipse, triangle, diamond, para → parallelogram, chevron, arrow → rightArrow (adj1 44000), pentagon → homePlate, hexagon (vf 115470), octagon, trapezoid, rtri → rtTriangle, darrow → leftRightArrow, ring → donut, star → star5 (adj 22500), plus → plus (square only); look outline/lift mapped (white + hairline / soft navy shadow). Text **inside** the shape: insets compensate the preset's own text rectangle (formulas from presetShapeDefinitions, cross-checked with LibreOffice's `oox-drawingml-cs-presets`; may be negative). Fill/line colour + alpha, `custDash` 3:2 for dashed, `outerShdw` for the runtime drop-shadow, `flipH/flipV`, rotation. **No equivalent** (callout, cylinder, wave, notch, brackets/braces, plus not square, looks accent/topbar/header/gradient/ice, or a flipped shape *with text* — PowerPoint would turn the text upside down) → *hybrid*: the body is rasterised with the text made transparent (`inkless`, so a growing Cabeçalho band stays) as a PNG, and an editable text box sits on top, grouped (`p:grpSp`, rotation on the group).
+  - *Lines* → `p:cxnSp`: `straightConnector1`, `bentConnector3` (adj1 = bend), `curvedConnector3`; endpoints → off/ext + flipH/flipV; vertical-first elbow/curve = rot 90° with flips solved for the start point; heads: arrow → triangle, open → arrow, dot → oval, diamond → diamond (headEnd = start, tailEnd = end; w/len from the runtime head size ÷ stroke), “bar” → an extra short perpendicular connector; `custDash` per dash style; round caps where the runtime uses them.
+  - *Photos* → `p:pic`: cover = centred `srcRect` crop from the natural size; contain = the frame is the whole box and the photo is letterboxed with a **negative** `srcRect`; radius → roundRect geometry; flips, rotation, opacity (`alphaModFix`), shadow (`outerShdw`). Data URIs png/jpeg/gif go in as-is (one media file per distinct source); svg/webp/http/blob → PNG through a canvas.
+  - *Background*: `p:bg` solid colour + `bgImg` as a bottom full-slide picture “Imagem de fundo” (cover crop, `alphaModFix` = `bgImgOp`).
+  - *fx* (charts, models, SmartArt, icons, A&M lines, cards, counters…) → transparent PNG via `AMExport.rasterEls` at 2×: the element (rotation removed) is centred on the off-screen stage with a generous margin (30 % of its size, ≥ 80 px — chart legends overflow their box), the PNG is cropped to its non-transparent pixels and placed so that PowerPoint's rotation about the picture centre equals the browser's rotation about the element centre (`rotBox`). Name = `AMRT.fxLabel` + n, `descr` = its text.
+- **Dialog** `#xkDlg.xp.xk` (same look and behaviour as S22's `#xpDlg`: classes `.xp-*`, focus trap, Esc, keys stop at the dialog; ids `xk*`): mode cards **Idêntico** (badge “recomendado”) / **Editável** (choice kept for the session), summary, font warning (Editável only: lists the fonts used by texts/shapes of the chosen slides — “precisam estar instaladas … o PowerPoint usa outra fonte”), Slides: Todos / Slide atual / De … a …, **Incluir slides ocultos (n) — entram ocultos, como no PowerPoint** (default ON when the deck has hidden slides; OFF = omitted), **Levar o resumo de cada slide para as anotações do orador (k slides têm resumo)** (default ON), slide count + estimated size, progress “Gerando slide i de n…” / “Montando o arquivo…”, Cancelar / **Exportar PowerPoint** (“Cancelar exportação” while busy; cancel keeps the dialog open, toast “Exportação cancelada”, nothing downloaded). Done → `AMStudio.download(slug(title) + '.pptx', blob, MIME)`, dialog closes, toast “PowerPoint salvo: nome.pptx · N slides (h ocultos) · 1,2 MB”. Opening the PowerPoint dialog closes the PDF one if open. Checked at 390×800, 1280×720, 1440×900.
+- **Data**: no new deck/slide/element fields; exporting never mutates the deck and adds no undo step.
+- **Verified** (`test-s23-pptx.js`, 29 checks, ≈ 75 s; needs python-pptx, LibreOffice **Impress** (`apt-get install libreoffice-impress` — the machine only had `libreoffice-core`; installed for this step), pdftoppm, unzip, fontTools+brotli (pip) for the font step): menus, dialog defaults, Idêntico through ▾ → download → python-pptx (7 slides, 16:9, title, hidden flag, notes) → `zipfile -t` + `unzip -t` + every XML part parsed + relations/content types → LibreOffice (6 pages by default = honours `show="0"`; 7 with `ExportHiddenSlides`) → `pdftoppm -r 192` vs the editor drawn at 2×: **98.2–99.96 %** of pixels within ±24, mean ≤ 1.6. Editável through Arquivo: runs/fonts/sizes/paragraphs/accents, geometries + rotations + flips, hybrid groups, 9 connectors with the right heads, photos (crop, negative crop, alpha), fx PNGs, background + photo at 35 %; LibreOffice vs editor **97.5–99.8 %** within ±40 (97.3–99.8 % within ±24). Range 2–3, hidden off (6 slides) / on (hidden), “Slide atual” on a hidden slide, cancel at slide 3 of 16, keyboard, 390/1440/1280, ribbon at 1280, deck unchanged + reopen + export again, `#bSave` still .html, 100 MB ZIP (CRC = zlib), zero console errors. Probe (not in the suite): the 5 cover templates (32 slides) in Editável → every slide ≥ 97.1 % within ±40 in LibreOffice, ≈ 1.1 s per slide.
+- **Differences seen** (Editável, LibreOffice, fonts installed): glyph widths differ by ~1 % (LibreOffice hinting vs Skia), so a long line can wrap one word earlier/later; a line containing `<sup>`/`<sub>` is taller in the browser (line box grows) than the fixed `spcPts` line; curved connectors use PowerPoint's two-segment S-curve (slightly different bow from the runtime's single cubic); elbow corners are sharp (runtime rounds them by 10 px); diamond/dot heads are a little smaller; a “contain” photo's shadow follows the photo, not the empty letterbox; Inter 500/600 become Regular/Bold (PowerPoint has only a bold flag).
+- **Caveats**: (1) Editável depends on the viewer's fonts: without Inter/Roboto/Roboto Condensed/JetBrains Mono (and “Roboto Light”) PowerPoint substitutes and line breaks change — the dialog says so; Idêntico has no such dependency. (2) Only LibreOffice was available to verify rendering; PowerPoint itself was not run — the package follows the ECMA-376 structure python-pptx and LibreOffice accept, and the preset text-rectangle formulas are the standard ones, but the baseline compensation and negative insets/negative `srcRect` are assumed to behave in PowerPoint as in LibreOffice. (3) fx elements are pictures (not native charts/SmartArt). (4) Animations/effects are not exported (final state, as requested). (5) Editável takes ≈ 1 s per slide with many components (each one is rasterised separately); Idêntico ≈ 0.2 s per slide.
+
+### S21b status: fixes from the adversarial review of S21–S23 (shipped; suite `test-s21b-revisao.js`, 41 checks)
+- **Blocker — XML-illegal characters broke every export.** A pasted Office soft line break (U+000B), U+0001/U+000C, U+FFFE/FFFF or a lone surrogate in any slide text made `svgFor` produce an SVG the `<img>` refuses (and `encodeURIComponent` throw), so PDF and PowerPoint Idêntico failed whole (“Não foi possível desenhar o slide”) and Editável silently glued words. Now: `AMExport.xmlSafe` strips those characters (lone surrogates → U+FFFD) in `svgFor`; the editor normalises at the sources — `cleanHTML` (text nodes: U+000B → `<br>`, other C0 removed; so `safeEl` on load and `endEdit` after a paste are covered), `pastePlain`, and the slide fields notes/sec/secSub/title in `safeSlide` (U+000B → newline); the PPTX writer's `xe()` uses a pair-aware surrogate regex and `parasOf` turns U+000B into a paragraph break (same as `<br>`). `pdf()` and `imageSlide` name the slide in the error (“slide N não pôde ser desenhado”).
+- **Export robustness**: `waitImages` races each `img.decode()` against 8 s (a photo that never decodes no longer freezes the dialog); **Cancelar / Esc / X act at once** in both dialogs (`cancelRun` flips the signal, frees the dialog, toasts “Exportação cancelada”; the late promise is ignored by the `st.sig !== sig` guard); while busy the focus sits on “Cancelar exportação”, afterwards on “Exportar”; the X carries `aria-disabled` while busy.
+- **Print path**: the gauge gradient id is `nid('gg')` per render (a fixed `gg-<el.id>` collided between the editor stage, thumbnails and `#amPrint`, and the “PDF pelo navegador” lost the value arc); `preparePrint` sets `document.title` to the deck title (restored on cleanup) so the browser's PDF is named after the deck; export stages get `.am-export` instead of `.am-edit`, so editor-only hints (`.sa-empty`, `.it-empty`) never print; `window` `beforeprint` (browser menu › Imprimir) calls `preparePrint(deck, {range:'all'})` so the slides print instead of the editor UI; **Ctrl+P** opens “Salvar como PDF” (also with the ▾ menu open, like Ctrl+S now).
+- **PDF text layer** (`winAnsi`): symbol map (`SYM`: − ‐ ‑ → '-', → '->', ← '<-', ≠ '!=', ≤ '<=', ≥ '>=', … '...', « » ‹ ›, bullets, check marks), invisible characters dropped (soft hyphen, ZW*, BOM), NFD base letter only for letters (`\p{L}`), everything else '?'. Range inputs have accessible names (“Intervalo de slides”, “Do slide nº”, “Até o slide nº”); a reversed range is swapped in the fields.
+- **Redefinir slide** (`editor.js`): snapshots now carry `t` (element type, `fx:<kind>` for components) and `dsel` = every `sel:`/`smartlayout` field of the component (strings matching `TOKEN_RE`/`COLOR_RE` or finite numbers; always present, even empty, so a field absent from it means “default” and `applySnap` deletes a later choice — a base from an older file without `dsel` leaves choices alone); slides **without a layout** (cover templates, opened files) keep in `base.tpl` a sanitised clone of each non-image element, so a deleted text/shape/line/component **comes back** (fresh id on collision); deleted photos do not (the toast says “1 foto apagada não volta (use Ctrl+Z)”); a layout element is re-created only if its type still matches the snapshot's `t`; after the reset the stack is re-sorted into `ph` order with added elements kept right after the original they followed. `safeBase` validates `tpl` (through `safeEl`, images and keys without a snapshot dropped) and `dsel`.
+- **PowerPoint** (`ed-41-pptx.js`): layout is now `titleOnly` with a title placeholder (master too); Editável marks the text element whose plain text equals `RT.slideTitle(slide, i)` as `<p:ph type="title"/>` (explicit spPr/rPr kept, no `txBox`), or adds a hidden-behind placeholder when no text matches; Idêntico puts a title placeholder **behind** the full-slide picture — PowerPoint's outline/navigation/accessibility checker see slide names, pixels unchanged (fidelity re-measured: Idêntico 98.2–99.96 %, Editável 97.5–99.8 %). `Media.addSrc(src, want)`: JPEGs with EXIF orientation ≠ 1 are re-encoded through the canvas (baked); SVG/WebP/http/blob and data images smaller than ⅔ of their displayed size are rasterised at 2× the displayed size (≤ 4096 px); a tainted canvas (http image without CORS) retries with `crossOrigin='anonymous'`, and an image that still fails is dropped and counted (`blob.dropped`, toast “n imagens não puderam ser incluídas”) instead of aborting; `AMExport.jpegOrient(u8)` reads the APP1 tag (the editor's `readImage` uses it to bake orientation at insert time). Dialog: lists which components go as images (“Vão como imagem: 3× Gráfico…”), font warning includes “Roboto Light” when a text resolves to Roboto ≤ 349, Idêntico estimate ≈ 190 KB/slide + photo term, “Levar o resumo…” is disabled/unchecked when no chosen slide has notes (hint points to “Sobre este slide”), and when every chosen slide is hidden (e.g. “Slide atual” on a hidden slide) the slides are written **visible** with a warning in the dialog (an all-hidden .pptx has an empty slideshow).
+- **Counters**: slide panel header “7 slides · 5 na apresentação” when any is hidden; `#sidePos.hid` (strike-through, title “· oculto na apresentação”); the Shift+F5 toast says “próximo”/“último” correctly; “Gerar resumo automático” counts visible slides (“slide i de N” as the player shows). `slug()` turns punctuation into separators (“Q3/2026” → `q3-2026`), caps at 80.
+- **Not done from the review** (documented limitations): Editável still exports text-centric components (headline, quote, counter, cards, RACI…) as PNG — the dialog now says which; bullets in Editável are literal “• ” characters, nested levels are not written as `lvl`; the text layer of rotated text is still per-word axis-aligned boxes; hidden chapter dividers still fold their chapter into the previous one in the rail; Redefinir does not grow shapes whose text no longer fits.
+
+### S24/S25 status: “Importar PowerPoint ou PDF…” — .pptx and .pdf become editable slides (shipped; suite `test-s24-import.js`)
+- **Files**: `ed-42-import.js` + `ed-42-import.css` (editor-only `ed-*`; nothing goes to exported files). Test helpers: `test-s24-tools.py` (`make` = coverage decks with python-pptx: fx-a 16:9 coverage, fx-b 4:3 placeholders, fx-c text+photo, fx-big 40 slides; `pdf` = LibreOffice conversion), `vendor/pdfjs-4.10.38/` (pdf.js build + LICENSE, served to the test page by a Playwright route in place of the CDN — the gate has no internet).
+- **API**: `window.AMImport = { open(file, opener), pick(opener), pptx(bytes, {notes, signal, onProgress}) → {title, slides, ctx}, pdf(bytes, …), finish(result, file, {mode:'replace'|'append'}) → report, isImportFile(f), isOpen(), close(), zipOpen, loadPdfjs }`. Editor side (`editor.js`): `AMStudio.appendSlides(slides)` (safeSlide → freshSlide → stampSlide, pushed at the end, current = first added, **one** `commit()` so one Ctrl+Z removes them all), `AMStudio.isBlank()`, `importPicker()` behind Arquivo › **Importar PowerPoint ou PDF…** (after “Minhas obras…”, `IC.import`; disabled with a tip if `AMImport` is missing; the label has no “abrir” — ARCH §0 invariant kept), `dragKind` → `'import'` for `.pptx`/`.pdf` drops on the stage, hidden `<input id="fImport" accept=".pptx,.pdf">` created lazily by the module. Runtime: `fontStack(name, dflt)` — an element font outside Inter/Roboto/Roboto Condensed/JetBrains Mono (e.g. Calibri from an import) is used when installed on the viewer's machine, with the normal stack as fallback; the props panel adds “<name> (do arquivo importado)” to the font select so the value never disappears.
+- **PowerPoint reader** (no library): own ZIP reader (central directory + `DecompressionStream('deflate-raw')`), XML via `DOMParser` (namespace-agnostic `localName` helpers). Package: `_rels/.rels` → presentation → `sldIdLst` order, `sldSz` (fit into 1280×720 keeping the aspect: 4:3 decks get 160 px side bands in the slide's own background colour), `defaultTextStyle`, `p14:sectionLst` (section name → `slide.sec` on its first slide), `docProps/core.xml` title → deck title. Per slide: layout → master → theme (`clrScheme` with `clrMap`/`overrideClrMapping`, `fontScheme` major/minor, `fmtScheme` line widths, fill/bg fill styles), `show="0"` → `hidden`, notes slide body → `slide.notes`, title placeholder → `slide.title`. Shapes come from the master and layout (non-placeholder decoration: logos, bars; honouring `showMasterSp`) and then the slide.
+  - *Placeholders*: xfrm/fill/line inherited from the layout placeholder (by `idx`, then by type; title/ctrTitle, body/subTitle/obj equivalences) and then the master; text style chain = own `lstStyle` → layout ph `lstStyle` → master ph `lstStyle` → master `txStyles` (title/body/other) → `defaultTextStyle`. Empty placeholders (prompts) are dropped.
+  - *Text* (`readText`): per paragraph `algn`, `marL`/`indent`, bullets (`buChar`, `buAutoNum` with counters per level and arabic/alpha/roman schemes, `buNone`), `lnSpc` (pct → 1.2×, pts), `spcBef`/`spcAft`; per run `sz`, `b`, `i`, `u`, `strike`, `cap`, `spc`, `baseline`, colour (solidFill with lumMod/lumOff/tint/shade/alpha/satMod on scheme colours), `latin typeface` (`+mj-lt`/`+mn-lt` → theme fonts); `fld` slidenum → the number; `br`; `normAutofit fontScale`/`lnSpcReduction`; `wrap="none"` → `white-space:nowrap`; `vert`/`vert270` → rotated box; `bodyPr` insets subtracted so a text box's geometry is the text area. The element base (font/size/weight/italic/colour) is the **dominant run** (most characters); each paragraph is a `<div>` with its own `font-size` in em (relative to the base) and a unitless `line-height`, runs are `<b>/<i>/<u>/<s>/<sup>/<sub>` plus `<span style>` for size (em, relative to the paragraph), colour, family, caps, spacing — everything inside `cleanHTML`'s allow-list.
+  - *Shapes*: `prstGeom` → Canteiro shape (`GEO` table: rect/roundRect family/ellipse/triangle/rtTriangle/diamond/parallelogram/trapezoid/chevron/homePlate/hexagon/octagon/arrows (left = flipH, up/down = ±90° with swapped box)/leftRightArrow/notchedRightArrow/callouts/can/donut/bracket & brace pairs/stars/plus/wave/flowchart basics); `roundRect` radius from `adj` (50 % → pill); anything else and `custGeom` → `rect` with the same fill/stroke/text and counted (“N formas sem equivalente viraram retângulos”). Fill: `solidFill`/`gradFill` (average of stops)/`pattFill` (fg)/`noFill`, else `p:style/fillRef` (theme fill style with `phClr`); line: `a:ln` (w, colour, `prstDash` → `dash`/`dashS`, `headEnd`/`tailEnd` → heads), else `lnRef`; text colour default from `fontRef`; `effectLst/outerShdw` → `shadow`; fill alpha → `opacity` (shapes without text); a shape with no fill and no line but text → **text element**; `blipFill` on a shape → picture in the shape's box.
+  - *Lines*: `p:cxnSp` and `p:sp` with line/connector geometry → `line` (endpoints from xfrm + flips, rotation about the centre; `bentConnector*` → `curve:'elbow'` with `bend` from adj, `curvedConnector*` → `'curve'`).
+  - *Pictures*: `a:blip r:embed` → media part → data URL (PNG/JPEG/GIF kept; SVG/WebP/BMP rasterised to PNG; EMF/WMF/TIFF and external links dropped and counted); `srcRect` crop baked through a canvas (the Canteiro has no free crop); `roundRect`/`ellipse` geometry → `radius`; `alphaModFix` → `opacity`; shadow. Slide/layout/master `bg` with `blipFill` → `slide.bgImg`; `bgRef` → theme bg fill colour.
+  - *Groups* flattened with the `chOff/chExt` transform, group rotation (about the group centre, added to children) and flips. `mc:AlternateContent` → `Fallback` (else `Choice`).
+  - *Tables* (`a:tbl`): one `rect` shape per cell (spans/merges honoured), own `tcPr` fill/borders, else the built-in table style colour (accent by `tableStyleId`; header = accent with white bold text, bands = 20 %/40 % tints, white borders), cell text through the same text reader (`otherStyle` chain), anchor → `valign`.
+  - *Charts* (`c:chart`): bar (col) → `columns` (cats, up to 4 series, clustered/stacked/percent → `mode`, series colours); bar (horizontal) → `hbars`; pie/doughnut/ofPie → `donut` (point colours); line/area → `linechart`; title kept. Other types → a dashed “Gráfico — não importado” placeholder (counted). The look is the Canteiro's, the data is editable in the panel.
+  - *SmartArt* (`dgm`): the `diagramDrawing` part's `dsp:sp` shapes are read as ordinary shapes offset by the frame (editable boxes/text); without a drawing part → placeholder. *OLE/unknown frames* → their fallback `p:pic`, else placeholder.
+  - Animations, transitions, slide timings, comments and hyperlinks are **not read** (by decision; the report says so).
+- **PDF reader**: pdf.js 4.10.38 loaded on demand with `import()` from cdnjs → jsdelivr → unpkg (`window.AM_PDFJS` overrides the base; the test routes cdnjs to `vendor/`). Each page: **background** = the page rendered at 2× with `fillText`/`strokeText` stubbed on the canvas context (pdf.js draws glyphs with them; vector shapes, fills and images stay) → JPEG `bgImg` (skipped when the page is blank), `slide.bg` sampled from the corner; **texts** = `getTextContent()` items grouped into lines (same baseline/rotation) and blocks (same font/size, aligned left/centre/right, spacing ≤ 1.9×) → one text element per block (`<br>` per original line, `white-space:nowrap`), size from the text matrix, `lh` from the baseline pitch, alignment from the edges, rotation from the matrix, font/weight/italic from `commonObjs` (family name cleaned of the subset prefix), **colour** = modal colour of the pixels that differ between the full render and the text-less render inside the block's box (quantised, then averaged), baseline-aligned placement (`y = baseline − ((lh−1)/2 + 0.92)·size`). Text drawn as paths (Type3/unembedded fonts) stays in the background and gets no text element; text inside images is not text.
+- **Dialog** `#xmDlg.xp.xm` (same look/behaviour as the export dialogs: focus trap, Esc, keys stop at the dialog, busy state, immediate cancel with the `st.sig !== sig` guard, X cancels while busy): file name/size/kind (magic bytes + extension; `.ppt`, `.odp`, `.key` and others refused with a message), “Onde colocar” = **Substituir** (default when the deck is blank; says “Ctrl+Z não desfaz” otherwise) / **Adicionar ao final (N slides)** (default otherwise), “Trazer as anotações do orador para ‘Sobre este slide’” (pptx), summary of what is imported and the limits, progress per slide, then an in-dialog **report** (chips: slides, textos, formas, linhas, imagens, tabelas, gráficos, SmartArt, anotações, ocultos; warnings: approximated shapes, dropped images, chart/SmartArt/object placeholders, fonts the Canteiro does not ship, charts converted) and “Concluir”. Toast: “Apresentação importada: N slides” / “Slides adicionados: N · Ctrl+Z desfaz”.
+- **Measured** (`test-s24-import.js`, Chromium `--disable-lcd-text`, LibreOffice renders at 96 dpi, pixels within ±40): fx-a slide 1 (shapes/table/lines/photo) × LibreOffice ≈ 92.5 %; fx-b 4:3 placeholders × LibreOffice ≈ 98.4 %; **round trip** S23 Editável export → import ≈ 98.4 % (text formatting, shapes, lines, photo come back as the same element types); PDF page (LibreOffice-made) × pdftoppm ≈ 97.6 %; the real 24-page client PDF (confidential: read only, never written) ≈ 97.0 % on page 1, 328 text blocks, ≈ 4.8 s. Import times: fx-a 28 ms, 24-page PDF ≈ 4.8 s (pdf.js in a worker).
+- **Limitations** (also stated in the dialog/report): fonts not shipped with the Canteiro depend on the viewer's machine (else Inter; line breaks can move); PowerPoint shapes without an equivalent become rectangles; custom geometry, EMF/WMF/TIFF pictures, external picture links, 3D/other chart types, SmartArt without a stored drawing and embedded objects without a fallback picture become placeholders or are dropped (all counted); gradient fills become their average colour; picture borders, soft edges, reflections, glow are not reproduced; table cell borders use one colour/width per cell; vertical text other than 90°/270° is not rotated; PDF: shapes/lines/images of the page are background (not editable), text drawn as outlines or inside images is not editable, colour of text over photos is the modal colour of the glyph pixels (usually right, can be off on busy photos), each original line is a hard line break.
+
+### S26 status: text formatting toolbar + stroke presets (shipped; suite `test-s26-texto.js`, 23 checks)
+- **Audit** (user list item 2): colours (S19 swatches + “Mais cores…”, S20 component colours), line thickness (`strokeW` field), arrow heads (both ends, 5 kinds), dashes, routes, element-level bold/italic/caps already existed. What was missing: formatting **inside** a text (per run) and quick thickness presets.
+- **Toolbar** `#txBar.frbar.txbar` (role toolbar, rendered by `drawSel` only while `editingId` is a text or a shape with text; placed at the top-left of the element, below it when there is no room; `mousedown` is prevented so the contenteditable keeps focus; the `#cv` pointerdown, double-click and context handlers treat it like `#frBar`): **B I U S** · **A− A+** (wraps the selection in `<span style="font-size:0.87em|1.15em">` — em, so it scales with the stage; repeats nest) · **cor do texto** (`AMColorPop.open`, `txHold` consumes the first blur so the edit session survives; the pick runs `foreColor` with CSS → `<span style="color">`) · **marcador** (`hiliteColor` orange, toggles) · **lista com marcadores / numerada** (`insertUnorderedList/OrderedList` → `<ul>/<ol>/<li>`; `runtime.css` now styles `.am-tx ul/ol` with 1.25 em padding, so lists render in thumbnails, player, exports and imported decks) · **esquerda / centro / direita** (`justify*` with CSS → `text-align` on the paragraph) · **limpar** (`removeFormat`). Bold/italic/underline/strike use `styleWithCSS=false` → compact `<b>/<i>/<u>/<strike>` (same tags the importer writes); everything passes `cleanHTML` at `endEdit`. Button states follow `document.queryCommandState` on `selectionchange` (`aria-pressed`).
+- **Keys** (inside the contenteditable, editor keydown): Ctrl/⌘+B, I, U; Ctrl+Shift+8 bullets, Ctrl+Shift+7 numbering (`e.code` Digit8/Digit7). The whole edit session is one undo step (unchanged).
+- **Stroke presets**: `wSeg()` (Fina 1 · Normal 2 · Média 3 · Grossa 4 · Extra 6 · Máxima 8 px) under the thickness field of lines and shape outlines; `act('sw-N')` sets `strokeW` (a shape with no outline gets the default outline colour), one `commit()`.
+- **Verified**: toolbar only while editing, 14 buttons inside the stage; B/I/U by button and by keys; strike; A+ nesting; colour via the popover hex field; marker; lists and alignment; clear; HTML allow-list; one Ctrl+Z; S23 Editável export reads b/i/u runs and 5 paragraphs (lists become bullet/numbered paragraphs); PDF; saved file shows bold and the 4 list lines in the player; reopen; presets on line and shape; Ctrl+Z; shape text also gets the bar; zero console errors.
+- **Limits**: lists are first-level only (no Tab indent levels yet — S27 lists item); the browser's native Ctrl+Z inside the contenteditable is the browser's own history (as before); font family/size per run come from A−/A+ and the panel, not from a font picker in the bar.
+
+### S27a status: groups, lock, layers panel, format painter, slide numbers (shipped; suite `test-s27-organizar.js`, 38 checks)
+- **Data**: `el.grp` (string id `/^[\w-]{1,40}$/`, shared by the members of a group), `el.lock === true`, `deck.num = {on:true, pos:'tl'|'tr'|'bl'|'br', from?}` — all validated in `safeEl`/`safeDeck`; nothing else changes in the file. `RT.stampNums(deck, map?)` writes a **non-enumerable** `_num = {n, pos}` on each slide (never serialised; `commit()`, `renderAll()` and the player call it; the player passes `map` so numbers are the original positions, like PowerPoint, even with hidden slides); `renderSlide` draws `.am-num.am-num-<pos>` (`.dk` on dark backgrounds; `runtime.css`), so thumbnails, the editor stage, the player, the PDF (text layer included) and the PowerPoint exports all carry the number.
+- **Groups** (`groupSel`/`ungroupSel`, Ctrl+G / Ctrl+Shift+G, Organizar menu, context menu, multi-selection panel chips): a click on a member selects the whole group (`withGroups`), the marquee takes whole groups, a second click on a member of the selected group selects just that member (the existing collapse-on-click), moving/resizing/rotating/deleting act on the selection as before; `dupSel` and paste remap `grp` so copies form a new group (`remapGrp`). The frame label reads “Grupo · N elementos”.
+- **Lock** (`lockSel`, Ctrl+Shift+L, chips, menus, layers list): a locked element is selectable (dashed frame + lock badge, no handles, no rotation handle) but pointer drag, arrows, resize, rotate, flip and Delete are refused with one throttled toast (`lockHint`); Delete on a mixed selection removes only the unlocked ones and says how many stayed; text editing still works (template use: fixed position, editable text).
+- **Layers** (`layersSec`, slide panel, end): one row per element, top-most first — type icon, name + a 30-char text preview, “grupo” tag, ▲/▼ (one z-step, `layerAct`), lock toggle (`aria-pressed`), click the name to select (group-aware). The element panel has a “Camadas” chip that deselects and scrolls to the list (`showLayers`, also Organizar › Camadas do slide…).
+- **Format painter** (`copyFmt`/`pasteFmt`, Ctrl+Alt+C / Ctrl+Alt+V — Ctrl+Shift+C/V are Chrome's DevTools keys; chips, menus): copies only format fields (`FMT` per type: text/shape text fields + shape fill/stroke/look, line stroke/heads/route, image radius/shadow/fit, fx `pal` + `data.colors`/`style`), never content; text ↔ shape share the text fields, other cross-type pastes are refused with a toast; one `commit()`.
+- **Slide numbers**: slide panel › “Numeração dos slides” (switch + 4 corner positions; `numAct`). Validated: on/off, positions, thumbnails 1/2/3 (hidden slide numbered too), player shows original positions, JSON carries `num` and no `_num`, PDF text layer has the number, PPTX Editável valid, `from` honoured, invalid values dropped.
+- **Keys**: shown next to the menu items (Organizar and context menu) and in `docs/KEYMAP.md`; the F1 manual keeps its 17-row invariant (test-cover), so they are not listed there.
+- **Still open for S27b**: image crop, list levels (Tab/Shift+Tab inside lists), find & replace across slides.
+
+### S27b status: image crop, list levels, find & replace (shipped; suite `test-s27b-recorte.js`, 24 checks)
+- **Crop** `el.crop = {l,t,r,b}` (fractions of the original photo, 0–0.9 each, opposite sides ≤ 0.95 together; `safeEl` validates, images only). Runtime `cropOf(el)` + `content()`: with a crop the photo is rendered inside `.am-crop` (absolute, overflow hidden, radius/shadow/flip on the wrapper) as an `<img>` sized `100/(1−l−r)` × `100/(1−t−b)` % and offset by `−l·sw` / `−t·sh` %, `object-fit: fill` — the visible slice fills the box, the original bytes stay. Panel (image section): **Recortar** toggles four range inputs (`data-p="crop.l|t|r|b"`, `applyProp` clamps and keeps opposite sides ≤ 95 %), **Ajustar à caixa** sets the box height from the slice aspect (natural size read from the stage `<img>`, as PowerPoint does), **Sem recorte** deletes `crop`. Export: `ed-41` writes the crop as `srcRect` with the whole picture (round corners kept); import (`ed-42`): a positive `srcRect` becomes `el.crop` with the whole picture (negative/letterbox crops are still baked through the canvas). Not in `Redefinir` snapshots.
+- **List levels**: inside a text being edited, **Tab** / **Shift+Tab** on a list item run `indent` / `outdent` (nested `<ul>/<ol>`, Chrome's own nesting); `runtime.css` styles nested lists (circle, square). `ed-41` `parasOf` now counts list ancestors → `lvl` attribute and cumulative `marL` on the paragraph (the S23 review's “nested lists lose their level”).
+- **Find & replace** (`openFind`, Ctrl+F / Ctrl+H, Editar › Localizar e substituir…): non-modal floating panel `#xfDlg.xf` (right of the stage; keys stay inside: Enter = next, Shift+Enter = previous, Esc = close, Ctrl+F refocuses the field). Scope: text and shape `html` **text nodes** (markup kept — `<b>Receita</b>` → `<b>Faturamento</b>`), and the text slots of component data (`xfSlots`: strings in `el.data` recursively, skipping `NOTEXT` keys, ids/srcs and colour-like values). Occurrences are counted per text node/slot (`xfCountIn`, case-insensitive by default, “Diferenciar maiúsculas” option); the label reads “k de N · N ocorrências em M slides”. Anterior/Próximo go to the slide and select the element; **Substituir** changes the current occurrence only; **Substituir tudo** changes every occurrence in one `commit()` (one Ctrl+Z); touched slides re-render (stage + thumbnails). Opening with a text selected pre-fills its first word.
+- **Verified**: crop controls/render/fit/none/undo, PPTX `srcRect` 25000 with the whole 800 px photo, import keeps the crop with the 400 px original; Tab nests “Segundo”, Shift+Tab returns, saved HTML keeps the nesting, PPTX has `lvl="1"` and 3 bullets; find: count 4 in 2 slides, navigation, replace one (shape), replace all (bold kept, component data, caps), Esc, one Ctrl+Z, case-sensitive 1, Editar has one entry; zero console errors.
+- **Limits**: find & replace does not search slide notes/titles or the deck title; occurrences split across formatting (e.g. “Rec<b>eita</b>”) are not matched; crop has no drag handles on the stage (sliders only); list levels depend on the browser's `indent` nesting (ul inside ul), which the exporter and importer both accept.
+
+### S28 status: ready-made editable layouts and slide blocks (shipped; suite `test-s28-layouts.js`)
+- **Slide layouts** (`LAYOUTS`, editor.js; appear in “Novo slide ▸”, `#mSlide`, context menus and the S21 reset machinery): **Agenda** (4 numbered rows with time budget), **Resumo executivo** (SCR card grid + decision quote), **Painel de indicadores** (4 counters + columns chart + bullet chart), **Roadmap** (roadmap component + reading note), **Comparativo** (two cards, recommendation quote), **Próximos passos** (timeline + 3 owner/deadline rows). Each is built from existing components, fits 1280×720, gets `base`/`ph` through `mkSlide` so **Redefinir slide** works, exports to PDF/PPTX like any slide, and is editable field by field in the panel. The whole-deck “Projetos prontos” of the cover were 5 until S34b added “Apresentação institucional A&M” as the 6th (test-cover invariant: 6) — deck-level sets are now provided as blocks instead:
+- **Blocks** (`SEQS`, `insertSeq(key)`, Slide › **Inserir bloco pronto ▸**): *Proposta comercial* (capa, agenda, conteúdo, roadmap, comparativo, encerramento), *Painel executivo* (divisor, painel, indicadores), *Roadmap de transformação* (divisor, roadmap, próximos passos), *Apresentação executiva* (capa, resumo executivo, conteúdo, próximos passos, encerramento). Inserted after the current slide, the first new slide becomes current, one `commit()` (one Ctrl+Z removes the block). `AMStudio.insertSeq` / `AMStudio.SEQS` exposed for tests.
+- **Verified**: 13 layouts listed and the picker fits at 1280×720; each new layout: base/ph, every element inside the slide, raster without a failed component (PNG previews in `shots/s28-*.png`); Redefinir on a new layout; Slide menu has one “Inserir bloco pronto” with 4 sub-items and counts; Proposta inserts 6 slides after the current; one Ctrl+Z; PDF and PPTX Editável with all 13 layouts; save/reopen keeps elements, base and layout.
+- **Limits**: layouts are A&M-styled and light-background (the cover/section/closing remain the navy ones); the Dashboard's charts carry sample data to be replaced in the panel; no per-client template variables (see S29 brand kit).
+
+### S29 status: brand kit — colours, component colours and font of the presentation (shipped; suite `test-s29-marca.js`, 47 checks)
+- **Model**: `deck.brand = {name ≤ 60, colors: ≤ 12 × #RRGGBB (unique, upper-case), pal: {p, a} (as `safePal`), font: TOKEN_RE}`; `safeBrand` in `safeDeck` (editor.js), empty kit dropped. Travels in the saved .html (deck JSON) and in Minhas obras.
+- **Where it shows**: the kit colours come first in every swatch row of the panel (`swList()` → `swatches()` default list and the “Cores do componente” rows, titled “Marca · #hex”, A&M duplicates removed) and as a “Cores da marca · <name>” section on top of “Mais cores…” (`AMColorPop.open(..., {kit})`, ed-colors.js; kit colours are not pushed to “Recentes”). Arquivo › **Kit de marca…** and the **Kit de marca…** button in the slide panel (Fundo) open the box (`AMBrand.open(opener)`, ed-43-brand.js + .css, `#bkDlg`, class `.xp` like export/import; Esc closes, Tab cycles, Enter inside a field never submits; “Mais cores…” opened from the box sits above it via `html.xp-open .cpop{z-index:210}`; the A&M confirm (`#modal`, z 200) sits above the box).
+- **Box**: name · colours (click = change via the colour pop, × = remove, + = add via the pop, paste codes `#RRGGBB / RRGGBB / #RGB / rgb()` in the order typed, **Do logotipo…** = `colorsFromImage` (64×64 sample without smoothing, 16-level bins, ≥ 1 % of pixels, white dropped, near-identical tones merged, up to 5)) · component colours p/a (the A&M default = key removed) with **Aplicar a todos os componentes (N)** / **Restaurar cores A&M em todos** (`AMStudio.brand.applyPal`) · font (Canteiro 4 + 12 Google families loaded on demand + 6 computer fonts; `fontOpts(cur, plain)`) with **Aplicar a todos os textos (N)** (`applyFont`: text/shape `el.font`, inline `font-family` spans from imports stripped, fx with a `font` field) · kits saved in the browser (`amStudio.brandKits`, max 20, Usar / Apagar with confirm) · **Baixar kit (.json)** / **Abrir kit (.json)…** (`AMBrand.toJSON/fromJSON`, also accepts `{brand:{…}}`). Every change = one `commit()` (one Ctrl+Z after closing the box).
+- **New elements**: `mkText`/`mkShape` → `withBrandFont` (also layouts via `mkSlide`), `mkFx` → `el.pal = brand.pal` when `palOk` (charts, SmartArt, models; never icons or Marca A&M). Existing elements change only through the explicit “Aplicar a todos” actions.
+- **Fonts**: `GFONTS` (Montserrat, Open Sans, Lato, Poppins, Source Sans 3, Nunito Sans, Raleway, Work Sans, Oswald, PT Sans, Merriweather, Playfair Display; weight sets verified against the Google CSS API) get a `<link data-gf>` on demand (`ensureFonts`: loadDeck, appendSlides, addEls, applyProp font, setBrand, applyFont); `fontLink(d)` writes the saved file’s `<link>` with the families the deck uses; `AMExport.fontsCSS` now reads every Google `<link>` (`facesOf` per href) so the PDF and PPTX “Idêntico” embed the extra family; runtime `FONTS` gained serif/computer stacks (Calibri → Carlito on Linux, Georgia, Times, Merriweather, Playfair). PPTX Editável: `theme(name, deck.brand)` writes the kit as the theme (accent1 = destaque, then the kit colours, A&M fills the rest; dk2 = principal; major/minor font = kit font; scheme named after the kit) so PowerPoint’s own pickers show the brand.
+- **Import**: `AMImport.finish` (replace mode) sets `deck.brand` from the first master’s theme (`ctx.theme0`: accent1–6, dk2, lt2, dk1 without white; the theme’s body font) named “Tema de <file>”; append mode leaves the kit alone; Google families in `GFONTS` are no longer reported as missing fonts.
+- **Verified** (test-s29-marca.js, with `fonts2/gf-montserrat.css` + 2 woff2 served by the test route): menu item + S02 invariants; box fits at 1280×720; paste codes (order, dedupe, invalid ignored); name; remove; + via colour pop above the box; Esc closes the pop only, then the box; font = Montserrat adds the `<link>`, new text/shape/slide elements carry it; pal p; default accent = no key; Fundo swatches start with the kit and the button opens the box; “Mais cores…” shows the kit section first; picking a kit colour paints the slide and one Ctrl+Z reverts; apply-all counts (4 texts incl. a headline, 3 components), results, two Ctrl+Z / two Ctrl+Y; restore A&M; element panel font select shows “(kit de marca)” on top plus Google/computer entries and brand swatches; saved file carries `deck.brand` and the Montserrat link; reopen; `safeDeck` cleaning (60-char name, 12 colours max, bad colours/font dropped); kits in the browser (save, new deck, Usar, Apagar with the A&M confirm above the box); .json down/up; Remover kit; logo colours; parseColors; `fontsCSS` embeds Montserrat with `data:`; PDF; PPTX Editável valid with the brand theme and Montserrat runs; the saved player loads Montserrat and uses it; importing fx-a.pptx creates “Tema de fx-a” with ≥ 4 colours and the body font; append keeps the kit; the imported font stays selected in the panel. Screens: `shots/s29-caixa.png`, `shots/s29-kit.png`, `shots/s29-pdf-slide.png`. S24-24 updated (Calibri is now a known computer font: “Calibri (do computador)”).
+- **Limits**: Google fonts need internet in the editor and in the saved player (the PDF and the “Idêntico” PPTX embed them; the “Editável” PPTX names the font and PowerPoint substitutes when it is not installed); computer fonts render with whatever the viewer has (Carlito/Segoe/Arial fallbacks); the kit font is not applied to components without a font field (charts, SmartArt keep the runtime’s Inter/Roboto); “Do logotipo…” reads up to 5 dominant flat colours (gradients and photos give averaged tones); the kit changes nothing retroactively except through the explicit “Aplicar a todos” buttons; one kit per presentation.
+
+### S30 status: interactive form inside the saved presentation (shipped; suite `test-s30-forms.js`, 25 checks)
+- **Component** `FX.form` (`rt-60-forms.js` + `.css`, embedded in every export; category “Interativo”, Inserir › **Interativo ▸ Formulário**, `INTERACTIVE` list in editor.js so S31 can add post-its/voting/timer). Data: `title`, `intro`, `qs` (question codec), `btn`, `thanks`, `tools` (`sel:1|0`, shows count/CSV/copy/clear), `sheet` (optional https URL of a Google Apps Script web app) and a `help` field — a new panel field type (`t === 'help'` renders the registry's HTML as a `.fhelp` note; here it carries the step-by-step and the `doPost` snippet in a read-only `<textarea>`).
+- **Codec** (`AMRT.forms.parse`, one question per line): `Pergunta` short text · `= texto longo` · `= 1-5` rating · `= sim/não` · `= A | B | C` single choice · `= [] A | B` multiple · trailing `*` required; unknown `= x` stays part of the title; empty spec = text; ≤ 20 questions, ≤ 12 options. Default: 4 questions that fit the 620×520 box.
+- **Rendering** is HTML/CSS only (no native controls): text answers are `div.amf-in` (`contenteditable` only once the player arms them), ratings/yes-no/options are buttons with `aria-checked`. So the editor stage (`.am-edit .amf *{pointer-events:none}`: clicking selects the element), the PDF/PPTX raster (`foreignObject`) and the player show the same picture. In static views the question list is clipped at the box; in the player it scrolls.
+- **Player** (`R.hooks.player`): delegation on `hd.deckEl` (click/keydown/paste), `arm()` on `hooks.show`. Submit validates required questions (marks `.amf-miss`, focuses, status), stores `{v, q, rows:[{at, a}]}` under `localStorage['amForm.<deck.id>.<el.id>']` (≤ 5000 rows, answers ≤ 2000 chars), shows the thank-you overlay over the questions only (footer stays usable), updates the count. **Baixar CSV** (`;` separator, BOM, quoted cells, `respostas-<slug>.csv`), **Copiar** (TSV to the clipboard, newlines flattened), **Limpar** (two clicks within 4 s). Enter in a short answer moves to the next field; the player's key handler already ignores inputs/contentEditable and lets Enter/Space act on focused buttons, so typing never navigates. With `sheet` set, every submission also `fetch`es the URL with `POST`, `mode:'no-cors'`, `text/plain` JSON `{deck, form, title, at, q, a}` (no preflight; opaque response, so the status says “enviada” without confirmation; offline → “registrada aqui; sem internet para a planilha”). Only `https://` URLs reach the element (`data-sheet`).
+- **Editor**: `NOTEXT_KEYS` gained `qs`, `sheet`, `tools` (auto summary never leaks the codec or the URL); the form is inert on the stage; present mode (`RT.player`) is fully interactive and stores under the same deck id.
+- **Verified**: codec edge cases; menu (one “forma” item kept), insertion 620×520 with 4 default questions, panel fields + Apps Script help, inert stage, one Ctrl+Z; raster/PDF/PPTX Editável valid; auto summary clean; saved player: armed fields, typing with Space, Enter moves on, choices (single/multi/toggle), submit → storage/count/thanks + POST payload captured by the test route, “Responder de novo”, required validation, second answer, CSV content (header, quoting of `;` `"` and newline), TSV copy, two-click clear, arrows inside a field don't navigate while → outside does; editor present mode; save/reopen keeps the six-question codec, hidden tools, `http://` sheet ignored. Screens: `shots/s30-raster.png`, `shots/s30-editor.png`, `shots/s30-player.png`.
+- **Limits**: answers live in the browser of whoever answers (per device/profile; file:// shares storage across local files); consolidation across people needs the Sheets app (or collecting the CSVs); no response authentication; the Apps Script deployment is the consultant's (free, one-time); long question lists need a taller box or two forms for the static exports; no conditional logic, file upload or signature fields.
+
+### S31 status: live workshop tools — post-it board, dot voting, countdown timer (shipped; suite `test-s31-workshop.js`)
+- **Module** `rt-61-workshop.js` + `.css` (embedded in every export; loads after `rt-60-forms.js` and reuses `R.forms.save/download/slug/stamp/post/cell`). Three `FX` kinds in Inserir › **Interativo ▸** (editor `INTERACTIVE` list with their own icons `note`, `vote`, `timer`), all with `.am-ia` so the player's advance/back click zones ignore them, inert on the editor stage, pure HTML/CSS (same picture in PDF/PPTX rasters).
+- **Quadro de post-its** (`board`, 1100×520): `cols` (lines, ≤ 6), `notes` (`rows:c:n|t|k`: column index, text, colour y/p/b/g/o), `tools`. Player: **+ Nota** per column (focus on the new note), text is contentEditable (saved on `input`, ≤ 400 chars), colour dots, ×, drag by the top strip (pointer capture, column highlight `.amb-over`, `elementFromPoint` drop), count per column. State `localStorage['amBoard.<deck.id>.<el.id>'] = {v, notes:[{id,c,t,k,at}]}`, seeded from the editor's notes (`<template class="amb-seed">`); **Limpar** (two clicks) deletes the key and re-seeds. **Baixar CSV** (`Coluna;Nota;Cor;Data/hora`), **Copiar** (TSV).
+- **Votação por pontos** (`vote`, 700×460): `opts` (≤ 12), `pts` (1–10), `show` (`after` | `always` | `never`), `tools`, `sheet`. Player: + / − per option with the remaining-points counter (+ disabled at 0 left, − at 0 on the row, Votar disabled with nothing distributed), **Votar** stores `{at, a:[points…]}` under `amVote.<deck>.<el>`, resets the row, shows the result bars (totals, % of all points, widest = 100 %) when `show !== 'never'`, **Ver/Esconder resultado** toggle, flash on the list; with `sheet`, POSTs the same JSON shape as the form (`q` = options, `a` = points) via `R.forms.post`. CSV/TSV/Limpar as the form.
+- **Cronômetro** (`timer`, 360×360): `min` (0–180), `sec` (0–59), `sound`, `auto`. Player: ring (`stroke-dashoffset`), tabular digits, **Iniciar / Pausar / Continuar**, **Reiniciar**, **±1 min** (adjusts total and remaining), last 10 s red, at zero `.amt-over` (blinking digits, “Tempo esgotado”) and three WebAudio beeps when `sound` ≠ 0; `auto` starts once on `hooks.show` of its slide; timers keep running across slides (state array per player, cleared on `hd.onDestroy`).
+- **Verified**: submenu lists the four interactive components; board insertion, panel codec and help, inert stage, Ctrl+Z; raster/PDF of the three; player: add/type/colour/drag/delete/CSV/reload persistence/clear-to-original for the board; vote limits, store, bars and percentages with two voters, Sheets POST payload, show/hide, TSV copy, clear; timer start/pause/continue, zero → esgotado, +1 min, reset, auto-start on slide 2 and continuity when going back; clicks in the player's edge zones; save/reopen keeps every field. Screens: `shots/s31-raster.png`, `shots/s31-player.png`, `shots/s31-editor.png`.
+- **Limits**: like the form, the state is per device (file:// shares it across local files); no live sync between participants' devices except through the Sheets app (votes only; the board has no remote sync); notes added in the player never flow back into the editor's `data.notes` (export CSV and paste into the panel codec if you want to keep them); drag works with a mouse/pen/touch via pointer events but there is no keyboard move (keyboard users can delete and re-add in another column); the timer is not synchronised with a wall clock across devices.
+
+### S32 status: bound connectors, flowchart and mind-map SmartArt (shipped; suite `test-s32-conectores.js`, 26 checks)
+- **Connectors that follow objects** (editor.js, no runtime change): a line end can be bound to an element, `el.a1` / `el.a2 = {id, s}` with `s` = `n|e|s|w` (middle of that side) or `c` (automatic: where the segment towards the other end, or towards the other bound element's centre, crosses the box). `safeEl` validates ids (`^[\w-]{1,40}$`) and sides (anything else → `c`); the snapshot keys (Redefinir) carry `a1`/`a2` as objects. The plain `x1/y1/x2/y2` stay the source of truth for the player and every export: `syncLinks(slide)` recomputes them in `renderStage` and `commit`, `posNode` (live move) and `rerenderEl` (resize) re-render the lines bound to the moved element (`refreshLinks`); a bound end whose target no longer exists is unbound at the next draw.
+- **Binding**: dragging a line end (`startResize` p1/p2) near an element (≤ 12 px outside its box) snaps it: within 22 px of a side midpoint → that side, else automatic; the target is outlined (`.lnk-t`) during the drag and the smallest element under the pointer wins; **Alt** disables snapping; a toast confirms. Moving a line on its own unbinds it (`detachMoved`); moving the line together with its target (multi-selection, group) keeps the binding. Duplicate slide (`freshSlide`), Ctrl+D (`dupSel`) and paste remap `a1/a2` to the copies' ids (`remapLinks`) and drop bindings whose target was not copied. Panel section **Pontas presas**: for each end, the element it is bound to, a side select (`a1.s` / `a2.s` via `applyProp`) and **Soltar** (`unlink-a1/2`).
+- **SmartArt** (`rt-40-smartart.js`, 14 layouts): **Fluxograma** (`flow`, group Processos): up to 16 top-level items in a serpentine of ≤ 4 per row with arrows between neighbours; `?` prefix = decision (diamond via `clip-path`, prefix hidden and restored on in-slide edit through `ep`); Início/Fim/Start/End = orange pill; Tab details inside the box. **Mapa mental** (`mindmap`, group Ciclos e relações): first line = centre pill; the next lines alternate right/left as coloured branches (A&M palette cycle, `--c`), their Tab children become sub-branches further out; cubic curves in the branch colour (`ln(d, i, cls, extra)` now takes an extra style). Icons, samples, panel tips and the drawer/menu entries come from the layout table; the Inserir › SmartArt ▸ submenu now groups by layout group in first-appearance order (new layouts at the end of the registry land in their group).
+- **Verified**: drag-to-bind with highlight and side detection, panel section, follow on move/resize/arrow keys, undo, side change (n → auto), both ends automatic facing centres, Alt = free, moving the line unbinds, API binding syncs on draw/commit, duplicate slide / paste / Ctrl+D remapping, delete target → unbound, undo restores, save/reopen, `safeDeck` cleanup, missing id unbound, PPTX Editável valid; flowchart sample (8 boxes: 2 diamonds, 2 pills, 7 arrows, all inside the element), mind-map sample (centre, 4 branches with distinct colours, 8 sub-branches, 12 curves), 14 tiles in the panel grid, submenu lists both; `test-s06.js` updated to 14 layouts (grouped submenu order, 56 fit cases). Screens: `shots/s32-editor.png`, `shots/s32-flow.png`, `shots/s32-mindmap.png`.
+- **Limits**: bindings are editor-only metadata (the player and PowerPoint get ordinary lines; PowerPoint connectors are not re-bound on import); the anchor is the element's axis-aligned box (rotated elements bind to the enclosing box); no automatic obstacle-avoiding routing (elbow/curve routes remain manual); the flowchart layout has no branch arrows for decisions (the Sim/Não paths are text inside or separate lines); the mind map holds ≤ 11 branches and two levels.
+
+### S33 status: slides from a spreadsheet (CSV/TSV) with a template slide (shipped; suite `test-s33-lote.js`)
+- **Box** `#btDlg` (`ed-44-batch.js` + `.css`, editor only; Slide › **Gerar slides de uma planilha (CSV)…**): the current slide is the template; every `{{Coluna}}` in its JSON strings (texts, shape text, any component field) is a placeholder. Data: paste cells copied from Excel/Sheets (TSV) or a CSV (`;` or `,`, quotes with embedded delimiters/newlines, BOM, CRLF), or open a `.csv/.tsv` file (`#btFile`); `parse(text)` detects the delimiter from the header line, keeps the first 200 data rows (counts the rest) and ≤ 40 columns. The box lists the template's placeholders as chips (red when no column matches), the unused columns, a 5-row preview, the detected delimiter/rows/columns and offers the spreadsheet's columns as copyable `{{…}}` chips (clipboard) when the template has none; “Baixar exemplo (.csv)” gives a starter file.
+- **Generation** (`build(template, table, {per})`): rows are grouped `per` (1–6) per slide; `{{Coluna}}` = row 1 of the group, `{{Coluna#2}}`… the next rows (empty when the last group is short); `{{#}}` = slide number in the batch, `{{##}}` = total; columns are matched without accents/case (`{{area}}` ↔ “Área”); a placeholder with no column stays as text. `html` fields receive the value escaped with newlines as `<br>`; other fields receive the raw text (the runtime escapes on render). Each copy drops `base`/`id`/`hidden` and goes through `AMStudio.appendSlides(list, at)` (new `at` argument: insert position, first inserted becomes current) so the copies get fresh ids, remapped bindings and their own Redefinir base; “Esconder o slide modelo” sets `hidden` on the template in the same commit (one Ctrl+Z removes the batch and unhides).
+- **Verified**: parser cases (quotes, empty lines, delimiters, 250 → 200), Slide menu item and S28 invariant, box fit/focus/placeholder chips, TSV paste preview and warning for `{{Foto}}`, 3 generated slides with escaped `<b>`, accent/case matching, `{{#}}/{{##}}`, component field replaced, template hidden and current slide, stage renders the value as text, one Ctrl+Z / Ctrl+Y, Redefinir on a generated slide keeps the generated content, `;` sample with 2 rows per slide and `{{Nome#2}}`, `.csv` file with BOM/CRLF/quoted newline, sample download, Esc, no-placeholder warning with copyable column chips, save/reopen. Screen: `shots/s33-caixa.png`.
+- **Limits**: images are not filled from the spreadsheet (a URL in a cell stays text; add the photo after generation); no conditional rows or per-column formatting; 200 rows per run (run again for more); the template is the current slide only (no multi-slide templates); generated slides are plain copies (no link back to the spreadsheet: regenerate after changing the data).
+
+### S34 status: A&M institutional slides — official block that never loses the model (shipped; suite `test-s34-institucional.js`, 34 checks)
+- **Source of truth**: five specs in `studio/inst/*.json` (cover “Somos a A&M Performance”, presença global, clientes, esferas de atuação, cadeia de valor), measured against 1280×720 references (`inst/ref-*.png`, rendered from the client's deck) with `tools/inst-check.js` (renders the spec through the built editor, prints match % at ±40 per channel, mean diff, worst boxes, and writes a reference | render | diff image). Measured: cover 97.9 % (fully native: 2 texts, 6 lines, wordmark), esferas 95.4 % (native: 10 texts, lines, wedge panel from `rect` + `rtri`, stacked A&M Performance lockup built from the official `perfW` asset with crops), mapa 99.0 % (baked art `inst/bg-map.jpg` + 12 editable texts and 2 rules for the KPIs), clientes 99.3 % (baked art + editable title), cadeia 100 % (baked art). Page numbers were removed from the art and the specs (the deck numbering of S27 applies).
+- **Build**: `assemble.py` inlines the specs (images as `data:` JPEG) into `ed-45-institucional.js` at the `INST_SPECS` marker; the module registers `LAYOUTS['inst-<key>']` (`hidden: true`, `inst: key`, `bgImg`/`bgImgOp` now honoured by `mkSlide`), the block `['inst', 'Institucional A&M', [...5], true]` first in `SEQS` (the 4th flag shows it as a tile in the “Novo slide” picker, rebuilt by `buildSlidePicker()`), and `window.AMInst`. Entry points: “+ Novo slide” › **Institucional A&M · 5 slides**, Slide › Inserir bloco pronto ▸ (first), Inserir › Marca A&M ▸ **Inserir os 5 slides institucionais**, and the slide panel section **Slides institucionais A&M** (button). Each insertion = one `commit()`; `kitSlide` skips `inst` layouts so the brand kit never restyles them; the 13 regular layouts stay the only ones in the picker and in Slide › Novo slide ▸ (`layoutItems` filters `hidden`; S28 tests updated).
+- **Import recognition**: `AMInst.match(slide)` normalises the slide's texts (largest first) and matches the institutional titles (`somos a am performance`, `fazemos parte da alvarez marsal`, `clientes de diferentes portes…`, `esferas de atuacao…`, cadeia de valor by its headings); `AMImport.finish` adds `rep.inst` and the import report shows “N slides institucionais reconhecidos” with **Usar os modelos oficiais**, which calls `AMInst.replace(list)`: same position, keeps `hidden`/`sec`, one commit (Ctrl+Z restores the imported originals).
+- **Verified**: registry/picker/tile/menu/panel entry points, insertion order and current slide, fidelity per slide (thresholds cover 96.5, mapa 97.5, clientes 98, esferas 93, cadeia 99), element composition and bounds, editable cover title + Redefinir base, brand kit exemption, one Ctrl+Z, save/reopen with embedded JPEG art, PDF + PPTX Editável (6 slides, valid), python-pptx deck with 3 institutional titles → recognition (0, 2, 3), replace in place, undo, imported slide fidelity much lower than the official one, report UI with the button and its disabled state after use. Screens: `shots/s34-*.png`.
+- **S34b — the button where people look** (user feedback: “não encontrei o botão”): ribbon button `#bInst` **Institucional A&M** (orange outline `.rb.inst`, hidden until the block is registered — `buildSlidePicker()` toggles it; short label “Institucional” ≤ 1640 px, full label above; the ribbon still fits at 1180/1280/1366/1600 — see §13 S34b re-budget), thumbnail context menu **Inserir slides institucionais A&M** right after “Novo slide depois”, Slide menu item after “Inserir bloco pronto ▸” (S28/S33 invariants kept: still exactly one of each), the slide-panel section moved right below Exibição e layout (visible without scrolling at 1280×720), the picker tile renamed **Inserir os 5 slides institucionais** under the header “Slides institucionais A&M” (orange, `#mSlide button[data-seq]`), and cover › Projetos prontos 6th card **Apresentação institucional A&M** (`cover.js` pushes it only when `LAYOUTS['inst-cover']` exists; 5 institutional + “Seu conteúdo” + closing = 7 slides; `.cv-tgrid` now 6 columns). Checks S34-20…27 + test-cover updated (6 cards).
+- **Limits / next**: the map, clients and value-chain slides use the client's rendered art as background (the editable parts are the texts that change: KPIs, titles); when the original .pptx arrives, the logos, map and chevron art should be replaced by the native assets (the specs and harness make that a measured swap). The stacked A&M Performance lockup on the esferas slide is composed from the horizontal asset (a stacked official asset would be better). Recognition is by title text, so a renamed institutional slide is not recognised (insert the official block instead). The reference renders are A&M marketing material supplied for this purpose and are committed under `studio/inst/`.
+
+### Summary table
+| # | Main files | Hot spots (line) | Top risk |
+|---|---|---|---|
+| F0 | E, R, assemble.py | E:135,151,163,166 · R:461,483 | none (verified) |
+| F1 | E (drawer), C (hover `.am-hov`) | E:1102–1168, C:43–50 | CR-12 timers; test.js `[data-ins=counter]` |
+| F2 | history.js, E, V, cover.css | E:92,111,171,1301,1481 · V:435,482,557,558,629 | cover pins; modal key trap; IDB rejections |
+| F3 | rt-20-icons.*, E | E:134 (DATA_TOKENS), 350–357, 396/441/522/531/590/1167 | data validation; licence |
+| F4 | R, E, H | R:13–46 · E:36–41,142,360–367,465,575–582,603,1286,1331 · H:334–335 | IX-04 hit-testing; `[data-add=arrow]`; "forma" label |
+| F5 | rt-30-charts.*, R (player zoom) | R:441,449,469 · C:133–158 | player bar width; click zones |
+| F6 | rt-40-smartart.* , E | E:1111 (order), 350–357, 409–415 | invisible cat; tree codec — **shipped (S6)** |
+| F7 | rt-50-models.*, E | E:1111 | drawer perf; slideCheck |
+| F8 | R, C, E | R:371–423,437–482 · C:6–50,383–387 · E:317–318,383–387 | runFx contract; Space semantics; G key |
+| F9 | R, C, E | R:441–474 · C:133–158 · E:91,334–340 | initial card eats Esc; `.amp-pos` |
+| F10 | R, E | R:441,460 · E:334–340,392,512 | modal; per-keystroke render |
+| F11 | xedit.js, R, E | E:1475–1480 · R:437–483 | CR-04; `</script`; key routing |
+
+---
+
+## 12. Unified player keymap (resolves TMG × DTS)
+| Key | Action | Origin |
+|---|---|---|
+| → PageDown Space Enter · click right 18 % | Avançar (next build group if F8 builds exist, else next slide; skips a visible chapter card) | existing / DTS / TMG |
+| ← PageUp Backspace · click left 18 % | Voltar (previous slide shown already built) | existing / DTS |
+| Home / End | First / last | existing |
+| F | Tela cheia | existing |
+| Esc | Close the topmost layer: zoom > comments > índice > resumo > effects popover > help > chapter card; else exit (editor) / leave edit mode (export) | merged |
+| **G** | Índice | TMG (the user praised it) |
+| **I** | Resumo do slide | TMG |
+| **Z** | Ampliar gráfico | TMG |
+| P (K) · R · T · V · D | Pausar · Reiniciar efeitos · Tour automático · Varrer agora · Profundidade | DTS |
+| **B** | Brilho (Glow) on/off | **moved from DTS "G"** |
+| . / , · − = + 0 | Passo ± · Velocidade | DTS |
+| C | Comentários (export) | F11 |
+| E | Modo edição (export, only when `opts.editable`) | F11 |
+| ? | Atalhos do apresentador | DTS |
+| Ctrl/⌘+S, Ctrl/⌘+Z, Ctrl/⌘+Shift+Z | Salvar cópia / desfazer / refazer in the export edit layer (xedit listener) | F11 |
+Rules:
+- Never act on keys whose target is input, textarea, select or contenteditable (F0).
+- Never act on Ctrl/⌘/Alt combos in `key()` (F0).
+- `mousedown → preventDefault` on bar buttons so Space keeps meaning "next" (TMG §6.5).
+
+---
+
+## 13. Ribbon and top-bar budget (measured) and the consolidation that makes room
+Free space after the last ribbon button: **1280: 7 px · 1366: 93 px · 1440: 17 px · 1536: 41 px · 1920: 425 px**. The top bar's spacer is already 0 px up to 1536 (`#top` does not overflow).
+Proposal (fits Ícones and Gráficos at 1280 with about 50 px to spare):
+1. "Linha" (71) + "Seta" (64) become the split button "↗ Seta" `[data-add=arrow]` + "▾" `[data-menu=mLine]` (estimated ~86). Saves ~49 px. The new-button widths in this list are estimates; the existing widths are measured.
+2. Edit group icon-only at ≤1420 px (`#bFront #bBack #bDup #bDel` 292 → 4×36). Saves ~148 px. Ids and `title` stay; IX-09 focuses `#bDup`/`#bFront` by id.
+3. "Marca A&M" → "Marca" at ≤1420 (`.lbs`). Saves ~40 px.
+4. Add "Ícones ▾" (~88, F3) and "Gráficos ▾" (~100, F5/F6; sections "Gráficos" and "SmartArt"). Full lists stay in Inserir (submenus "Ícone animado ▸", "Gráfico ▸", "SmartArt ▸", "Linhas e setas ▸").
+Verify with test-core §16 (`#rib.scrollWidth <= clientWidth` at 1280×720), plus screenshots at 1280/1366/1440 (`SHOTS/a20-editor-<w>.png` show today's state).
+
+**S34b re-budget (measured with the real fonts, deck with the institutional block, sweep 1180→1920 step 20: no overflow anywhere):** the ribbon gained the orange **Institucional A&M** button (`#bInst`, icon-only ≤ 1220 px, short label “Institucional” ≤ 1640 px, full label above). To make room: short labels for every ribbon button up to **1640 px** (was 1420), edit group (`#bFront #bBack #bDup #bDel`) icon-only up to **1800 px** (was 1600 — this also fixes a pre-existing overflow at 1601–1640), **Gráficos** icon-only ≤ 1300 px (was 1240) and **Apresentar deste slide** icon-only ≤ 1380 px (title keeps the Shift+F5 hint). test-s34 S34-21 pins the fit at 1180/1280/1366/1600 with the label visible.
+
+---
+
+## 14. Screenshot index (`SHOTS/`)
+| File | Shows |
+|---|---|
+| `a01-editor-empty.png` | Editor, blank deck |
+| `a02-editor-template-slide2.png` | Template "Proposta comercial", slide 2 |
+| `a03-props-model-selected.png` | Model selected: variant chips, fields, `#fxArrow` |
+| `a04-variant-menu.png` | `#mVar` variant menu |
+| `a05-props-animation-section.png` | Animação section (entrance, delay/duration, loop, hover) |
+| `a06-drawer-models.png` / `a07-drawer-fx.png` | Biblioteca: Modelos / Efeitos e animações |
+| `a08-menu-file.png`, `a08-menu-insert.png`, `a08-menu-present.png` | App menus |
+| `a09-ribbon-formas.png`, `a10-ribbon-cards.png` | Ribbon popovers |
+| `a11-ctx-canvas.png` | Context menu |
+| `a12-props-slide.png` | Slide panel (where F9/F10 fields go) |
+| `a13-present-editor.png` | Present mode in the editor |
+| `a14-exported-player.png`, `a15-exported-phone.png` | Exported deck at 1440 and 390 px |
+| `a20-editor-1280/1366/1440/1536/1920.png` | Ribbon budget per width |
+| `f0-probe-model-inserted.png`, `f0-probe-export.png` | F0 extension model in the editor and the export |
+
+---
+
+## 15. Evidence log
+- Baseline gate on a private copy: `SP/qa-understand/arch-analyst/gate-baseline.log` → GATE PASS (5 min 07 s).
+- F0 prototype gate (F0 patch applied to a private copy): `SP/qa-understand/arch-analyst/gate-f0.log` → **GATE PASS**. test.js and test2.js PASS, test-core "TUDO OK", test-cover 100/100, zero console errors.
+- `p1-model.js`: field survival matrix, CR paths, export globals, file:// storage sharing (`localStorage` + IndexedDB visible across folders), quota.
+- `p2-ui.js`: registry inventory, z-index, drawer counts, preview cost (21 cards / 12 ms), Space-in-contenteditable bug, 390 px bar fits.
+- `p3-slack.js`, `p4-rb.js`: ribbon/top-bar budget.
+- `p5-fsa.js`: `isSecureContext=true`, `showSaveFilePicker` present on file://.
+- `p6-f0.js`: F0 round-trip, `rt-*.js` registration, inert `xedit.js`, export carries extensions, key guard.
+- The original studio files are unchanged (md5 list in `studio-md5-before.txt`, re-verified after all probes).
+
+## 16. Open questions for the orchestrator
+1. Approve **B = Glow** (moving it off G) so G = Índice and I = Resumo, as in TMG.
+2. Approve F2 placement: cover view "Obras recentes" (top-right button) plus Arquivo › "Histórico de apresentações…". The alternative (an editor modal) needs a modal-handler rework.
+3. Approve the ribbon consolidation in §13 (split "Seta", icon-only edit group ≤1420, "Marca" short label).
+4. F11 scope v1: move plus text edit plus comments (no resize/delete in the exported file). Confirm.
+5. Should comments also be editable in the editor (not only preserved)? This doc assumes a read-only list in v1.

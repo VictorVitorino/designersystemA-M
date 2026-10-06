@@ -1,0 +1,110 @@
+<script>(function(){try{document.documentElement.classList.add(/[?&]nocover(?:[=&]|$)/.test(location.search)?'cv-skip':'cv-boot');}catch(e){}})();</script>
+<div id="cover" class="cv cv-enter" role="dialog" aria-modal="true" aria-labelledby="cvTitle" aria-describedby="cvTagline" data-view="home" tabindex="-1">
+  <div class="cv-bg" aria-hidden="true"></div>
+  <header class="cv-top">
+    <div class="cv-brand">
+      <img class="cv-wm" src="%%WM_W%%" alt="Alvarez &amp; Marsal" width="262" height="42">
+      <span class="cv-dts" title="Digital &amp; Technology Services"><b>DTS</b><span>Digital &amp; Technology Services</span></span>
+    </div>
+    <div class="cv-topr">
+      <span class="cv-log" id="cvLog">Diário de obra</span>
+      <button type="button" class="cv-ghost cv-histbtn" id="cvHistBtn" aria-keyshortcuts="M" title="Minhas obras — as apresentações que você construiu neste navegador (M)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M3 4h18v4H3z"/><path d="M10 12h4"/></svg><span class="cv-hl">Minhas obras</span><span class="cv-hn" id="cvHistN"></span></button>
+      <button type="button" class="cv-ghost" id="cvResume" hidden>Voltar à obra <kbd>Esc</kbd></button>
+    </div>
+  </header>
+
+  <main class="cv-main">
+    <section class="cv-view cv-home on" id="cvHome" aria-label="Início">
+      <div class="cv-left">
+        <div class="cv-hero">
+          <p class="cv-eyebrow" style="--i:0"><i></i><span><span id="cvHello">Olá</span>, vamos construir?</span></p>
+          <h1 class="cv-h1" id="cvTitle" style="--i:1">Canteiro<span class="cv-dot" aria-hidden="true"></span></h1>
+          <p class="cv-line" style="--i:2">Acervo de Apresentações A<b>&amp;</b>M</p>
+          <p class="cv-tag" id="cvTagline" style="--i:3">Monte, encaixe e apresente — peça por peça.</p>
+        </div>
+        <div class="cv-menu" role="group" aria-label="Escolha como começar">
+          <button type="button" class="cv-opt" data-k="1" aria-keyshortcuts="1" style="--i:0">
+            <span class="cv-ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 9v6M9 12h6"/></svg></span>
+            <kbd class="cv-key">1</kbd><span class="cv-lbl">Obra nova</span><span class="cv-sub">Começar com um slide em branco</span>
+          </button>
+          <button type="button" class="cv-opt" data-k="2" aria-keyshortcuts="2" aria-haspopup="true" style="--i:1">
+            <span class="cv-ico"><svg viewBox="0 0 24 24"><rect x="3" y="9" width="14" height="10.5" rx="1.5"/><path d="M7 6h11.5A1.5 1.5 0 0 1 20 7.5V16"/><path d="M11 3h9.5A1.5 1.5 0 0 1 22 4.5"/></svg></span>
+            <kbd class="cv-key">2</kbd><span class="cv-lbl">Projetos prontos</span><span class="cv-sub">Roteiros completos para adaptar</span>
+          </button>
+          <button type="button" class="cv-opt" data-k="3" aria-keyshortcuts="3" style="--i:2">
+            <span class="cv-ico"><svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 7.5V12l3 2"/></svg><i class="cv-pip" aria-hidden="true"></i></span>
+            <kbd class="cv-key">3</kbd><span class="cv-lbl" id="cvO3l">Retomar obra</span><span class="cv-sub" id="cvO3s">Continuar o rascunho salvo neste navegador</span>
+          </button>
+          <button type="button" class="cv-opt" data-k="4" aria-keyshortcuts="4" style="--i:3">
+            <span class="cv-ico"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.2h8.5A1.5 1.5 0 0 1 21 8.7V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/><path d="M12 16.5v-6M9.5 13 12 10.5l2.5 2.5"/></svg></span>
+            <kbd class="cv-key">4</kbd><span class="cv-lbl">Abrir planta</span><span class="cv-sub">Abrir uma apresentação .html salva</span>
+          </button>
+          <button type="button" class="cv-opt" data-k="5" aria-keyshortcuts="5" style="--i:4">
+            <span class="cv-ico"><svg viewBox="0 0 24 24"><path d="M3 20.5V8.2L12 3.5l9 4.7v12.3"/><path d="M7 20.5V12h10v8.5"/><path d="M7 16.2h10"/></svg></span>
+            <kbd class="cv-key">5</kbd><span class="cv-lbl">Almoxarifado</span><span class="cv-sub">Biblioteca de modelos e efeitos</span>
+          </button>
+          <button type="button" class="cv-opt" data-k="6" aria-keyshortcuts="6" aria-haspopup="true" style="--i:5">
+            <span class="cv-ico"><svg viewBox="0 0 24 24"><path d="M12 6.6C10.4 5.1 7.9 4.6 3.5 4.6v13.1c4.4 0 6.9.5 8.5 2 1.6-1.5 4.1-2 8.5-2V4.6c-4.4 0-6.9.5-8.5 2z"/><path d="M12 6.6v13.1"/></svg></span>
+            <kbd class="cv-key">6</kbd><span class="cv-lbl">Manual da obra</span><span class="cv-sub">Como funciona e atalhos</span>
+          </button>
+        </div>
+      </div>
+      <figure class="cv-scene" id="cvScene" aria-hidden="true"></figure>
+    </section>
+
+    <section class="cv-view cv-panel" id="cvTpl" aria-labelledby="cvTplT">
+      <div class="cv-ph">
+        <button type="button" class="cv-ghost cv-backbtn" data-back><svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>Voltar <kbd>Esc</kbd></button>
+        <div class="cv-pht"><h2 id="cvTplT">Projetos prontos</h2><p>Roteiros completos para adaptar — escolha um e edite à vontade.</p></div>
+        <span class="cv-pcount" id="cvTplN"></span>
+      </div>
+      <div class="cv-tgrid" id="cvTplGrid" role="group" aria-label="Projetos prontos"></div>
+      <div class="cv-strip" aria-hidden="true">
+        <div class="cv-strip-h"><span>Planta completa</span><b id="cvStripName"></b><span id="cvStripN"></span></div>
+        <div class="cv-strip-row" id="cvStrip"></div>
+      </div>
+    </section>
+
+    <section class="cv-view cv-panel cv-hist" id="cvHist" aria-labelledby="cvHistT">
+      <div class="cv-ph">
+        <button type="button" class="cv-ghost cv-backbtn" data-back><svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>Voltar <kbd>Esc</kbd></button>
+        <div class="cv-pht"><h2 id="cvHistT">Minhas obras</h2><p>Tudo o que você constrói fica guardado aqui, a cada alteração — abra, duplique ou baixe quando quiser.</p></div>
+        <span class="cv-pcount" id="cvHistCount"></span>
+      </div>
+      <div class="cv-htools">
+        <label class="cv-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><input type="search" id="cvHistQ" placeholder="Buscar pelo nome da obra" aria-label="Buscar obras pelo nome" autocomplete="off" spellcheck="false" maxlength="80"><kbd aria-hidden="true">/</kbd></label>
+        <div class="cv-seg" role="group" aria-label="Ordenar obras"><button type="button" data-sort="recent" aria-pressed="true">Recentes</button><button type="button" data-sort="name" aria-pressed="false">Nome</button></div>
+        <span class="cv-hsp"></span>
+        <button type="button" class="cv-ghost cv-hio" id="cvHistImp" title="Juntar um acervo exportado (.json) às suas obras — a versão mais recente de cada obra prevalece"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>Importar acervo</button>
+        <button type="button" class="cv-ghost cv-hio" id="cvHistExp" title="Baixar todas as obras num único arquivo .json, para levar a outro computador ou guardar uma cópia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>Exportar acervo (.json)</button>
+        <input type="file" id="cvHistFile" accept=".json,application/json" hidden>
+      </div>
+      <div class="cv-hgrid" id="cvHistGrid" role="list" aria-label="Minhas obras"></div>
+      <div class="cv-hempty" id="cvHistEmpty" hidden></div>
+      <p class="cv-hnote"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1"/></svg><span>Suas obras ficam salvas neste navegador; use Exportar acervo para levar a outro computador.</span></p>
+    </section>
+
+    <section class="cv-view cv-panel" id="cvHelp" aria-labelledby="cvHelpT">
+      <div class="cv-ph">
+        <button type="button" class="cv-ghost cv-backbtn" data-back><svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>Voltar <kbd>Esc</kbd></button>
+        <div class="cv-pht"><h2 id="cvHelpT">Manual da obra</h2><p>Como funciona e atalhos — tudo o que você precisa para montar, mexer e salvar.</p></div>
+        <span class="cv-pcount">No editor, F1 mostra os atalhos</span>
+      </div>
+      <div class="cv-help" id="cvHelpBody"></div>
+    </section>
+  </main>
+
+  <footer class="cv-foot">
+    <p class="cv-safe"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span>O arquivo-mestre nunca é alterado · “Salvar” gera um novo HTML da sua apresentação</span></p>
+    <p class="cv-hints" id="cvHints"></p>
+  </footer>
+
+  <div class="cv-drop" aria-hidden="true"><div><svg viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg><b>Solte para abrir a planta</b><span>Arquivo .html salvo pelo Canteiro</span></div></div>
+  <div class="cv-confirm" id="cvConfirm" role="alertdialog" aria-modal="true" aria-labelledby="cvCfT" aria-describedby="cvCfD" hidden>
+    <span class="cv-cf-ic" aria-hidden="true">!</span>
+    <div class="cv-cf-tx"><b id="cvCfT">Substituir a obra atual?</b><span id="cvCfD">O que não foi salvo será perdido.</span></div>
+    <button type="button" class="cv-cf-no" id="cvCfNo">Cancelar</button>
+    <button type="button" class="cv-cf-ok" id="cvCfOk">Substituir</button>
+  </div>
+  <div class="cv-note" id="cvNote" role="status" aria-live="polite"></div>
+</div>

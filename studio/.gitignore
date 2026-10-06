@@ -1,0 +1,10 @@
+AM-Studio-Editor.html
+shots/
+shots-cover/
+qa/
+*.v1.*
+*.v2.*
+saved*.html
+node_modules/
+.s00-*/
+.gate/

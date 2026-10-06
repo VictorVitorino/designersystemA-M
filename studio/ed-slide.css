@@ -1,0 +1,25 @@
+/* S21 — slide oculto na apresentação e “Redefinir slide” (só no editor) */
+/* miniatura: esmaecida (o contorno de seleção continua nítido), número riscado e selo de olho cortado sob o número */
+.th.hid .box>.am-stage{opacity:.45}
+.th.hid .box{background:repeating-linear-gradient(135deg,#F3F6F9 0 6px,#E9EEF4 6px 12px)}
+.th.hid .n{text-decoration:line-through;text-decoration-thickness:1.5px;color:#8A97A8}
+.th .hb{position:absolute;left:0;top:19px;width:18px;display:grid;place-items:center;color:var(--steel2)}
+.th .hb svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.th.on .hb{color:var(--orange)}
+/* palco: faixa discreta acima do slide, sem bloquear cliques */
+#hidBan{position:absolute;left:50%;top:7px;transform:translateX(-50%);z-index:4;display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 11px 0 9px;border-radius:99px;
+  background:#fff;border:1px solid var(--line);box-shadow:0 2px 8px rgba(0,30,50,.08);font-size:11.5px;font-weight:600;color:var(--steel2);white-space:nowrap;pointer-events:none}
+#hidBan[hidden]{display:none}
+#hidBan svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* painel do slide: interruptor “Ocultar na apresentação” */
+.swt{display:flex;align-items:center;gap:10px;width:100%;min-height:34px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#F8FAFC;font-weight:600;font-size:12.5px;color:var(--navy);text-align:left}
+.swt:hover{border-color:var(--orange)}
+.swt:focus-visible{outline:2px solid var(--orange);outline-offset:1px}
+.swt .sk{position:relative;flex:0 0 auto;width:30px;height:17px;border-radius:99px;background:#C5D2E2;transition:background .15s}
+.swt .sk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,30,50,.3);transition:transform .15s}
+.swt[aria-checked=true]{border-color:var(--orange);background:#FFF8F0}
+.swt[aria-checked=true] .sk{background:var(--orange)}
+.swt[aria-checked=true] .sk::after{transform:translateX(13px)}
+.swt .sl{flex:1;min-width:0}
+.swt svg{flex:0 0 auto;width:15px;height:15px;stroke:var(--steel2);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+@media (prefers-reduced-motion:reduce){.swt .sk,.swt .sk::after{transition:none}}

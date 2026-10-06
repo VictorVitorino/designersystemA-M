@@ -1,0 +1,26 @@
+/* ===== ed-44-batch.css — caixa “Gerar slides de uma planilha” (S33; só no editor) ===== */
+.bt-box{width:min(680px,100%)}
+.bt .xp-sum code,.bt .note code{font:11px/1 'JetBrains Mono',Consolas,monospace;background:#EEF2F7;padding:1px 4px;border-radius:4px;color:var(--navy,#002A46)}
+.bt-ph{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 6px}
+.bt-ph .chip{height:26px;padding:0 10px;border:1px solid var(--line,#DCE3EC);border-radius:13px;background:#fff;font:600 11.5px/1 'JetBrains Mono',Consolas,monospace;color:var(--navy,#002A46);cursor:pointer}
+.bt-ph .chip:hover{background:#EEF2F7}
+.bt-ph .chip.bad{border-color:#D23F55;color:#B02A3E;background:#FDECEE}
+.bt-ph .chip.ghost{border-style:dashed;color:var(--steel2,#43698F);font-weight:500}
+.bt-ph .chip:focus-visible{outline:2px solid var(--navy,#002A46);outline-offset:2px}
+.bt-cols{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;padding-top:6px;border-top:1px dashed var(--line,#DCE3EC)}
+.bt-empty{font-size:12.5px;color:var(--mut,#566579)}
+.bt-warn{flex-basis:100%;font-size:12px;color:#9A4A00;background:#FFF4E6;border-radius:6px;padding:6px 8px}
+#btSrc{display:block;width:100%;box-sizing:border-box;min-height:96px;padding:8px 10px;border:1px solid var(--line,#DCE3EC);border-radius:8px;background:#fff;font:12px/1.45 'JetBrains Mono',Consolas,monospace;color:var(--ink,#1C2733);resize:vertical;white-space:pre}
+#btSrc:focus-visible{outline:2px solid var(--navy,#002A46);outline-offset:1px}
+.bt-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 6px}
+.bt .xp-btn.sm{height:32px;padding:0 12px;font-size:12.5px}
+.bt-info{flex:1;min-width:0;font-size:12px;color:var(--mut,#566579)}
+.bt-prev{max-height:168px;overflow:auto;border:1px solid var(--line,#DCE3EC);border-radius:8px;scrollbar-width:thin}
+.bt-prev:empty{display:none}
+.bt-prev table{border-collapse:collapse;width:100%;font-size:12px}
+.bt-prev th,.bt-prev td{padding:5px 8px;border-bottom:1px solid #EEF2F7;text-align:left;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.bt-prev th{position:sticky;top:0;background:#F7F9FC;font-weight:700;color:var(--navy,#002A46)}
+.bt-prev .bt-more{color:var(--mut,#566579);font-style:italic}
+.bt-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink,#1C2733)}
+.bt-opt select{height:32px;padding:0 8px;border:1px solid var(--line,#DCE3EC);border-radius:8px;background:#fff;font:inherit}
+.bt-ck{margin:0!important;padding:0!important;border:0!important}

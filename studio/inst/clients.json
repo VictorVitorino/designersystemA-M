@@ -1,0 +1,23 @@
+{
+ "bg": "#002A46",
+ "bgImg": "bg-clients.jpg",
+ "bgImgOp": 1,
+ "els": [
+  {
+   "type": "text",
+   "x": 118.5,
+   "y": 57,
+   "w": 800,
+   "h": 32,
+   "html": "Clientes de diferentes portes, perfis e segmentos da economia",
+   "font": "Roboto",
+   "size": 26,
+   "weight": 300,
+   "color": "#FFFFFF",
+   "align": "left",
+   "valign": "middle",
+   "lh": 1.2,
+   "ls": 0.009
+  }
+ ]
+}

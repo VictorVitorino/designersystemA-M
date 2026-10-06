@@ -1,0 +1,81 @@
+/* ===== SmartArt (rt-40-smartart.js): .fxsa raiz · .sal-<layout> modificador · .sa-* peças ===== sem keyframes novos (amRise/amFade/amZoom/amDraw) */
+.fxsa{overflow:visible;font-family:Inter,Roboto,Arial,sans-serif;color:#002A46}
+.fxsa>svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.sa-ln{fill:none;stroke:#7EA1C3;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sa-ln.sa-lead{stroke:#A3B8D6;stroke-width:1.2}
+.sa-hd{fill:#7EA1C3}
+.sa-n{position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:.3em;line-height:1.2;overflow:hidden;overflow-wrap:anywhere}
+.sa-n b{font-family:'Roboto Condensed',Roboto,sans-serif;font-weight:700;font-size:1.12em;line-height:1.12}
+.sa-n ul,.sa-sub ul,.sa-bt ul{margin:0;padding-left:1.05em;display:flex;flex-direction:column;gap:.22em;font-size:.92em;line-height:1.25}
+.sa-n li::marker,.sa-sub li::marker,.sa-bt li::marker{color:#F78C16}
+.sa-n b>[data-e],.sa-n li>[data-e],.sa-sub li>[data-e],.sa-bt li>[data-e]{display:block} /* a linha inteira recebe o duplo clique (edição no slide), não só as letras */
+.sa-sub,.sa-bt{position:absolute;box-sizing:border-box;color:#002A46;line-height:1.25;overflow:hidden;overflow-wrap:anywhere}
+.sa-bt{display:flex;align-items:center;background:#EEF2F7;border-radius:0 .4em .4em 0;padding:0 1.2em}
+/* processo */
+.sa-box{background:#EEF2F7;border-radius:.6em;padding:1.1em 1.2em;justify-content:flex-start;border-top:.3em solid #002A46}
+.sa-box.sa-last{border-top-color:#F78C16}
+/* chevrons */
+.sa-chev{background:#002A46;color:#fff;align-items:center;text-align:center}
+.sa-chev.sa-last{background:#F78C16}
+.sa-chev b{font-size:1.05em}
+/* degraus */
+.sa-step{background:#002A46;color:#fff;justify-content:flex-start;padding:1em 1.1em;border-radius:.4em .4em 0 0}
+.sa-step:nth-of-type(even){background:#13406A}
+.sa-step.sa-last{background:#F78C16}
+/* ciclo e radial */
+.sa-pill{background:#002A46;color:#fff;border-radius:1em;align-items:center;text-align:center;padding:0 .8em}
+.sa-pill.sa-first{background:#F78C16}
+.sa-hubc{background:#F78C16;color:#fff;border-radius:50%;align-items:center;text-align:center;padding:0 .6em}
+.sa-hubc b{font-size:1.2em}
+.sa-spk{background:#fff;color:#002A46;border-radius:1em;align-items:center;text-align:center;padding:0 .8em;box-shadow:inset 0 0 0 .12em #002A46}
+/* hierarquia */
+.sa-org{border-radius:.45em;align-items:center;text-align:center;padding:0 .6em}
+.sa-org.sa-d0{background:#002A46;color:#fff}.sa-org.sa-d1{background:#4A6FA5;color:#fff}.sa-org.sa-d2{background:#EEF2F7;color:#002A46;box-shadow:inset 0 0 0 1px #C9D6E8}
+/* pirâmide, funil e alvo (texto ao lado) */
+.sa-side{justify-content:center;padding:.1em 0 .1em .5em;border-bottom:1px dashed #C9D6E8}
+.sa-side.sa-last{border-bottom-color:transparent}
+.sa-py,.sa-tc{transform-box:fill-box;transform-origin:50% 50%}
+/* venn */
+.sa-vc{fill-opacity:.78;mix-blend-mode:multiply}
+.sa-vl{align-items:center;text-align:center;color:#fff;padding:0 .3em}
+.sa-vl.sa-s2{color:#002A46}
+.sa-vl b{font-size:1.05em}
+.sa-vm{align-items:center;text-align:center;background:#F78C16;color:#fff;border-radius:2em;padding:0 .5em;box-shadow:0 .25em .8em rgba(0,30,50,.25)}
+.sa-vm b{font-size:.95em}
+/* matriz */
+.sa-q{padding:1.1em 1.3em;justify-content:flex-start;border-radius:.6em}
+.sa-q.sa-q0{background:#002A46;color:#fff}.sa-q.sa-q1{background:#4A6FA5;color:#fff}.sa-q.sa-q2{background:#EEF2F7}.sa-q.sa-q3{background:#E3EAF2;box-shadow:inset .3em 0 0 #F78C16}
+/* lista em blocos */
+.sa-bk{background:#002A46;color:#fff;border-radius:.4em 0 0 .4em;padding:0 1.1em}
+.sa-bk.sa-first{background:#F78C16}
+/* sem itens: lembrete só no editor (o palco da apresentação é .am-play) */
+.sa-empty{display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:.4em;text-align:center;padding:1em;border:.15em dashed #A3B8D6;border-radius:.6em;color:#43698F;background:rgba(238,242,247,.6)}
+.am-edit .sa-empty{display:flex}
+.sa-empty b{font-family:'Roboto Condensed',Roboto,sans-serif;font-size:1.3em;color:#002A46}
+/* entradas */
+.am-in .fxsa.fxv-one :is(.sa-n,.sa-sub,.sa-bt){animation:amRise .55s cubic-bezier(.22,.61,.36,1) calc(var(--d,0ms) + var(--i) * 180ms) both}
+.am-in .fxsa.fxv-one :is(.sa-py,.sa-vc,.sa-tc){animation:amFade .5s ease calc(var(--d,0ms) + var(--i) * 260ms) both}
+.am-in .fxsa:is(.fxv-one,.fxv-level,.fxv-focus) .sa-ln{stroke-dasharray:1;animation:amDraw .5s cubic-bezier(.65,0,.35,1) calc(var(--d,0ms) + var(--i) * 180ms + 250ms) both}
+.am-in .fxsa:is(.fxv-one,.fxv-level,.fxv-focus) .sa-hd{animation:amFade .25s ease calc(var(--d,0ms) + var(--i) * 180ms + 650ms) both}
+.am-in .fxsa.fxv-level :is(.sa-n,.sa-py,.sa-vc,.sa-tc){animation:amFade .5s ease calc(var(--d,0ms) + var(--lv,0) * 600ms) both}
+.am-in .fxsa.fxv-level :is(.sa-n li,.sa-sub,.sa-bt){animation:amFade .5s ease calc(var(--d,0ms) + 900ms) both}
+.am-in .fxsa.fxv-all{animation:amZoom .7s cubic-bezier(.22,.61,.36,1) var(--d,0ms) both}
+.am-in .fxsa.fxv-focus :is(.sa-n,.sa-sub,.sa-bt,.sa-py,.sa-vc,.sa-tc){animation:amFade .5s ease calc(var(--d,0ms) + var(--i) * 120ms) both}
+/* foco percorrendo (data-cycle="g"): só o grupo ativo fica inteiro */
+.fxsa.cy-active [data-g]:not(.cy-on){opacity:.3;transition:opacity .4s}
+.fxsa.cy-active .sa-n.cy-on{transform:scale(1.04);box-shadow:0 .6em 1.4em rgba(0,30,50,.2);transition:transform .4s,box-shadow .4s}
+.fxsa.cy-active .sa-chev.cy-on,.fxsa.cy-active .sa-step.cy-on,.fxsa.cy-active .sa-bk.cy-on{transform:none;box-shadow:none}
+/* S32: fluxograma e mapa mental */
+.sa-dia{background:#002A46;color:#fff;align-items:center;text-align:center;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);justify-content:center}
+.sa-dia b{font-size:.98em}
+.sa-flowbox{padding:.7em .9em}
+.sa-flowend{background:#F78C16;color:#002A46}
+.sa-flowend.sa-pill{border-radius:2em}
+.sa-mm-c{background:#002A46;color:#fff;border-radius:2em;align-items:center;text-align:center;padding:0 .9em}
+.sa-mm-c b{font-size:1.15em}
+.sa-mm-b{background:var(--c,#4A6FA5);color:#fff;border-radius:.5em;align-items:center;text-align:center;padding:0 .6em}
+.sa-mm-b b{font-size:1em}
+.sa-mm-s{background:#fff;color:#002A46;border:.12em solid var(--c,#4A6FA5);border-radius:.45em;align-items:center;text-align:center;padding:0 .5em}
+.sa-mm-s b{font-size:.82em;font-weight:600}
+.sa-ln.sa-mm-l{stroke:var(--c,#7EA1C3);stroke-width:2.4}
+.sa-ln.sa-mm-l2{stroke-width:1.6}

@@ -1,0 +1,76 @@
+/* ===== Ícones animados (FX.icon / FX.iconmorph) — vai junto no arquivo exportado; keyframes com prefixo ic* =====
+   Regra de ouro: toda lista de animação de um traço começa com var(--drw) (o desenho da entrada). Assim icDraw fica sempre na
+   posição 0 e o Chrome não o recria quando o movimento entra e sai da lista (sem “redesenho” ao fim de cada passagem do mouse). */
+.fxic{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4%;overflow:visible}
+.fxic .ic-pl{position:relative;height:100%;max-width:100%;aspect-ratio:1;display:grid;place-items:center;border-radius:26%}
+.fxic.has-l .ic-pl{height:70%}
+.fxic .ic-l{font-family:'Roboto Condensed',Arial,sans-serif;font-weight:700;color:var(--ic);text-align:center;line-height:1.1;letter-spacing:.01em;max-width:100%;overflow-wrap:anywhere}
+.fxic[data-pl=soft] .ic-pl{background:#EEF2F7}
+.fxic[data-pl=circle] .ic-pl{background:#EEF2F7;border-radius:50%}
+.fxic[data-pl=ring] .ic-pl{border-radius:50%;box-shadow:inset 0 0 0 2px #CBD4E1}
+.fxic[data-pl=navy] .ic-pl{background:#002A46;border-radius:50%}
+.fxic[data-pl=navy]{--is:#FFFFFF}
+.fxic .ic{width:100%;height:100%;overflow:visible;fill:none;stroke:var(--is,var(--ic));stroke-width:var(--sw,1.85);stroke-linecap:round;stroke-linejoin:round}
+.fxic:not([data-pl=none]) .ic{width:60%;height:60%}
+.fxic .ic-ax{stroke:var(--ia)}
+.fxic .ic-mv{transform-box:view-box;transform-origin:var(--o,12px 12px)}
+.fxic .ic-ring{stroke:var(--ia);stroke-width:1.2;opacity:0}
+/* parâmetros por movimento: keyframes, curva e origem padrão */
+.fxic[data-mo=redraw]{--kf:icRedraw;--me:cubic-bezier(.65,0,.35,1)}
+.fxic[data-mo=pulse]{--kf:icPulse;--me:ease-in-out}
+.fxic[data-mo=beat]{--kf:icBeat;--me:ease-in-out}
+.fxic[data-mo=spin]{--kf:icSpin;--me:cubic-bezier(.65,0,.35,1)}
+.fxic[data-mo=bounce]{--kf:icBounce;--me:cubic-bezier(.3,.7,.4,1);--o:12px 21.5px}
+.fxic[data-mo=float]{--kf:icFloat;--me:ease-in-out}
+.fxic[data-mo=wiggle]{--kf:icWiggle;--me:ease-in-out}
+.fxic[data-mo=swing]{--kf:icSwing;--me:ease-in-out;--o:12px 3px}
+.fxic[data-mo=nudge]{--kf:icNudge;--me:cubic-bezier(.22,.61,.36,1)}
+.fxic[data-mo=tick]{--kf:icTick;--me:linear}
+.fxic[data-mo=grow]{--kf:icGrow;--me:cubic-bezier(.22,.61,.36,1)}
+.fxic[data-mo=grow] .ic-mv{transform-box:fill-box;transform-origin:50% 100%}
+.fxic[data-mo=blink]{--kf:icBlink;--me:ease-in-out}
+.fxic[data-mo=wave]{--kf:icWave;--me:ease-in-out;--o:5px 8px}
+.fxic[data-mo=flow]{--kf:icFlow;--me:linear}
+.fxic[data-mo=flip]{--kf:icFlip;--me:ease-in-out}
+.fxic[data-mo=orbit]{--kf:icOrbit;--me:linear}
+.fxic[data-mo=ping]{--kf:icPing;--me:cubic-bezier(0,0,.2,1)}
+/* entrada: a MESMA “Desenhar” do elemento (el.anim.in = draw; --t = anim.dur), traço a traço a cada 110 ms, o detalhe por último.
+   Outras entradas (Surgir, Zoom…) agem no .am-el como em qualquer elemento e os traços aparecem completos. */
+.fxic .ic-s{--drw:none}
+.am-in .am-el[data-in=draw] .fxic .ic-s{--drw:icDraw var(--t,900ms) cubic-bezier(.65,0,.35,1) calc(var(--d,0ms) + var(--k) * 110ms) both}
+.am-in .fxic .ic-s{stroke-dasharray:1;animation:var(--drw)}
+/* contínuo: começa depois da entrada (--t0 calculado no html()) */
+.am-in .fxic:is([data-tr=in-loop],[data-tr=loop]) .ic-mv{animation:var(--drw,none),var(--kf) var(--md) var(--me) calc(var(--d,0ms) + var(--t0) + var(--j,0) * var(--ms)) infinite}
+/* uma vez (passar o mouse / clicar, via .ic-go do bindIcons), vai e volta, e repetir enquanto o mouse estiver em cima */
+.am-play .fxic.ic-go .ic-mv{animation:var(--drw,none),var(--kf) var(--md) var(--me) calc(var(--j,0) * var(--ms)) 1}
+.am-play .fxic.ic-go[data-tr=boomerang] .ic-mv{animation:var(--drw,none),var(--kf) calc(var(--md) / 2) var(--me) 0ms 2 alternate}
+.am-play .fxic[data-tr=loop-hover]:hover .ic-mv{animation:var(--drw,none),var(--kf) var(--md) var(--me) calc(var(--j,0) * var(--ms)) infinite}
+.am-play .fxic:is([data-tr=hover],[data-tr=loop-hover],[data-tr=click],[data-tr=in-hover],[data-tr=boomerang]){cursor:pointer}
+/* transformação: dois glifos empilhados; cruzam com giro de 90° e escala (funciona em qualquer navegador) */
+.fxic .ic-st{transform-box:view-box;transform-origin:12px 12px;transition:opacity .45s ease,transform .55s cubic-bezier(.34,1.56,.64,1)}
+.fxic .ic-sb{opacity:0;transform:rotate(-90deg) scale(.5)}
+.fxic.ic-on .ic-sa{opacity:0;transform:rotate(90deg) scale(.5)}
+.fxic.ic-on .ic-sb{opacity:1;transform:none}
+.fxic .ic-sb .ic-s{stroke:var(--ia)}
+.am-in .fxic[data-mo=morph][data-tr=loop] .ic-sa{animation:icMorphA 4.4s cubic-bezier(.34,1.3,.64,1) calc(var(--d,0ms) + 900ms) infinite}
+.am-in .fxic[data-mo=morph][data-tr=loop] .ic-sb{animation:icMorphB 4.4s cubic-bezier(.34,1.3,.64,1) calc(var(--d,0ms) + 900ms) infinite}
+@keyframes icDraw{0%{stroke-dashoffset:1;opacity:0}8%{opacity:1}100%{stroke-dashoffset:0;opacity:1}}
+@keyframes icRedraw{0%{stroke-dashoffset:1}40%,100%{stroke-dashoffset:0}}
+@keyframes icPulse{0%,100%{transform:scale(1)}45%{transform:scale(1.12)}}
+@keyframes icBeat{0%,60%,100%{transform:scale(1)}12%{transform:scale(1.16)}24%{transform:scale(.97)}36%{transform:scale(1.1)}}
+@keyframes icSpin{0%{transform:rotate(0)}55%,100%{transform:rotate(var(--sp,360deg))}}
+@keyframes icBounce{0%,62%,100%{transform:translateY(0) scale(1,1)}18%{transform:translateY(-3px) scale(.95,1.05)}34%{transform:translateY(0) scale(1.06,.94)}46%{transform:translateY(-1px) scale(1,1)}}
+@keyframes icFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.6px)}}
+@keyframes icWiggle{0%,55%,100%{transform:rotate(0)}10%{transform:rotate(-11deg)}20%{transform:rotate(9deg)}30%{transform:rotate(-6deg)}40%{transform:rotate(3deg)}}
+@keyframes icSwing{0%,65%,100%{transform:rotate(0)}12%{transform:rotate(16deg)}26%{transform:rotate(-11deg)}40%{transform:rotate(6deg)}52%{transform:rotate(-2deg)}}
+@keyframes icNudge{0%{transform:translate(var(--ax,0px),var(--ay,-3px));opacity:0}18%{opacity:1}30%{transform:translate(calc(var(--ax,0px) * -.15),calc(var(--ay,-3px) * -.15))}40%,100%{transform:translate(0,0);opacity:1}}
+@keyframes icTick{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes icGrow{0%{transform:scaleY(0)}28%{transform:scaleY(1.08)}36%,100%{transform:scaleY(1)}}
+@keyframes icBlink{0%,45%,100%{opacity:1;transform:scale(1)}15%{opacity:.12;transform:scale(.7)}}
+@keyframes icWave{0%,100%{transform:skewY(0) scaleX(1)}50%{transform:skewY(-7deg) scaleX(.92)}}
+@keyframes icFlow{from{stroke-dasharray:.14 .1;stroke-dashoffset:0}to{stroke-dasharray:.14 .1;stroke-dashoffset:-.48}}
+@keyframes icFlip{0%,55%,100%{transform:scaleX(1)}14%{transform:scaleX(0)}28%{transform:scaleX(-1)}42%{transform:scaleX(0)}}
+@keyframes icOrbit{from{transform:rotate(0) translateX(1.4px) rotate(0)}to{transform:rotate(360deg) translateX(1.4px) rotate(-360deg)}}
+@keyframes icPing{0%{transform:scale(.55);opacity:.8}80%,100%{transform:scale(1.2);opacity:0}}
+@keyframes icMorphA{0%,40%{opacity:1;transform:none}50%,90%{opacity:0;transform:rotate(90deg) scale(.5)}100%{opacity:1;transform:none}}
+@keyframes icMorphB{0%,40%{opacity:0;transform:rotate(-90deg) scale(.5)}50%,90%{opacity:1;transform:none}100%{opacity:0;transform:rotate(-90deg) scale(.5)}}

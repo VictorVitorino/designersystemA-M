@@ -1,0 +1,58 @@
+/* ===== rt-60-forms.css — Formulário interativo (S30) ===== */
+.amf{position:relative;display:flex;flex-direction:column;width:100%;height:100%;box-sizing:border-box;padding:1.1em 1.3em 1em;border-radius:.9em;background:#fff;border:1px solid #DCE3EC;box-shadow:0 .6em 1.6em -.9em rgba(0,42,70,.35);color:#002A46;font-family:Inter,Roboto,Arial,sans-serif;line-height:1.3;text-align:left;overflow:hidden}
+.amf-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.amf-h{flex:none;display:flex;flex-direction:column;gap:.2em;margin:0 0 .7em;padding:0 0 .6em;border-bottom:2px solid #F78C16}
+.amf-t{font:600 1.3em/1.15 Roboto,Inter,Arial,sans-serif;color:#002A46}
+.amf-i{font-size:.82em;color:#566579}
+.amf-qs{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:.75em;padding-right:.3em;scrollbar-width:thin}
+.amf-q{display:flex;flex-direction:column;gap:.35em}
+.amf-q.amf-miss .amf-l{color:#B02A3E}
+.amf-q.amf-miss .amf-in,.amf-q.amf-miss .amf-rb,.amf-q.amf-miss .amf-o{border-color:#D23F55}
+.amf-l{font-size:.92em;font-weight:600;color:#13315C}
+.amf-req{font-style:normal;color:#F78C16;font-weight:700}
+.amf-in{position:relative;min-height:1.9em;padding:.4em .6em;border:1px solid #B9C8DA;border-radius:.4em;background:#FBFCFE;font-size:.92em;color:#002A46;white-space:pre-wrap;word-break:break-word;outline:none;cursor:text}
+.amf-in.amf-ta{min-height:3.6em}
+.amf-in:empty::before{content:attr(data-ph);color:#8A96A8;pointer-events:none}
+.amf-in:focus{border-color:#4A6FA5;box-shadow:0 0 0 .18em rgba(74,111,165,.22);background:#fff}
+.amf-rate,.amf-yn,.amf-opts{display:flex;flex-wrap:wrap;gap:.4em;align-items:center}
+.amf-opts{flex-direction:column;align-items:stretch;gap:.3em}
+.amf-rb,.amf-o,.amf-send,.amf-tb,.amf-again{font:inherit;cursor:pointer;color:#002A46;background:#fff;border:1px solid #B9C8DA;border-radius:.4em;line-height:1.2}
+.amf-rb{min-width:2.2em;height:2.2em;padding:0 .5em;font-weight:600;font-size:.95em}
+.amf-rb:hover,.amf-o:hover{border-color:#43698F;background:#EEF2F7}
+.amf-rb[aria-checked=true]{background:#002A46;color:#fff;border-color:#002A46}
+.amf-ynb{min-width:4.2em}
+.amf-rl{display:flex;gap:1em;margin-left:.3em;font-size:.72em;color:#566579}
+.amf-rl em{font-style:normal}
+.amf-o{display:flex;align-items:center;gap:.55em;padding:.38em .6em;text-align:left;font-size:.9em}
+.amf-o i{flex:none;width:1.05em;height:1.05em;border:1.5px solid #43698F;border-radius:50%;background:#fff;box-sizing:border-box;position:relative}
+.amf-o[role=checkbox] i{border-radius:.2em}
+.amf-o[aria-checked=true]{border-color:#002A46;background:#EEF2F7}
+.amf-o[aria-checked=true] i{background:#002A46;border-color:#002A46}
+.amf-o[aria-checked=true] i::after{content:"";position:absolute;inset:.2em;border-radius:inherit;background:#fff}
+.amf-o[role=checkbox][aria-checked=true] i::after{inset:0;background:none;border:solid #fff;border-width:0 .18em .18em 0;width:.3em;height:.55em;left:.3em;top:.08em;transform:rotate(45deg);border-radius:0}
+.amf-rb:focus-visible,.amf-o:focus-visible,.amf-send:focus-visible,.amf-tb:focus-visible,.amf-again:focus-visible{outline:2px solid #F78C16;outline-offset:2px}
+.amf-f{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.5em .7em;margin-top:.8em;padding-top:.7em;border-top:1px solid #EEF2F7}
+.amf-send{padding:.5em 1.3em;font-weight:700;background:#F78C16;border-color:#F78C16;color:#002A46}
+.amf-send:hover{background:#E07A0A}
+.amf-st{flex:1 1 8em;min-width:0;font-size:.78em;color:#566579}
+.amf-st.amf-ok{color:#1F8048}
+.amf-st.amf-err{color:#B02A3E}
+.amf-tools{display:flex;align-items:center;gap:.4em;margin-left:auto;font-size:.78em}
+.amf-n{color:#566579;white-space:nowrap}
+.amf-tb{padding:.3em .6em;font-size:1em}
+.amf-tb:hover{background:#EEF2F7}
+.amf-tb:disabled{opacity:.45;cursor:default}
+.amf-done{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1em;padding:1.5em;border-radius:inherit;background:rgba(255,255,255,.96);text-align:center}
+.amf-done[hidden]{display:none}
+.amf-done b{font:600 1.25em/1.3 Roboto,Inter,Arial,sans-serif;color:#002A46}
+.amf-again{padding:.5em 1.1em;font-weight:600}
+.amf-again:hover{background:#EEF2F7}
+.amf-empty{margin:0;font-size:.9em;color:#8A96A8}
+.amf-sent .amf-qs,.amf-sent .amf-send{filter:blur(1px);pointer-events:none}
+/* editor: o formulário é só desenho — clicar seleciona o elemento; sem cursor de texto */
+.am-edit .amf *{pointer-events:none}
+.am-edit .amf-in{cursor:default}
+/* fundo escuro do slide: o quadro continua branco (contraste), só o contorno some */
+.am-stage.am-dark .amf{border-color:transparent}
+/* editor e exportação (PDF/PowerPoint): a lista não rola, então sem barra de rolagem na imagem */
+.am-edit .amf-qs,.am-export .amf-qs{overflow:hidden}
