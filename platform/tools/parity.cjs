@@ -200,6 +200,9 @@ async function framesOf(p, i, times) {
   await p.clock.runFor(50);
   await p.waitForSelector('#presenter.open', { timeout: 5000 }).catch(() => {});
   await settleAnims(p);
+  /* o esmaecimento de ENTRADA do player (transição de opacidade do próprio .amp-slide ao abrir) depende do instante do primeiro
+     recálculo de estilo e não é um efeito do slide: é concluído nos dois lados para que t=0 compare os ELEMENTOS no estado inicial */
+  await p.evaluate(() => document.getAnimations().forEach((a) => { try { const el = a.effect && a.effect.target; if (a instanceof CSSTransition && el && (el.classList.contains('amp-slide') || el.classList.contains('amp-view') || el.classList.contains('amp-deck'))) a.finish(); } catch (e) { } }));
   let prev = 0;
   for (const t of times) {
     await pauseAll(p, t);
@@ -273,8 +276,9 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
   report.deck = { slides: JSON.parse(deckJson).slides.length, bytes: deckJson.length, tags: tags.length, notApplied: tags.filter((t) => t.applied === false).length, notInserted: tags.filter((t) => t.inserted === 0).length, buildErrors: tags.filter((t) => t.err) };
   log('deck de prova:', JSON.stringify({ slides: report.deck.slides, bytes: report.deck.bytes, notApplied: report.deck.notApplied, notInserted: report.deck.notInserted, errs: report.deck.buildErrors.length }));
 
-  /* 3. recarregar A do zero (a construção avançou contadores internos de ids) e carregar o MESMO deck em A e B */
+  /* 3. recarregar A e B do zero (simetria total: a construção e a leitura do catálogo avançaram contadores e temporizadores) e carregar o MESMO deck */
   await A.ctx.close(); const A2 = await openPage(browser, A_PATH, 'A'); A.ctx = A2.ctx; A.p = A2.p; A.errs.push(...A2.errs);
+  await B.ctx.close(); const B2 = await openPage(browser, B_PATH, 'B'); B.ctx = B2.ctx; B.p = B2.p; B.errs.push(...B2.errs);
   await loadDeck(A.p, deckJson); await loadDeck(B.p, deckJson);
   const normA = await A.p.evaluate(() => JSON.stringify(AMStudio.deck)), normB = await B.p.evaluate(() => JSON.stringify(AMStudio.deck));
   report.deckNormalizedSame = normA === normB; if (!report.deckNormalizedSame) report.mismatches.push({ layer: 'deck', detail: 'o deck normalizado (safeDeck) difere entre A e B' });
