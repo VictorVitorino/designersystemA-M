@@ -16,7 +16,17 @@ O que depende de contas externas (Supabase, Vercel, GitHub Actions, domínio, e-
 
 ### 1.1 Portão de qualidade do editor (35 baterias)
 
-PENDENTE_GATE
+Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node tests/cloud/preservacao.test.js`, que copia `studio/`, troca o HTML sob teste pelo **build em nuvem sem `window.AM_CLOUD`** e roda o `qa-gate.sh` completo:
+
+| Medida | Resultado |
+|---|---|
+| Baterias aprovadas no portão | **34 de 35** (539 s), com três fazendas de Chromium rodando ao mesmo tempo nesta máquina (prova de paridade + agentes de qualidade) |
+| Única falha | `test-s24-import.js`: "Execution context was destroyed", padrão de renderer derrubado por falta de recursos; não é erro de teste nem do build |
+| Reexecução isolada da S24 sobre o build em nuvem | **TUDO OK: 38 checagens, 0 erros** |
+| Execução do agente construtor (mesmo comando, máquina ociosa) | GATE PASS 35/35 (530 s) |
+| Provas estruturais da mesma suíte (PR-01…PR-13) | cloud − extensão = autônomo + 6 patches (igualdade exata de texto); nenhum arquivo de `studio/`, `original/`, `am/` alterado; build autônomo com o SHA-256 do original |
+
+Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as 35 baterias do editor original.
 
 ### 1.2 Prova de paridade (todos os efeitos, modelos, layouts, templates e quadros)
 
