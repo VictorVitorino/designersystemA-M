@@ -115,7 +115,7 @@ Na nuvem o editor **não** grava o rascunho em `localStorage` (`amStudio.draft` 
 A única cópia local é a fila `canteiro-cloud` (apagada após o salvamento confirmado) e as respostas de formulário que a própria pessoa enviou. "Minhas obras…" (acervo local antigo) continua abrindo, intacto.
 
 ## 7. Suposições sobre o contrato (para o backend conferir)
-1. `GET …/interactions` devolve itens `{id, kind, elementId, payload, author:{id,displayName}, createdAt, updatedAt}`; a extensão filtra o estado próprio por `author.id`.
+1. `GET …/interactions` devolve itens `{id, kind, elementId, payload, author:{id,displayName}, createdAt, updatedAt}` (`user` é um alias de `author`); a extensão só restaura no dispositivo os itens cujo `author.id` é o da sessão carregada — item sem autor, ou sem sessão, nunca entra (E2E-01).
    `form_response.payload = {at, q:[perguntas], a:[respostas]}`; `board_state/vote_state.payload` = o objeto guardado em `localStorage` (≤ 64 KB).
 2. `PUT …/content` com `snapshot:true` cria o ponto mesmo se o conteúdo for idêntico (`unchanged:true` + `snapshotNo`) — usado em "Antes de substituir" e em "Salvar versão agora" sem mudanças.
 3. `POST /api/assets/check` devolve como faltantes também os arquivos que o servidor tem mas o usuário ainda não "possui"; o `PUT` então responde 200 `deduplicated:true`.

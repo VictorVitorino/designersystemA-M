@@ -21,7 +21,8 @@
     "build:web": "node tools/build-web.js",
     "build:cloud": "node tools/build-cloud-editor.js --verify-standalone",
     "test:parity": "node tools/parity.cjs --a \"../original/Canteiro-AM (3).html\" --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud",
-    "test:parity:quick": "node tools/parity.cjs --a \"../original/Canteiro-AM (3).html\" --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud-quick --quick"
+    "test:parity:quick": "node tools/parity.cjs --a \"../original/Canteiro-AM (3).html\" --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud-quick --quick",
+    "test:parity:evidence": "node tools/parity-evidence.cjs --out .tmp/parity/cloud --doc docs/evidencias/paridade.md"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",

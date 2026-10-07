@@ -211,6 +211,18 @@ async function pinAll(p, t) {
   return last;
 }
 async function pauseAll(p, t) { return p.evaluate((t) => { document.getAnimations().forEach((a) => { try { a.pause(); a.currentTime = t; } catch (e) { } }); return document.getAnimations().filter((a) => a.playState === 'running').length; }, t); }
+/* Captura ESTÁVEL: o compositor do Chromium rasteriza em blocos de 256 px de forma assíncrona; logo após fixar uma animação de transform, um
+   bloco pode ainda mostrar a posição anterior (uma "costura" de 1 px na borda da lâmina que desliza). Fotografamos até duas capturas seguidas
+   saírem byte-idênticas — só então o quadro é o estado fixado, e não um estado intermediário do rasterizador. */
+const REPAINT = process.env.AM_PARITY_REPAINT === '1';   /* opcional: invalidar a pintura antes da foto (não altera o resultado nos casos medidos) */
+async function stableShot(el, opts) {
+  /* invalida a pintura das camadas do palco antes da foto: os blocos de raster são refeitos TODOS na translação atual (sem isso, um bloco
+     rasterizado num instante anterior da animação de transform fica com a borda meio pixel deslocada em relação aos demais) */
+  if (REPAINT) { try { await el.evaluate((v) => { v.ownerDocument.querySelectorAll('#presenter .amp-slide, #presenter .amp-view, #presenter .amp-deck').forEach((n) => { n.style.outline = '0px solid transparent'; void n.offsetWidth; }); }); await sleep(20); await el.evaluate((v) => { v.ownerDocument.querySelectorAll('#presenter .amp-slide, #presenter .amp-view, #presenter .amp-deck').forEach((n) => { n.style.outline = ''; void n.offsetWidth; }); }); await sleep(20); } catch (e) { } }
+  let prev = await el.screenshot(opts);
+  for (let k = 0; k < 5; k++) { await sleep(40); const cur = await el.screenshot(opts); if (cur.equals(prev)) return cur; prev = cur; }
+  return prev;
+}
 async function framesOf(p, i, times, attempt = 1) {
   const out = [];
   /* relógio pausado ANTES de abrir: o tempo de JS (relógio do player, temporizadores, rAF) passa a ser idêntico em A e B */
@@ -227,8 +239,8 @@ async function framesOf(p, i, times, attempt = 1) {
     await pauseAll(p, t);
     if (t > prev) await p.clock.runFor(t - prev); prev = t;
     await settleAnims(p); await pinAll(p, t);
-    const el = await p.$('#presenter .amp-view'); const png = await el.screenshot({ type: 'png', animations: 'allow', caret: 'hide' });
-    const bar = await p.$('#presenter .amp-bar'); const barPng = bar ? await bar.screenshot({ type: 'png', animations: 'allow', caret: 'hide' }) : null;
+    const el = await p.$('#presenter .amp-view'); const png = await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' });
+    const bar = await p.$('#presenter .amp-bar'); const barPng = bar ? await stableShot(bar, { type: 'png', animations: 'allow', caret: 'hide' }) : null;
     out.push({ t, png, barPng });
   }
   await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
@@ -236,22 +248,26 @@ async function framesOf(p, i, times, attempt = 1) {
   return out;
 }
 async function trFramesOf(p, i, times, attempt = 1) {
+  /* Cada instante t é medido numa SEQUÊNCIA NOVA (reabrir o player, avançar, fixar em t, fotografar). Medir t = 80, 250 e 500 ms na mesma
+     sequência deixava o raster dos blocos da lâmina em movimento dependente do histórico de pausas (um bloco refeito num instante anterior
+     mostrava a borda meio pixel deslocada — "costura" de 1 px); com uma captura por sequência não há histórico, e o resultado é determinístico. */
   const out = [];
-  await pauseClockAt(p, anchorFor(i, 3, attempt));
-  await p.evaluate((i) => { window.__amSeed(7000 + i); AMStudio.present(i - 1, true); }, i);
-  await p.clock.runFor(50);
-  await p.waitForSelector('#presenter.open', { timeout: 5000 }).catch(() => {});
-  await p.clock.runFor(4000); await settleAnims(p);
-  await p.evaluate(() => document.getAnimations().forEach((a) => { try { a.finish(); } catch (e) { } }));
-  await p.keyboard.press('ArrowRight'); await p.clock.runFor(20); await settleAnims(p);
-  let prev = 0;
-  for (const t of times) {
+  for (let k = 0; k < times.length; k++) {
+    const t = times[k];
+    await pauseClockAt(p, anchorFor(i, 3, attempt) + k * 30000);
+    await p.evaluate((i) => { window.__amSeed(7000 + i); AMStudio.present(i - 1, true); }, i);
+    await p.clock.runFor(50);
+    await p.waitForSelector('#presenter.open', { timeout: 5000 }).catch(() => {});
+    await p.clock.runFor(4000); await settleAnims(p);
+    await p.evaluate(() => document.getAnimations().forEach((a) => { try { a.finish(); } catch (e) { } }));
+    await p.keyboard.press('ArrowRight'); await p.clock.runFor(20); await settleAnims(p);
     await pauseAll(p, t);
-    if (t > prev) await p.clock.runFor(t - prev); prev = t;
+    await p.clock.runFor(t);
     await settleAnims(p); await pinAll(p, t);
-    const el = await p.$('#presenter .amp-view'); out.push({ t, png: await el.screenshot({ type: 'png', animations: 'allow', caret: 'hide' }) });
+    const el = await p.$('#presenter .amp-view'); out.push({ t, png: await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' }) });
+    await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
+    await p.evaluate(() => { const pr = document.getElementById('presenter'); if (pr && pr.classList.contains('open')) { pr.classList.remove('open'); } });
   }
-  await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
   return out;
 }
 async function pixelDiff(aBuf, bBuf) {

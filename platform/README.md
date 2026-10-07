@@ -26,7 +26,7 @@ Tudo o que é de produção (Supabase, Vercel, domínio, e-mail) está em [`docs
 | `db/migrations/` | Esquema `app` com RLS em todas as tabelas, papéis de privilégio mínimo, funções de auditoria/limite/identidade |
 | `web/` | Páginas do site (entrar, confirmar convite, esqueci a senha, acervo, admin, importar) sob CSP estrita |
 | `studio-cloud/` | Extensão de nuvem do editor (`ed-50-cloud.js`), `cloud-core.js` e os patches de texto do build |
-| `tools/` | `dev.js` (tudo em um comando), `migrate.js`, `build-web.js`/`build-cloud-editor.js`/`csp.js`, `backup.js`/`restore.js`/`restore-drill.js`, `gc-assets.js`, `maintenance.js`, `verify-deploy.js`, `secret-scan.js`, `parity.cjs` (prova de paridade), `fake-gotrue.js`, `create-first-admin.js`, `seed-demo.js` |
+| `tools/` | `dev.js` (tudo em um comando), `migrate.js`, `build-web.js`/`build-cloud-editor.js`/`csp.js`, `backup.js`/`restore.js`/`restore-drill.js`, `gc-assets.js`, `maintenance.js`, `verify-deploy.js`, `secret-scan.js`, `parity.cjs` (prova de paridade) e `parity-evidence.cjs` (gera `docs/evidencias/paridade.md` a partir do relatório), `fake-gotrue.js`, `create-first-admin.js`, `seed-demo.js` |
 | `tests/` | `unit`, `db` (isolamento/RLS), `api`, `security`, `web` (Playwright), `cloud` (editor em nuvem + preservação), `ops` (backup/restore/GC), `e2e` (pilha real), `load` (50 usuários) |
 | `infra/` | Supabase (checklist do painel, templates de e-mail, SSO), Vercel, Docker/Caddy alternativo, exemplos de variáveis |
 | `docs/` | Contrato da API, arquitetura, segurança, operação, backup, monitoramento, ambientes, pesquisa de custos, evidências |
@@ -38,7 +38,7 @@ Tudo o que é de produção (Supabase, Vercel, domínio, e-mail) está em [`docs
 npm test                 # unit + banco + API + segurança (Postgres local)
 npm run test:e2e         # ponta a ponta com a pilha real (Playwright)
 npm run test:load        # 50 usuários simultâneos
-npm run test:parity      # prova de paridade original × editor em nuvem (≈ 1 h)
+npm run test:parity      # prova de paridade original × editor em nuvem (≈ 1 h); depois: npm run test:parity:evidence
 npm run build:web        # dist/public + csp.json + vercel.json
 npm run build:cloud      # editor em nuvem (e prova que o autônomo segue byte-idêntico)
 node tools/backup.js all # backup cifrado do banco e dos arquivos (ver docs/BACKUP-E-RESTAURACAO.md)
