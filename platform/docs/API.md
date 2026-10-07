@@ -186,3 +186,8 @@ Detalhes em `docs/editor-em-nuvem.md`. O build "cloud" (`studio-cloud/`) acresce
 carregamento por `/editor/<id>` → `GET /api/presentations/:id` → hidratar `asset:` em `data:` → `AMStudio.loadDeck`; autosave com debounce (3 s) → externalizar imagens (`POST /api/assets/check` + `PUT /api/assets/:sha`) → `PUT …/content` com `baseRev`;
 indicador de estado (Salvando… / Salvo às HH:MM / Sem conexão — alterações guardadas neste computador / Conflito); fila local em IndexedDB para falhas de rede, com recuperação; tela de conflito; histórico de versões; "Criar cópia"; modo **visualizar** (apresentação direta, sem edição) para apresentações de outras pessoas;
 interações (formulários) enviadas à API quando há `window.AM_CLOUD`.
+
+O que a API oferece ao cliente desde 2026-10-07 (contrato acima): preferências da pessoa em `GET/PUT /api/me/prefs` (`brandKits`, `editor`); `clientId` no
+`POST …/interactions` para o reenvio da fila offline não duplicar; `DELETE …/interactions?elementId=&kind=` para o "Limpar" (só os próprios itens) e para o
+dono apagar as respostas de um elemento; estado de quadro/votação até 256 KB; `details.issues` (`slide` 1-based e `elementId`) no 422 do salvamento, para levar a
+pessoa ao ponto exato; 413 do salvamento medido em **bytes** (4 MiB na Vercel); upload 300/min por pessoa; 413 `quota_exceeded` quando a cota estiver ligada.
