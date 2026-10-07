@@ -18,7 +18,7 @@ const doc = `# Prova de paridade — original × editor em nuvem (todos os efeit
 |---|---|---|
 | A (original) | \`${path.basename(rep.a)}\` | \`${rep.aSha}\` |
 | B (candidato: editor em nuvem) | \`${path.basename(rep.b)}\` | \`${rep.bSha}\` |
-
+${rep.resumedFrom ? `\nExecução em **passagens retomáveis** (\`--resume\`): ${rep.resumedFrom} slides vieram do checkpoint \`progress.jsonl\` de uma passagem anterior (mesmo deck de prova — conferido pelo hash — e os mesmos dois arquivos), ${S.compared - rep.resumedFrom} foram comparados nesta passagem; os 7 slides de transição foram recalculados nesta passagem com o harness definitivo. O tempo acima é só desta passagem.\n` : ''}
 ## 1. O que a prova garante
 
 O editor em nuvem é o original acrescido da extensão de nuvem e de seis ajustes de uma linha. Esta prova mostra que **tudo o que o usuário vê** — cada efeito do Acervo de efeitos com suas variantes, cada caixa da Biblioteca de modelos, todos os ícones e transformações, layouts, projetos prontos da capa, blocos, SmartArt, formas, textos, linhas e marcas — **rende de forma idêntica** nos dois arquivos, quadro a quadro, inclusive durante as animações e as transições, e que as exportações (HTML e PowerPoint) são as mesmas.

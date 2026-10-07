@@ -48,6 +48,10 @@ const PROG = path.join(OUT, 'progress.jsonl');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const log = (...m) => console.error(new Date().toISOString().slice(11, 19), ...m);
+const TRACE = process.env.AM_PARITY_TRACE === '1'; const trace = (...m) => { if (TRACE) log('   ·', ...m); };
+/* cão de guarda: um stall do navegador (sem progresso por 5 min) encerra com código 3; quem lançou retoma com --resume do último checkpoint */
+let lastProgress = Date.now(); const WATCHDOG_MS = Number(process.env.AM_PARITY_WATCHDOG_MS || 300000);
+setInterval(() => { if (Date.now() - lastProgress > WATCHDOG_MS) { log(`WATCHDOG: sem progresso há ${Math.round(WATCHDOG_MS / 60000)} min — saindo com código 3 para retomada (--resume)`); process.exit(3); } }, 10000).unref();
 
 /* ---------- determinismo injetado antes de qualquer script da página ---------- */
 const INIT = `
@@ -230,9 +234,9 @@ async function stableShot(el, opts) {
 async function framesOf(p, i, times, attempt = 1) {
   const out = [];
   /* relógio pausado ANTES de abrir: o tempo de JS (relógio do player, temporizadores, rAF) passa a ser idêntico em A e B */
-  await pauseClockAt(p, anchorFor(i, 1, attempt));
+  await pauseClockAt(p, anchorFor(i, 1, attempt)); trace('frames', i, 'present');
   await p.evaluate((i) => { window.__amSeed(5000 + i); AMStudio.present(i, true); }, i);
-  await p.clock.runFor(50);
+  trace('frames', i, 'runFor 50'); await p.clock.runFor(50); trace('frames', i, 'aberto');
   await p.waitForSelector('#presenter.open', { timeout: 5000 }).catch(() => {});
   await settleAnims(p);
   /* o esmaecimento de ENTRADA do player (transição de opacidade do próprio .amp-slide ao abrir) depende do instante do primeiro
@@ -240,16 +244,16 @@ async function framesOf(p, i, times, attempt = 1) {
   await p.evaluate(() => document.getAnimations().forEach((a) => { try { const el = a.effect && a.effect.target; if (a instanceof CSSTransition && el && (el.classList.contains('amp-slide') || el.classList.contains('amp-view') || el.classList.contains('amp-deck'))) a.finish(); } catch (e) { } }));
   let prev = 0;
   for (const t of times) {
-    await pauseAll(p, t);
-    if (t > prev) await p.clock.runFor(t - prev); prev = t;
-    await settleAnims(p); await pinAll(p, t);
+    trace('frames', i, 't=' + t, 'pauseAll'); await pauseAll(p, t);
+    trace('frames', i, 't=' + t, 'runFor', t - prev); if (t > prev) await p.clock.runFor(t - prev); prev = t;
+    trace('frames', i, 't=' + t, 'settle+pin'); await settleAnims(p); await pinAll(p, t); trace('frames', i, 't=' + t, 'foto');
     const el = await p.$('#presenter .amp-view'); const png = await el.screenshot({ type: 'png', animations: 'allow', caret: 'hide' });
     const bar = await p.$('#presenter .amp-bar'); const barPng = bar ? await bar.screenshot({ type: 'png', animations: 'allow', caret: 'hide' }) : null;
     out.push({ t, png, barPng });
   }
-  await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
+  trace('frames', i, 'escape'); await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
   await p.evaluate(() => { const pr = document.getElementById('presenter'); if (pr && pr.classList.contains('open')) { pr.classList.remove('open'); } });
-  return out;
+  trace('frames', i, 'fim'); return out;
 }
 async function trFramesOf(p, i, times, attempt = 1) {
   /* Cada instante t é medido numa SEQUÊNCIA NOVA (reabrir o player, avançar, fixar em t, fotografar). Medir t = 80, 250 e 500 ms na mesma
@@ -350,11 +354,11 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     const row = { i, it: tag.it, kind: tag.kind, name: tag.name }; const mism = [], noise = [], files = []; const n = { dom: 0, raster: 0, frames: 0, framesTotal: 0, tr: 0, trTotal: 0, idOnly: 0, barChecks: 0, barAntialias: 0, framesNoise: 0, trNoise: 0 };
     /* relógios de A e B no MESMO instante antes do DOM: ids gerados com Date.now() (quadros de post-its etc.) saem iguais */
     await pauseClockAt(A.p, anchorFor(i, 0, attempt)); await pauseClockAt(B.p, anchorFor(i, 0, attempt));
-    const [dA, dB] = await Promise.all([domOf(A.p, i), domOf(B.p, i)]); row.dom = dA === dB;
+    trace('slide', i, 'dom'); const [dA, dB] = await Promise.all([domOf(A.p, i), domOf(B.p, i)]); row.dom = dA === dB;
     if (!row.dom && normIds(dA) === normIds(dB)) { row.dom = true; row.domIdsOnly = true; n.idOnly++; }
     if (row.dom) n.dom++; else { mism.push({ layer: 'dom', i, it: tag.it }); files.push([`${i}-dom-a.html`, dA], [`${i}-dom-b.html`, dB]); }
     for (const X of [A, B]) { try { await X.p.clock.resume(); } catch (e) { } }   /* o raster (caminho do PDF) usa temporizadores reais */
-    const [rA, rB] = await Promise.all([rasterOf(A.p, i), rasterOf(B.p, i)]);
+    trace('slide', i, 'raster'); const [rA, rB] = await Promise.all([rasterOf(A.p, i), rasterOf(B.p, i)]); trace('slide', i, 'raster ok');
     if (rA === rB) { row.raster = true; n.raster++; } else { const bufA = b64png(rA), bufB = b64png(rB); const d = await pixelDiff(bufA, bufB); row.raster = d.same; row.rasterPct = d.pct; if (d.same) n.raster++; else { mism.push({ layer: 'raster', i, it: tag.it, pct: d.pct, px: d.px }); files.push([`${i}-raster-a.png`, bufA], [`${i}-raster-b.png`, bufB]); if (d.diffPng) files.push([`${i}-raster-diff.png`, d.diffPng]); } }
     if (FRAMES) {
       const fA = await framesOf(A.p, i, FRAME_T, attempt), fB = await framesOf(B.p, i, FRAME_T, attempt);
@@ -399,6 +403,7 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     }
     for (const [name, buf] of r.files) wr(name, buf);
     report.mismatches.push(...r.mism); report.noise.push(...r.noise); report.slides.push(r.row);
+    lastProgress = Date.now();
     fs.appendFileSync(PROG, JSON.stringify({ i, deckSha: sha(deckJson).slice(0, 16), row: r.row, mism: r.mism, noise: r.noise, n: r.n, unstable: r.row.unstableFirstCapture ? report.unstable[report.unstable.length - 1] : null }) + '\n');   /* cada slide fica gravado: uma interrupção não perde o trabalho (--resume) */
     domSame += r.n.dom; rasterSame += r.n.raster; framesSame += r.n.frames; framesTotal += r.n.framesTotal; trSame += r.n.tr; trTotal += r.n.trTotal; idOnly += r.n.idOnly; barChecks += r.n.barChecks; barAntialias += r.n.barAntialias; framesNoise += r.n.framesNoise; trNoise += r.n.trNoise;
     if (k % 25 === 0 || k === idx.length - 1) log(`slide ${i + 1}/${N}${ONLY ? ' (' + (k + 1) + '/' + idx.length + ')' : ''} · dom ${domSame} · raster ${rasterSame} · quadros ${framesSame}/${framesTotal} · transições ${trSame}/${trTotal} · divergências ${report.mismatches.length} · recapturas ${retried} (instáveis ${unstable})`);

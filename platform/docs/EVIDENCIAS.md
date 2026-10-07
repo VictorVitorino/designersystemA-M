@@ -30,7 +30,21 @@ Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as 35 bater
 
 ### 1.2 Prova de paridade (todos os efeitos, modelos, layouts, templates e quadros)
 
-PENDENTE_PARIDADE
+`npm run test:parity` (`tools/parity.cjs`) com o original × build em nuvem final (sha `8e20f87c…`), executada em 2026-10-07 em duas passagens retomáveis (00:46–01:57, 311 slides; travamento transitório do navegador; retomada 02:19–02:52 a partir do checkpoint, com os 7 slides de transição recalculados pelo harness definitivo). Documento completo com método, envelope de ruído e lista de cada quadro fora da igualdade exata: [`evidencias/paridade.md`](evidencias/paridade.md).
+
+| Camada | Resultado |
+|---|---|
+| Deck de prova montado pelo caminho do usuário em A e carregado em A e B | **423 slides**: 196 caixas do Acervo de efeitos (Entrada 17, Contínuo 10, Mouse 10, Transição 7, Componentes 15, Ícones 18, Modelos 119) sobre 5 tipos de elemento, 42 caixas da Biblioteca de modelos, 54 ícones, 7 transformações, 18 layouts, 6 projetos prontos da capa, 5 blocos, 14 SmartArt, formas, textos, linhas, marcas |
+| Catálogo, runtime embutido (CSS/JS), deck normalizado | idênticos |
+| DOM renderizado por slide | **423/423** |
+| Raster 1280×720 (caminho do PDF) | **423/423** |
+| Quadros do player (t = 0, 150, 400, 800, 1500, 3000 ms) | **2 530/2 538** idênticos pixel a pixel; 8 dentro do envelope de ruído do Chromium (bordas de máscara: ≤ 123 px, ≤ 35/255), todos listados com imagem |
+| Quadros de transição (t = 80, 250, 500 ms após avançar) | **19/21** idênticos; 2 na borda da transição “Zoom” (1 coluna, ≤ 9/255) |
+| HTML exportado (2 922 KB) e PowerPoint (1 285 entradas) | idênticos |
+| Erros de console/página | 0 |
+| **Divergências atribuíveis ao build em nuvem** | **0** — resultado **IDÊNTICO** |
+
+Uma captura instável (slide 82, `timeline:steps`, t = 3000 ms) divergiu na 1ª foto e saiu idêntica na recaptura imediata, durante uma reconferência que rodava em paralelo; está registrada no documento, com as imagens da 1ª tentativa.
 
 ## 2. Banco de dados e isolamento (RLS)
 
