@@ -28,13 +28,17 @@ export async function rate(c, user, bucket, windowS, max) {
    deduplicados, então o freio de abuso é o teto por IP, que continua sendo o valor × RATE_IP_MULTIPLIER). prefs: gravação das preferências. */
 export const RATES = Object.freeze({ write: [60, 120], upload: [60, 300], comment: [60, 30], read: [60, 600], asset_read: [60, 600], prefs: [60, 60] });
 
-/** Lê o corpo no máximo `maxBytes` — para de ler ao estourar (não carrega 1 GB na memória só para depois recusar). */
-export async function readBodyLimited(c, maxBytes) {
+/** "4 MB", "13 MB", "1,5 MB" — limites em MiB escritos como a pessoa lê. */
+export const fmtMb = (bytes) => `${(Math.round((bytes / 1048576) * 10) / 10).toLocaleString('pt-BR')} MB`;
+
+/** Lê o corpo no máximo `maxBytes` (em BYTES) — para de ler ao estourar (não carrega 1 GB na memória só para depois recusar).
+ *  `tooLarge`: mensagem do 413 (a da rota diz o limite e o que fazer). */
+export async function readBodyLimited(c, maxBytes, tooLarge) {
   const declared = c.req.header('content-length');
   if (declared != null && declared !== '') {
     const n = Number(declared);
     if (!Number.isFinite(n) || n < 0) throw E.badRequest('Cabeçalho Content-Length inválido.');
-    if (n > maxBytes) throw E.tooLarge();
+    if (n > maxBytes) throw E.tooLarge(tooLarge);
   }
   const body = c.req.raw.body;
   if (!body) return Buffer.alloc(0);
@@ -43,15 +47,15 @@ export async function readBodyLimited(c, maxBytes) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > maxBytes) { await reader.cancel().catch(() => {}); throw E.tooLarge(); }
+    if (total > maxBytes) { await reader.cancel().catch(() => {}); throw E.tooLarge(tooLarge); }
     chunks.push(value);
   }
   return Buffer.concat(chunks.map((v) => Buffer.from(v.buffer, v.byteOffset, v.byteLength)), total);
 }
 
-/** JSON do corpo, com limite de tamanho e validação zod (o `schema` decide o que é aceito; a mensagem nunca ecoa o valor recebido). */
-export async function readJsonBody(c, schema, maxBytes = 16 * 1024) {
-  const buf = await readBodyLimited(c, maxBytes);
+/** JSON do corpo, com limite de tamanho (em bytes) e validação zod (o `schema` decide o que é aceito; a mensagem nunca ecoa o valor recebido). */
+export async function readJsonBody(c, schema, maxBytes = 16 * 1024, { tooLarge } = {}) {
+  const buf = await readBodyLimited(c, maxBytes, tooLarge);
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { throw E.badRequest('O corpo não é UTF-8 válido.'); }
   let data;

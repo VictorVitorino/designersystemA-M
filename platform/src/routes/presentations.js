@@ -7,7 +7,7 @@ import { E } from '../lib/errors.js';
 import { requireUser, requireAdmin, txAsUser, audit } from '../lib/request.js';
 import { cursorKey, encodeCursor, decodeCursor } from '../lib/cursor.js';
 import {
-  uuidParam, isUuid, rate, RATES, readJsonBody, prepareContent, blankDeck, normalizeTitle, accessOf, getMeta, getPresentation, listQuery, mapMeta,
+  uuidParam, isUuid, rate, RATES, readJsonBody, fmtMb, prepareContent, blankDeck, normalizeTitle, accessOf, getMeta, getPresentation, listQuery, mapMeta,
   saveContent, createPresentation, duplicatePresentation, renamePresentation, trashPresentation, restorePresentation, purgePresentation, transferPresentation,
   listVersions, getVersion, restoreVersion,
 } from '../lib/presentations-service.js';
@@ -50,6 +50,8 @@ export function presentationsRoutes(deps) {
   r.use('*', async (c, next) => { await next(); if (!c.res.headers.has('cache-control')) c.header('Cache-Control', 'no-store'); });
 
   const aud = (tx, c) => (action, entityType, entityId, meta) => audit(tx, c, action, entityType, entityId, meta);
+  /** 413 amigável do salvamento/criação: o corpo inteiro (em BYTES, UTF-8) passa de MAX_JSON_BYTES — 4 MB por padrão na Vercel (PUB-08). */
+  const deckBody = { tooLarge: `A apresentação passa do limite de ${fmtMb(config.maxJsonBytes)} por salvamento. Reduza imagens muito grandes ou divida a apresentação em duas e tente de novo.` };
   /** Rejeição por segurança vira auditoria própria (a transação principal nem chegou a abrir). Falha de auditoria nunca muda a resposta. */
   async function auditRejected(c, id, e) {
     if (!e || e.code !== 'rejected_content') return;
@@ -77,7 +79,7 @@ export function presentationsRoutes(deps) {
   r.post('/', async (c) => {
     const user = requireUser(c);
     await rate(c, user, 'write', ...RATES.write);
-    const body = await readJsonBody(c, CreateBody, config.maxJsonBytes);
+    const body = await readJsonBody(c, CreateBody, config.maxJsonBytes, deckBody);
     const source = body.source || 'new';
     if (source === 'import' && !body.content) throw E.badRequest('Informe o conteúdo a importar.');
     let title = null;
@@ -105,7 +107,7 @@ export function presentationsRoutes(deps) {
   r.put('/:id/content', async (c) => {
     const user = requireUser(c); const id = uuidParam(c);
     await rate(c, user, 'write', ...RATES.write);
-    const body = await readJsonBody(c, SaveBody, config.maxJsonBytes);
+    const body = await readJsonBody(c, SaveBody, config.maxJsonBytes, deckBody);
     let prep;
     try { prep = prepareContent(body.content); } catch (e) { await auditRejected(c, id, e); throw e; }
     const out = await lockSafe(() => txAsUser(c, (tx) => saveContent(tx, { userId: user.id, aud: aud(tx, c), id, input: body, prep })));

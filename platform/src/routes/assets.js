@@ -16,7 +16,7 @@ import { createLogger } from '../lib/log.js';
 import { sha256Hex } from '../lib/canonical.js';
 import { validateUpload, LIMITS, MIME } from '../lib/asset-validate.js';
 import { contentDisposition } from '../storage/keys.js';
-import { rate, RATES, readBodyLimited, readJsonBody } from '../lib/presentations-service.js';
+import { rate, RATES, readBodyLimited, readJsonBody, fmtMb } from '../lib/presentations-service.js';
 
 const SHA_RE = /^[0-9a-f]{64}$/;
 const KINDS = ['image', 'thumb', 'attachment'];
@@ -26,7 +26,6 @@ const KIND_MIMES = {
   attachment: [MIME.pdf, MIME.pptx, MIME.csv],
 };
 const EXT = { [MIME.png]: 'png', [MIME.jpeg]: 'jpg', [MIME.webp]: 'webp', [MIME.gif]: 'gif', [MIME.pdf]: 'pdf', [MIME.pptx]: 'pptx', [MIME.csv]: 'csv' };
-const STREAM_LIMIT = 8 * 1024 * 1024;     // acima disso (e havendo URL assinada) a resposta é 302 para o armazenamento
 
 const sha = z.string().regex(SHA_RE, 'Hash inválido.');
 const CheckBody = z.object({ shas: z.array(sha).max(200) }).strict();
@@ -39,6 +38,9 @@ export function assetsRoutes(deps) {
   const { config, storage } = deps;
   const log = deps.logger || createLogger(config);
   const r = new Hono();
+  // acima disso (e havendo URL assinada) a leitura é 302 para o armazenamento: 8 MiB em servidor Node; 4 MiB na Vercel, cuja função não devolve
+  // corpo maior que 4,5 MB (PUB-08) — lá, sem URL assinada, o arquivo grande recebe 413 claro em vez de uma resposta cortada pela plataforma
+  const streamLimit = config.streamLimitBytes || 8 * 1024 * 1024;
 
   /** Limite efetivo: o menor entre o padrão do tipo (25 MB imagem, 100 MB anexo…) e a configuração `uploads.max_bytes` do admin. */
   async function capFor(tx, kind) {
@@ -108,7 +110,7 @@ export function assetsRoutes(deps) {
     const user = requireUser(c);
     await rate(c, user, 'upload', ...RATES.upload);
     const want = shaParam(c); const kind = kindOf(c);
-    const bytes = await readBodyLimited(c, config.maxApiUploadBytes);            // 413 sem ler o resto
+    const bytes = await readBodyLimited(c, config.maxApiUploadBytes, `O arquivo passa do limite de ${fmtMb(config.maxApiUploadBytes)} por envio. Reduza a imagem (ou o arquivo) e tente de novo.`);   // 413 sem ler o resto
     if (!sameHash(sha256Hex(bytes), want)) throw E.badRequest('O hash informado não confere com o conteúdo enviado.');
     const cap = await txAsUser(c, (tx) => capFor(tx, kind));
     let info;
@@ -228,9 +230,13 @@ export function assetsRoutes(deps) {
     const inm = c.req.header('if-none-match');
     if (inm && inm.split(',').some((t) => t.trim().replace(/^W\//, '') === `"${v}"`)) return c.body(null, 304, headers);
     const size = Number(a.size_bytes);
-    if (size > STREAM_LIMIT) {
+    if (size > streamLimit) {
       const url = await storage.signedGetUrl(v, { ttlS: 300, disposition: image ? 'inline' : 'attachment', filename: image ? undefined : `${v.slice(0, 16)}.${EXT[a.mime] || 'bin'}`, mime: a.mime });
       if (url) return c.body(null, 302, { Location: url, 'Cache-Control': 'private, no-store' });   // URL expira em 5 min: nunca cacheie o redirecionamento
+      if (config.onVercel) {
+        log.warn('asset_too_large_for_function', { sha: v, size });
+        throw E.tooLarge(`Este arquivo tem mais de ${fmtMb(streamLimit)} e não pode ser entregue por este servidor sem um link temporário do armazenamento. Fale com um administrador.`);
+      }
     }
     const obj = await storage.getStream(v);
     if (!obj) { log.error('asset_object_missing', { sha: v }); throw E.notFound(); }                // metadado sem objeto: incidente de integridade (alerta em log)

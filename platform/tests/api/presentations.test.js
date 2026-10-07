@@ -395,7 +395,7 @@ describe('entrada maliciosa e limites', () => {
     const big = deck('Big', { text: 'x' }); big.slides[0].els[0].src = 'data:image/png;base64,' + 'A'.repeat(200000);
     const r = await put({ baseRev: 1, content: big }); assert.equal(r.status, 422); assert.ok(r.json.error.details.reasons.includes('imagem_nao_externalizada'));
     const huge = await env.request(A, 'PUT', `/api/presentations/${p.id}/content`, { body: Buffer.alloc(14 * 1024 * 1024, 0x20), headers: { 'content-type': 'application/json' } });
-    assert.equal(huge.status, 413); assert.equal(huge.json.error.code, 'too_large');
+    assert.equal(huge.status, 413); assert.equal(huge.json.error.code, 'too_large'); assert.match(huge.json.error.message, /limite de 13 MB por salvamento/, 'fora da Vercel o padrão é 13 MiB (PUB-08)');
     const lying = await env.request(A, 'PUT', `/api/presentations/${p.id}/content`, { body: '{}', headers: { 'content-type': 'application/json', 'content-length': String(50 * 1024 * 1024) } });
     assert.equal(lying.status, 413, 'Content-Length declarado grande demais é barrado antes de ler');
     assert.equal((await row(p.id)).rev, 1);
