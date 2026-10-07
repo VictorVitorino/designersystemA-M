@@ -14,6 +14,7 @@ import { presentationsRoutes } from './routes/presentations.js';
 import { commentsRoutes } from './routes/comments.js';
 import { interactionsRoutes } from './routes/interactions.js';
 import { assetsRoutes } from './routes/assets.js';
+import { prefsRoutes } from './routes/prefs.js';
 
 /** @param {{config:object, db:object, storage:object, gotrue:object, sessionOverride?:Function}} deps
  *  sessionOverride só existe em APP_ENV=test (testes de rotas sem passar pelo GoTrue); em qualquer outro ambiente é ignorado e a partida falha. */
@@ -30,6 +31,7 @@ export function createApp(deps) {
   app.route('/api', healthRoutes(deps));
   app.route('/api/auth', authRoutes(deps));
   app.route('/api/me', authRoutes.me ? authRoutes.me(deps) : new Hono());
+  app.route('/api/me', prefsRoutes(deps));      // /me/prefs (preferências da própria pessoa)
   app.route('/api/admin', adminRoutes(deps));
   app.route('/api/presentations', presentationsRoutes(deps));
   app.route('/api', commentsRoutes(deps));      // /presentations/:id/comments e /comments/:id

@@ -51,8 +51,25 @@ describe('gravar', () => {
     assert.equal((await post(V1, { ...ok, payload: root })).status, 400, 'aninhamento excessivo');
     const big = await post(V1, { ...ok, payload: { t: 'x'.repeat(66 * 1024) } }); assert.equal(big.status, 413); assert.equal(big.json.error.code, 'too_large');
     const edge = await post(V1, { ...ok, payload: { t: 'x'.repeat(60 * 1024) } }); assert.equal(edge.status, 201, 'perto do limite (60 KB) passa');
-    const huge = await env.request(V1, 'POST', url(), { body: Buffer.alloc(200 * 1024, 0x20), headers: { 'content-type': 'application/json' } }); assert.equal(huge.status, 413);
+    const huge = await env.request(V1, 'POST', url(), { body: Buffer.alloc(300 * 1024, 0x20), headers: { 'content-type': 'application/json' } }); assert.equal(huge.status, 413, 'corpo acima do teto (256 KB + envelope) nem é lido');
     assert.equal((await env.request(V1, 'POST', url(), { body: '{x', headers: { 'content-type': 'application/json' } })).status, 400);
+  });
+  test('BE-ED-14: board_state e vote_state aceitam até 256 KB; form_response, reaction e view continuam até 64 KB', async () => {
+    const W = await env.mkUser({ name: 'Quadro grande' });
+    for (const kind of ['board_state', 'vote_state']) {
+      const big = { notes: Array.from({ length: 200 }, (_, i) => ({ id: 'n' + i, c: i % 3, t: 'x'.repeat(400), k: 'y', at: '2026-10-07T10:00:00.000Z' })) };   // ~100 KB, como o quadro cheio do editor
+      assert.ok(Buffer.byteLength(JSON.stringify(big)) > 64 * 1024);
+      const r = await post(W, { kind, elementId: 'grande', payload: big }); assert.equal(r.status, 201, r.text);
+      const edge = await post(W, { kind, elementId: 'grande', payload: { t: 'y'.repeat(256 * 1024 - 8) } }); assert.equal(edge.status, 200, 'exatamente 256 KB serializados passam');
+      const over = await post(W, { kind, elementId: 'grande', payload: { t: 'y'.repeat(256 * 1024 - 7) } }); assert.equal(over.status, 413); assert.equal(over.json.error.code, 'too_large');
+      assert.equal((await rows({ u: W.id, kind, el: 'grande' }))[0].payload.t.length, 256 * 1024 - 8, 'o estado anterior ficou');
+    }
+    // votação com milhares de linhas de números pequenos (o binário do jsonb passa de 4× o texto): continua cabendo no banco
+    const votes = { q: ['A', 'B', 'C'], rows: Array.from({ length: 5000 }, (_, i) => ({ at: '2026-10-07T10:00:00Z', a: [i % 3, 1, 0] })) };
+    assert.equal((await post(W, { kind: 'vote_state', elementId: 'votos', payload: votes })).status, 201);
+    for (const kind of ['form_response', 'reaction', 'view']) {
+      const r = await post(W, { kind, elementId: 'f', payload: { t: 'x'.repeat(66 * 1024) } }); assert.equal(r.status, 413, kind); assert.match(r.json.error.message, /64 KB/);
+    }
   });
   test('teto de 500 por pessoa/elemento (409) — por elemento, por tipo e por pessoa; estados não têm teto', async () => {
     await env.sys((tx) => tx`insert into app.interactions(presentation_id, user_id, kind, element_id, payload) select ${P.id}::uuid, ${V1.id}::uuid, 'form_response', 'cheio', '{}'::jsonb from generate_series(1, 500)`);
@@ -82,6 +99,118 @@ describe('gravar', () => {
     assert.equal((await post(null, { kind: 'reaction', elementId: 'x', payload: {} })).status, 401);
     const S = await env.mkUser({ status: 'suspended' }); assert.equal((await post(S, { kind: 'reaction', elementId: 'x', payload: {} })).status, 403);
     assert.equal((await rows({ p: T.id })).length, 0);
+  });
+});
+
+describe('idempotência do reenvio (clientId, F13)', () => {
+  test('mesmo (apresentação, pessoa, clientId) → devolve o item existente (200), uma só linha; clientId diferente cria outro', async () => {
+    const W = await env.mkUser({ name: 'Fila offline' });
+    const a = await post(W, { kind: 'form_response', elementId: 'f1', clientId: 'c-0001_Ab', payload: { q: ['Nota'], a: ['9'] } }); assert.equal(a.status, 201, a.text);
+    const b = await post(W, { kind: 'form_response', elementId: 'f1', clientId: 'c-0001_Ab', payload: { q: ['Nota'], a: ['9'] } }); assert.equal(b.status, 200);
+    assert.equal(b.json.id, a.json.id); assert.equal(b.json.createdAt, a.json.createdAt); assert.equal(b.json.kind, 'form_response'); assert.equal(b.json.elementId, 'f1');
+    assert.equal((await rows({ u: W.id, el: 'f1' })).length, 1);
+    assert.equal((await post(W, { kind: 'form_response', elementId: 'f1', clientId: 'c-0002', payload: { a: ['8'] } })).status, 201);
+    assert.equal((await post(W, { kind: 'form_response', elementId: 'f1', payload: { a: ['7'] } })).status, 201, 'sem clientId continua acumulando');
+    assert.equal((await post(W, { kind: 'form_response', elementId: 'f1', payload: { a: ['7'] } })).status, 201);
+    assert.equal((await rows({ u: W.id, el: 'f1' })).length, 4);
+    // reenvio com o mesmo clientId mas outro conteúdo: vale o que foi gravado primeiro (a fila nunca troca o conteúdo de um envio)
+    const c = await post(W, { kind: 'form_response', elementId: 'f1', clientId: 'c-0001_Ab', payload: { a: ['outro'] } }); assert.equal(c.status, 200); assert.equal(c.json.id, a.json.id);
+    assert.deepEqual((await env.sys((tx) => tx`select payload from app.interactions where id = ${a.json.id}`))[0].payload, { q: ['Nota'], a: ['9'] });
+  });
+  test('o clientId é por pessoa e por apresentação: outra pessoa (ou outra apresentação) com o mesmo valor cria o seu', async () => {
+    const W1 = await env.mkUser({ name: 'Pessoa 1' }), W2 = await env.mkUser({ name: 'Pessoa 2' }); const P2 = await env.create(OWNER, 'Outra', deck('Outra'));
+    const a = await post(W1, { kind: 'reaction', elementId: 'r', clientId: 'mesmo', payload: {} }); assert.equal(a.status, 201);
+    const b = await post(W2, { kind: 'reaction', elementId: 'r', clientId: 'mesmo', payload: {} }); assert.equal(b.status, 201); assert.notEqual(b.json.id, a.json.id);
+    const c = await post(W1, { kind: 'reaction', elementId: 'r', clientId: 'mesmo', payload: {} }, P2.id); assert.equal(c.status, 201); assert.notEqual(c.json.id, a.json.id);
+  });
+  test('reenvios SIMULTÂNEOS com o mesmo clientId resultam em UMA linha (201 uma vez, 200 nas outras), inclusive com 499 já gravados', async () => {
+    const W = await env.mkUser({ name: 'Rajada' });
+    await env.sys((tx) => tx`insert into app.interactions(presentation_id, user_id, kind, element_id, payload) select ${P.id}::uuid, ${W.id}::uuid, 'form_response', 'cheio2', '{}'::jsonb from generate_series(1, 499)`);
+    const res = await Promise.all(Array.from({ length: 10 }, (_, i) => env.post(W, url(), { json: { kind: 'form_response', elementId: 'cheio2', clientId: 'rajada-1', payload: { i: 0 } }, ip: `198.51.100.${120 + i}` })));
+    assert.deepEqual(res.map((r) => r.status).sort(), [200, 200, 200, 200, 200, 200, 200, 200, 200, 201], 'o 500º item é gravado uma vez; os reenvios não esbarram no teto');
+    assert.equal(new Set(res.map((r) => r.json.id)).size, 1);
+    assert.equal((await rows({ u: W.id, el: 'cheio2' })).length, 500);
+    const again = await post(W, { kind: 'form_response', elementId: 'cheio2', clientId: 'rajada-1', payload: {} }); assert.equal(again.status, 200, 'reenvio depois do teto: devolve o item, não 409');
+    assert.equal((await post(W, { kind: 'form_response', elementId: 'cheio2', clientId: 'rajada-2', payload: {} })).status, 409, 'item novo além do teto continua barrado');
+  });
+  test('estados (quadro/votação) aceitam clientId e continuam upsert; clientId inválido → 400', async () => {
+    const W = await env.mkUser({ name: 'Estado com id' });
+    assert.equal((await post(W, { kind: 'board_state', elementId: 'b', clientId: 'k1', payload: { v: 1 } })).status, 201);
+    assert.equal((await post(W, { kind: 'board_state', elementId: 'b', clientId: 'k2', payload: { v: 2 } })).status, 200);
+    assert.equal((await post(W, { kind: 'board_state', elementId: 'b', clientId: 'k2', payload: { v: 2 } })).status, 200);
+    const st = await rows({ u: W.id, kind: 'board_state', el: 'b' }); assert.equal(st.length, 1); assert.deepEqual(st[0].payload, { v: 2 });
+    for (const clientId of ['', 'a'.repeat(65), 'com espaço', 'x/y', '<b>', 'ç', 5, null, ['a']]) assert.equal((await post(W, { kind: 'form_response', elementId: 'f', clientId, payload: {} })).status, 400, JSON.stringify(clientId));
+    assert.equal((await post(W, { kind: 'form_response', elementId: 'f', clientId: 'A'.repeat(64), payload: {} })).status, 201, '64 caracteres é o máximo');
+  });
+  test('o banco garante a unicidade e a imutabilidade do clientId (índice parcial + gatilho)', async () => {
+    const W = await env.mkUser({ name: 'Banco' });
+    const ins = (cid) => env.db.asUser(W.id, (tx) => tx`insert into app.interactions(presentation_id, user_id, kind, element_id, payload, client_id) values (${P.id}::uuid, ${W.id}::uuid, 'form_response', 'x', '{}'::jsonb, ${cid}) returning id`);
+    const [r] = await ins('db-1');
+    await assert.rejects(() => ins('db-1'), (e) => e.code === '23505');
+    await assert.rejects(() => ins('tem espaço'), (e) => e.code === '23514');
+    await assert.rejects(() => env.db.asUser(W.id, (tx) => tx`update app.interactions set client_id = 'db-2' where id = ${r.id}`), (e) => e.code === '42501');
+  });
+});
+
+describe('apagar (DELETE …/interactions?elementId=&kind=, BE-ED-05)', () => {
+  let Q, R1, R2;
+  const del = (u, q, id) => env.del(u, `${url(id || Q.id)}?${q}`);
+  async function seed() {
+    await env.sys((tx) => tx`delete from app.interactions where presentation_id = ${Q.id}`);
+    for (const u of [R1, R2, OWNER]) {
+      await post(u, { kind: 'form_response', elementId: 'f1', payload: { a: ['x'] } }, Q.id); await post(u, { kind: 'form_response', elementId: 'f1', payload: { a: ['y'] } }, Q.id);
+      await post(u, { kind: 'vote_state', elementId: 'f1', payload: { v: 1 } }, Q.id); await post(u, { kind: 'board_state', elementId: 'b1', payload: { notes: [] } }, Q.id);
+    }
+  }
+  const count = async (where = {}) => (await rows({ p: Q.id, ...where })).length;
+  before(async () => { Q = await env.create(OWNER, 'Workshop', deck('Workshop')); R1 = await env.mkUser({ name: 'Participante 1' }); R2 = await env.mkUser({ name: 'Participante 2' }); });
+
+  test('membro ("Limpar"): apaga SÓ os próprios itens do elemento — os dos outros ficam; 200 {deleted}', async () => {
+    await seed();
+    const r = await del(R1, 'elementId=f1'); assert.equal(r.status, 200, r.text); assert.deepEqual(r.json, { deleted: 3 });
+    assert.equal(await count({ u: R1.id, el: 'f1' }), 0); assert.equal(await count({ u: R1.id, el: 'b1' }), 1, 'outro elemento intacto');
+    assert.equal(await count({ u: R2.id, el: 'f1' }), 3); assert.equal(await count({ u: OWNER.id, el: 'f1' }), 3);
+    assert.deepEqual((await del(R1, 'elementId=f1')).json, { deleted: 0 }, 'repetir é inofensivo');
+  });
+  test('filtro por kind: só aquele tipo do elemento', async () => {
+    await seed();
+    assert.deepEqual((await del(R2, 'elementId=f1&kind=vote_state')).json, { deleted: 1 });
+    assert.equal(await count({ u: R2.id, el: 'f1', kind: 'form_response' }), 2); assert.equal(await count({ u: R2.id, el: 'f1', kind: 'vote_state' }), 0);
+  });
+  test('dono da apresentação e admin apagam TODOS os itens do elemento (de todas as pessoas)', async () => {
+    await seed();
+    assert.deepEqual((await del(OWNER, 'elementId=f1&kind=form_response')).json, { deleted: 6 });
+    assert.equal(await count({ el: 'f1', kind: 'form_response' }), 0); assert.equal(await count({ el: 'f1', kind: 'vote_state' }), 3);
+    assert.deepEqual((await del(ADM, 'elementId=f1')).json, { deleted: 3 });
+    assert.equal(await count({ el: 'f1' }), 0); assert.equal(await count({ el: 'b1' }), 3, 'outros elementos intactos');
+  });
+  test('quem não vê a apresentação → 404 (lixeira alheia, inexistente); sem login 401; suspenso 403 — nada é apagado', async () => {
+    await seed();
+    const T = await env.create(OWNER, 'Na lixeira', deck('Lixo')); await post(R1, { kind: 'form_response', elementId: 'f1', payload: {} }, T.id); await env.del(OWNER, `/api/presentations/${T.id}`);
+    assert.equal((await del(R1, 'elementId=f1', T.id)).status, 404); assert.equal((await rows({ p: T.id })).length, 1);
+    assert.equal((await del(R1, 'elementId=f1', '00000000-0000-4000-8000-000000000000')).status, 404);
+    assert.equal((await del(OWNER, 'elementId=f1', T.id)).status, 200, 'o dono ainda vê a própria lixeira');
+    assert.equal((await del(null, 'elementId=f1')).status, 401);
+    const S = await env.mkUser({ status: 'suspended' }); assert.equal((await del(S, 'elementId=f1')).status, 403);
+    assert.equal(await count({ el: 'f1' }), 9);
+  });
+  test('validação: elementId obrigatório e no formato; kind conhecido', async () => {
+    for (const q of ['', 'kind=form_response', 'elementId=', 'elementId=%3Cb%3E', 'elementId=' + 'a'.repeat(81), 'elementId=f1&kind=comment', "elementId=f1'%20or%201=1"]) assert.equal((await del(OWNER, q)).status, 400, q);
+    assert.equal(await count(), 12, 'nada apagado');
+  });
+  test('auditoria interactions.delete: quem, onde, quantos (e de quantas outras pessoas) — nunca o conteúdo', async () => {
+    await env.sys((tx) => tx`delete from app.interactions where presentation_id = ${Q.id}`);
+    await post(R1, { kind: 'form_response', elementId: 'aud', payload: { a: ['RESPOSTA-SIGILOSA'] } }, Q.id); await post(R2, { kind: 'form_response', elementId: 'aud', payload: { a: ['OUTRA-SIGILOSA'] } }, Q.id);
+    await del(OWNER, 'elementId=aud&kind=form_response');
+    const au = await env.sys((tx) => tx`select actor_id, entity_type, entity_id, meta from app.audit_log where action = 'interactions.delete' and entity_id = ${Q.id} order by id desc limit 1`);
+    assert.equal(au[0].actor_id, OWNER.id); assert.equal(au[0].entity_type, 'presentation');
+    assert.deepEqual(au[0].meta, { elementId: 'aud', kind: 'form_response', deleted: 2, others: 2 });
+    assert.ok(!JSON.stringify(await env.sys((tx) => tx`select meta from app.audit_log`)).includes('SIGILOSA'));
+  });
+  test('o RLS é quem decide: mesmo direto no banco, um membro não apaga o item de outra pessoa', async () => {
+    await seed();
+    const n = await env.db.asUser(R1.id, (tx) => tx`delete from app.interactions where presentation_id = ${Q.id} and user_id = ${R2.id} returning id`);
+    assert.equal(n.length, 0); assert.equal(await count({ u: R2.id }), 4);
   });
 });
 
