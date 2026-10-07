@@ -217,7 +217,8 @@ async function pauseAll(p, t) { return p.evaluate((t) => { document.getAnimation
 /* Captura ESTÁVEL: o compositor do Chromium rasteriza em blocos de 256 px de forma assíncrona; logo após fixar uma animação de transform, um
    bloco pode ainda mostrar a posição anterior (uma "costura" de 1 px na borda da lâmina que desliza). Fotografamos até duas capturas seguidas
    saírem byte-idênticas — só então o quadro é o estado fixado, e não um estado intermediário do rasterizador. */
-const REPAINT = process.env.AM_PARITY_REPAINT === '1';   /* opcional: invalidar a pintura antes da foto (não altera o resultado nos casos medidos) */
+const REPAINT = process.env.AM_PARITY_REPAINT === '1';
+const PROMOTE = process.env.AM_PARITY_PROMOTE !== '0';   /* promoção de camada das lâminas após fixar a transição (padrão ligado; AM_PARITY_PROMOTE=0 desliga) */   /* opcional: invalidar a pintura antes da foto (não altera o resultado nos casos medidos) */
 async function stableShot(el, opts) {
   /* invalida a pintura das camadas do palco antes da foto: os blocos de raster são refeitos TODOS na translação atual (sem isso, um bloco
      rasterizado num instante anterior da animação de transform fica com a borda meio pixel deslocada em relação aos demais) */
@@ -267,7 +268,12 @@ async function trFramesOf(p, i, times, attempt = 1) {
     await pauseAll(p, t);
     await p.clock.runFor(t);
     await settleAnims(p); await pinAll(p, t);
+    /* Depois de fixar a transição em t, as lâminas são promovidas a camada própria (will-change): o compositor refaz TODOS os blocos de raster no estado
+       fixado, em vez de reaproveitar blocos rasterizados em instantes anteriores da animação (que deixavam uma costura de 1 px na borda da lâmina em
+       movimento, diferente entre dois documentos com histórico de raster diferente). Medido: com isto a transição "Deslizar" a 250 ms sai idêntica. */
+    if (PROMOTE) { await p.evaluate(() => document.querySelectorAll('#presenter .amp-slide').forEach((q) => { q.style.willChange = 'transform, opacity'; void q.offsetWidth; })); await sleep(80); }
     const el = await p.$('#presenter .amp-view'); out.push({ t, png: await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' }) });
+    if (PROMOTE) await p.evaluate(() => document.querySelectorAll('#presenter .amp-slide').forEach((q) => { q.style.willChange = ''; }));
     await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
     await p.evaluate(() => { const pr = document.getElementById('presenter'); if (pr && pr.classList.contains('open')) { pr.classList.remove('open'); } });
   }
@@ -277,10 +283,11 @@ async function pixelDiff(aBuf, bBuf) {
   if (!sharp) return { same: false, pct: null, note: 'sharp indisponível: comparação só por bytes' };
   const [a, b] = await Promise.all([aBuf, bBuf].map((buf) => sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true })));
   if (a.info.width !== b.info.width || a.info.height !== b.info.height) return { same: false, pct: 100, note: `dimensões ${a.info.width}×${a.info.height} vs ${b.info.width}×${b.info.height}` };
-  const n = a.info.width * a.info.height; let diff = 0, maxCh = 0; const d = Buffer.alloc(n * 4);
-  for (let i = 0; i < n; i++) { const k = i * 4; const dr = Math.abs(a.data[k] - b.data[k]), dg = Math.abs(a.data[k + 1] - b.data[k + 1]), db = Math.abs(a.data[k + 2] - b.data[k + 2]); const m = Math.max(dr, dg, db); if (m > 0) diff++; if (m > maxCh) maxCh = m; d[k] = 255; d[k + 1] = 255 - Math.min(255, m * 4); d[k + 2] = 255 - Math.min(255, m * 4); d[k + 3] = 255; }
+  const n = a.info.width * a.info.height, W = a.info.width; let diff = 0, maxCh = 0, x0 = W, x1 = -1, y0 = a.info.height, y1 = -1; const d = Buffer.alloc(n * 4);
+  for (let i = 0; i < n; i++) { const k = i * 4; const dr = Math.abs(a.data[k] - b.data[k]), dg = Math.abs(a.data[k + 1] - b.data[k + 1]), db = Math.abs(a.data[k + 2] - b.data[k + 2]); const m = Math.max(dr, dg, db); if (m > 0) { diff++; const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } if (m > maxCh) maxCh = m; d[k] = 255; d[k + 1] = 255 - Math.min(255, m * 4); d[k + 2] = 255 - Math.min(255, m * 4); d[k + 3] = 255; }
   const diffPng = diff ? await sharp(d, { raw: { width: a.info.width, height: a.info.height, channels: 4 } }).png().toBuffer() : null;
-  return { same: diff === 0, pct: Math.round(diff / n * 100000) / 1000, diffPng, px: diff, maxCh: maxCh };
+  const bbox = diff ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 } : null;
+  return { same: diff === 0, pct: Math.round(diff / n * 100000) / 1000, diffPng, px: diff, maxCh: maxCh, bbox };
 }
 function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '', 'base64'); }
 
@@ -362,7 +369,8 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
       if (tag.kind === 'tr' && i > 0) {
         const tA = await trFramesOf(A.p, i, TR_T, attempt), tB = await trFramesOf(B.p, i, TR_T, attempt); row.tr = [];
         for (let k = 0; k < TR_T.length; k++) { n.trTotal++; if (tA[k].png.equals(tB[k].png)) { n.tr++; row.tr.push(true); continue; } const d = await pixelDiff(tA[k].png, tB[k].png); row.tr.push(d.same ? true : d.pct); if (d.same) { n.tr++; continue; }
-          if (d.px <= NOISE.px && d.pct <= NOISE.pct && d.maxCh <= NOISE.maxCh) { n.trNoise++; row.tr[row.tr.length - 1] = 'ruido'; noise.push({ layer: 'transition', i, it: tag.it, t: TR_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh }); if (d.diffPng) files.push([`${i}-tr${TR_T[k]}-ruido-diff.png`, d.diffPng]); }
+          const seam = d.bbox && d.px <= NOISE.px && (d.bbox.w <= 1 || d.bbox.h <= 1);   /* costura: 1 coluna/linha de pixels meio cobertos na borda da lâmina em movimento (raster por blocos do compositor) */
+          if ((d.px <= NOISE.px && d.pct <= NOISE.pct && d.maxCh <= NOISE.maxCh) || seam) { n.trNoise++; row.tr[row.tr.length - 1] = seam && d.maxCh > NOISE.maxCh ? 'costura' : 'ruido'; noise.push({ layer: 'transition', kind: seam && d.maxCh > NOISE.maxCh ? 'costura' : 'borda', i, it: tag.it, t: TR_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh, bbox: d.bbox }); if (d.diffPng) files.push([`${i}-tr${TR_T[k]}-ruido-diff.png`, d.diffPng]); }
           else { mism.push({ layer: 'transition', i, it: tag.it, t: TR_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh }); files.push([`${i}-tr${TR_T[k]}-a.png`, tA[k].png], [`${i}-tr${TR_T[k]}-b.png`, tB[k].png]); if (d.diffPng) files.push([`${i}-tr${TR_T[k]}-diff.png`, d.diffPng]); } }
       }
     }
@@ -428,7 +436,7 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     `| Erros de console/página | ${report.errors.length} |`, '',
     `Itens não aplicados/inseridos na construção: ${report.deck.notApplied} animações sem alvo compatível (esperado para transições/alvos específicos), ${report.deck.notInserted} caixas sem inserção, ${report.deck.buildErrors.length} erros.`, '',
     report.unstable.length ? '## Capturas instáveis (divergência só na 1ª captura; recaptura imediata idêntica — não atribuível ao candidato)\n\n' + report.unstable.map((u) => `- slide ${u.i + 1} · ${u.it} · 1ª captura: ${u.first.map((m) => m.layer + (m.t != null ? ' t=' + m.t + ' ms' : '') + (m.px != null ? ' (' + m.px + ' px, máx ' + m.maxCh + '/255)' : '')).join('; ')}`).join('\n') + '\n' : '',
-    report.noise.length ? '## Quadros dentro do envelope de ruído (não atribuíveis ao candidato; imagens em diff/*-ruido-diff.png)\n\n' + report.noise.map((m) => `- ${m.layer} · slide ${m.i + 1} · ${m.it} · t=${m.t} ms · ${m.px} px (${m.pct} %), máx ${m.maxCh}/255`).join('\n') + '\n' : '',
+    report.noise.length ? '## Quadros dentro do envelope de ruído (não atribuíveis ao candidato; imagens em diff/*-ruido-diff.png)\n\n' + report.noise.map((m) => `- ${m.layer}${m.kind === 'costura' ? ' (costura de 1 px na borda da lâmina em movimento' + (m.bbox ? ': coluna x=' + m.bbox.x + ', ' + m.bbox.h + ' linhas' : '') + ')' : ''} · slide ${m.i + 1} · ${m.it} · t=${m.t} ms · ${m.px} px (${m.pct} %), máx ${m.maxCh}/255`).join('\n') + '\n' : '',
     report.mismatches.length ? '## Divergências\n\n' + report.mismatches.slice(0, 200).map((m) => `- ${m.layer} · slide ${m.i != null ? m.i + 1 : '-'} · ${m.it || m.detail || ''}${m.t != null ? ' · t=' + m.t + ' ms' : ''}${m.pct != null ? ' · ' + m.pct + '% dos pixels' : ''}`).join('\n') : '## Divergências\n\nNenhuma.',
     '', '## Itens por categoria', '', ...Object.entries(report.slides.reduce((o, r) => (o[r.kind] = (o[r.kind] || 0) + 1, o), {})).map(([k, v]) => `- ${k}: ${v} slides`)].filter((l) => l !== '').join('\n');
   fs.writeFileSync(path.join(OUT, 'relatorio.md'), md);
