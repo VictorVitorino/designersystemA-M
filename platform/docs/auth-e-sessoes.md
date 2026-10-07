@@ -40,7 +40,7 @@ Suspender alguém: o banco passa a recusar na hora (cache invalidado nesta inst�
 - **Convite**: admin → `POST /api/admin/invites` (usuário `invited` + convite + e-mail do GoTrue na mesma transação; falha do GoTrue desfaz tudo) → usuário abre o link `/auth/confirmar?token_hash=…&type=invite` → `POST /api/auth/verify` (sessão, `needsPassword`) → `POST /api/auth/password` (ativa) → login normal.
 - **Login**: limite de taxa (8/10 min por e-mail+IP, 30/10 min por IP) **antes** de falar com o GoTrue; falhas idênticas e com tempo equalizado; auditoria `auth.login` / `auth.login_failed` (só HMAC do e-mail).
 - **Esqueci a senha**: sempre 202; limite 5/15 min por IP e por e-mail; link `type=recovery` → `verify` → `password`.
-- **Trocar senha**: encerra as *outras* sessões (`logout?scope=others`).
+- **Trocar senha**: só em **estado de recuperação** — logo depois de abrir um link de convite ou de “esqueci a senha” (`status = invited` ou cookie `am_np = 1`); uma sessão ativa comum recebe **403** (uma sessão roubada não toma a conta). Trocar encerra as *outras* sessões (`logout?scope=others`).
 - **Sair**: revoga só este dispositivo (`scope=local`) e apaga os cookies.
 
 ## CSRF
@@ -82,5 +82,5 @@ node --test --test-concurrency=1 tests/unit/*.test.js tests/api/auth.test.js tes
 
 - O access token (JWT) é *stateless*: depois do logout/troca de senha ele ainda verifica até expirar (≤ 1 h). O que protege é o banco (suspensão vale em ≤ 15 s) e o cookie ser apagado/HttpOnly. Para reduzir a janela, diminua "JWT expiry" no Supabase.
 - O cache de identidade é por instância (serverless): mudanças feitas em outra instância valem em até 15 s.
-- Limites por IP (login 30, verify/forgot 5) podem pegar vários usuários atrás do mesmo NAT de escritório.
+- Limites por IP: login 30/10 min e esqueci-a-senha 5/15 min podem pegar vários usuários atrás do mesmo NAT de escritório; `verify` e `refresh` são limitados pelo próprio token (tetos por IP altos: 100/15 min e 600/min) justamente para não travar um escritório inteiro.
 - O e-mail de convite vale pelo "Email OTP expiration" do Supabase (padrão 1 h, máx. 24 h), mesmo que o convite no app dure 7 dias: use "reenviar".

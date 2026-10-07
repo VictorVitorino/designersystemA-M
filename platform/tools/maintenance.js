@@ -69,12 +69,14 @@ export async function stats(sql, { warnDbGb = 6, warnStorageGb = 800 } = {}) {
     const [o] = await tx`select (select count(*)::int from app.audit_log) as audit, (select count(*)::int from app.comments where deleted_at is null) as comments, (select count(*)::int from app.interactions) as interactions, (select count(*)::int from app.invites where status = 'pending') as pending_invites`;
     const [d] = await tx`select pg_database_size(current_database())::bigint as bytes`;
     const tables = await tx`select c.relname as name, pg_total_relation_size(c.oid)::bigint as bytes from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'app' and c.relkind = 'r' order by 2 desc limit 5`;
-    return { users: u, presentations: p, versions: v.n, assets: { ready: a.ready, bytes: Number(a.bytes), pending: a.pending, markedDeleted: a.marked_deleted }, other: o, dbBytes: Number(d.bytes), biggestTables: tables.map((t) => ({ name: t.name, bytes: Number(t.bytes) })) };
+    const bloat = await tx`select relname as name, n_live_tup::bigint as live, n_dead_tup::bigint as dead, last_autovacuum, last_vacuum from pg_stat_user_tables where schemaname = 'app' and relname in ('presentations', 'presentation_versions', 'audit_log', 'rate_limits') order by n_dead_tup desc`;
+    return { users: u, presentations: p, versions: v.n, assets: { ready: a.ready, bytes: Number(a.bytes), pending: a.pending, markedDeleted: a.marked_deleted }, other: o, dbBytes: Number(d.bytes), biggestTables: tables.map((t) => ({ name: t.name, bytes: Number(t.bytes) })), bloat: bloat.map((b) => ({ name: b.name, live: Number(b.live), dead: Number(b.dead), lastAutovacuum: b.last_autovacuum, lastVacuum: b.last_vacuum })) };
   });
   const warnings = [];
   if (r.dbBytes > warnDbGb * 1024 ** 3) warnings.push(`banco com ${fmtBytes(r.dbBytes)} (alerta em ${warnDbGb} GB): revise retenção de versões/auditoria ou aumente o plano`);
   if (r.assets.bytes > warnStorageGb * 1024 ** 3) warnings.push(`arquivos somam ${fmtBytes(r.assets.bytes)} (alerta em ${warnStorageGb} GB): planeje mais espaço ou rode o GC`);
   if (r.users.admins < 2) warnings.push('há menos de 2 administradores ativos (risco de perder o acesso administrativo)');
+  for (const b of r.bloat) if (b.dead > 10000 && b.dead > b.live) warnings.push(`${b.name}: ${b.dead} tuplas mortas para ${b.live} vivas (autovacuum atrasado — o autosave reescreve o deck inteiro); confira autovacuum em docs/MONITORAMENTO.md`);
   return { ...r, dbHuman: fmtBytes(r.dbBytes), assetsHuman: fmtBytes(r.assets.bytes), warnings, ok: !warnings.length };
 }
 

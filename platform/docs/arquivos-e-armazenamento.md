@@ -174,6 +174,7 @@ Propriedades de segurança do driver:
 - **Integridade ponta a ponta:** o SHA-256 vai como `x-amz-checksum-sha256` (no `put` e **assinado** no upload direto), então o próprio provedor recusa bytes que não sejam os do hash da chave. Se o provedor não aceitar o cabeçalho (501/`NotImplemented`/erro de argumento citando checksum), o driver **degrada** e lembra; `BadDigest` (bytes errados) nunca degrada. Para forçar desligado: `storage.s3.checksum = 'off'` (hoje `config.js` não expõe essa variável — veja *Pendências*).
 - Retentativas finitas (3, modo `standard`), `connectionTimeout` 5 s, `requestTimeout` 30 s. O SDK novo calcula CRC32 por padrão e vários S3-compatíveis ainda não aceitam; por isso `requestChecksumCalculation: 'WHEN_REQUIRED'`.
 - Credenciais ficam em fechamento: `JSON.stringify(storage)`/`util.inspect` não as mostram (testado).
+- **Área de preparo do upload direto** (`up/<uuid do usuário>/<sha>`, `stagingKey`): a URL assinada escreve só ali; `getStaging` lê só a pasta do próprio usuário; `promoteStaging` copia para a chave canônica (CopyObject; se o provedor não tiver, baixa e regrava) **sem** regravar objeto existente, e apaga o preparo; `purgeStaging` limpa preparos abandonados (GC, > 48 h).
 
 ---
 
@@ -183,9 +184,9 @@ Propriedades de segurança do driver:
 `bytes → validateUpload → sha = sha256Hex(bytes) → (confere com :sha256 da URL) → storage.put(sha, bytes, {mime}) → INSERT app.assets (+ asset_uploads)`. Responda `deduplicated: !put.created`.
 
 **Upload direto (acima de 4 MB).**
-1. `POST /api/assets/uploads {sha256,size,mime,kind}`: valide `kind/mime/size` e **só então** `createUpload`. **Nunca emita URL para um sha que já esteja `ready`/referenciado** (devolva "já existe"): sem isso alguém reenviaria bytes para a chave de um objeto legítimo. A assinatura do checksum já faz o provedor recusar bytes que não casem com o sha, mas nem todo S3-compatível aplica isso.
+1. `POST /api/assets/uploads {sha256,size,mime,kind}`: valide `kind/mime/size` e **só então** `createUpload(sha, { …, stagingFor: user.id })` — a URL escreve na **área de preparo da própria pessoa**, nunca na chave canônica, então pedir uma URL para o hash de um arquivo alheio não dá acesso a nada (AF-2). Registre o `pending` **sem posse**. A assinatura do checksum já faz o provedor recusar bytes que não casem com o sha, mas nem todo S3-compatível aplica isso.
 2. O navegador faz `PUT` com `headers` exatamente como devolvidos.
-3. `POST /api/assets/:sha/finalize`: `storage.verify(sha)`; se `!ok` → apague o objeto **somente se o registro ainda estiver `pending`** e responda 422. Se `ok`, baixe o início do objeto (ou `get` se pequeno) e rode `validateUpload` antes de marcar `ready` — o `verify` prova o hash, não o tipo.
+3. `POST /api/assets/:sha/finalize`: `storage.getStaging(user.id, sha)` (404 se não há registro visível nem bytes; 409 se ainda não chegaram); confira `sha256(bytes) === sha` (senão apague o preparo, descarte o `pending` **só se foi ela que o criou**, audite e responda 422); `validateUpload` (o hash prova os bytes, não o tipo); **só então** conceda a posse (`app.asset_uploads`), `promoteStaging` (cópia para a chave canônica; nada é regravado se já existir) e `app.asset_mark_ready`.
 
 **Download.** Imagem pequena: `getStream` e cabeçalhos `Content-Type` (do banco), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, max-age=31536000, immutable`, `Content-Disposition` via `contentDisposition()` (exportado de `storage/keys.js`). Arquivo grande/não-imagem: `302` para `signedGetUrl(sha, {disposition, filename, mime})`.
 

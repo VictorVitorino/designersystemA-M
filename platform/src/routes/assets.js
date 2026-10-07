@@ -55,14 +55,17 @@ export function assetsRoutes(deps) {
   async function auditReject(c, shaHex, e, extra = {}) {
     try { await txAsUser(c, (tx) => audit(tx, c, 'asset.reject', 'asset', shaHex, { reasons: reasonsOf(e), status: e && e.status, ...extra })); } catch { /* melhor-esforço */ }
   }
-  /** Registra o envio como `pending` e a posse do usuário (conflito = o arquivo já existia: não é erro). Devolve true se a linha foi criada agora. */
-  async function register(tx, userId, a) {
+  /** Registra o envio como `pending` (conflito = o arquivo já existia: não é erro). Devolve true se a linha foi criada agora. NÃO concede posse. */
+  async function registerPending(tx, userId, a) {
     const ins = await tx`insert into app.assets(sha256, size_bytes, mime, kind, width, height, status, uploaded_by)
         values (${a.sha}, ${a.size}::bigint, ${a.mime}, ${a.kind}, ${a.width ?? null}, ${a.height ?? null}, 'pending', ${userId}::uuid)
         on conflict (sha256) do nothing returning sha256`;
-    await tx`insert into app.asset_uploads(sha256, user_id) values (${a.sha}, ${userId}::uuid) on conflict do nothing`;
     return ins.length === 1;
   }
+  /** Posse (app.asset_uploads) = prova de que a pessoa tem os bytes. Só é concedida depois que o servidor conferiu o SHA-256 do que ELA enviou. */
+  async function grantOwnership(tx, userId, sha) { await tx`insert into app.asset_uploads(sha256, user_id) values (${sha}, ${userId}::uuid) on conflict do nothing`; }
+  /** Caminho da API: os bytes já foram conferidos pelo chamador → registra e concede a posse de uma vez. */
+  async function register(tx, userId, a) { const created = await registerPending(tx, userId, a); await grantOwnership(tx, userId, a.sha); return created; }
   const publicInfo = (a, deduplicated) => ({ sha256: a.sha, size: a.size, mime: a.mime, ...(a.width != null ? { width: a.width, height: a.height } : {}), deduplicated });
 
   // ------------------------------------------------------------------ o que falta enviar
@@ -112,10 +115,11 @@ export function assetsRoutes(deps) {
     const cap = await txAsUser(c, (tx) => capFor(tx, b.kind));
     if (b.size > cap) throw E.tooLarge(`O arquivo excede o limite de ${Math.floor(cap / 1048576)} MB.`);
     if (storage.driver === 'local') return c.json({ mode: 'api' });       // sem URL assinada no driver local: o cliente usa o PUT acima
-    const up = await storage.createUpload(b.sha256, { size: b.size, mime: b.mime, ttlS: 300 });
+    // A URL escreve na área de PREPARO da própria pessoa (up/<usuário>/<sha>), nunca na chave canônica: pedir uma URL para o hash de um arquivo
+    // alheio não dá acesso a nada — só o finalize, depois de conferir o SHA-256 do que ela enviou, promove o objeto e concede a posse (AF-2).
+    const up = await storage.createUpload(b.sha256, { size: b.size, mime: b.mime, ttlS: 300, stagingFor: user.id });
     if (!up) return c.json({ mode: 'api' });
-    // registra como pending + posse: o finalize só aceita quem iniciou o envio. (A URL assinada exige o checksum SHA-256 do arquivo: o provedor recusa bytes diferentes.)
-    await txAsUser(c, (tx) => register(tx, user.id, { sha: b.sha256, size: b.size, mime: b.mime, kind: b.kind }));
+    await txAsUser(c, (tx) => registerPending(tx, user.id, { sha: b.sha256, size: b.size, mime: b.mime, kind: b.kind }));   // sem posse
     return c.json({ mode: 'direct', url: up.url, method: up.method, headers: up.headers, expiresAt: up.expiresAt });
   });
 
@@ -123,37 +127,46 @@ export function assetsRoutes(deps) {
     const user = requireUser(c);
     await rate(c, user, 'upload', ...RATES.upload);
     const want = shaParam(c);
-    const cur = await txAsUser(c, async (tx) => {
-      const [a] = await tx`select sha256, size_bytes, mime, kind, width, height, status from app.assets where sha256 = ${want}`;   // RLS: só se ele iniciou/possui
-      return a || null;
-    });
-    if (!cur) throw E.notFound();
+    const visible = (tx) => tx`select sha256, size_bytes, mime, kind, width, height, status, uploaded_by from app.assets where sha256 = ${want}`;   // RLS: só o que ele iniciou, possui ou pode ver
+    let cur = (await txAsUser(c, visible))[0] || null;
     const done = (a, dedup) => c.json(publicInfo({ sha: a.sha256, size: Number(a.size_bytes), mime: a.mime, width: a.width, height: a.height }, dedup));
-    if (cur.status === 'ready') return done(cur, true);
-    if (cur.status !== 'pending' && cur.status !== 'deleted') throw E.notFound();
-    const obj = await storage.get(want);
-    if (!obj) throw E.conflict('O arquivo ainda não foi enviado ao armazenamento.');
+    const dropStaging = () => storage.deleteStaging(user.id, want).catch(() => {});
+    if (cur && cur.status === 'ready') { await dropStaging(); return done(cur, true); }
+    if (cur && cur.status !== 'pending' && cur.status !== 'deleted') throw E.notFound();
+    // O que a pessoa enviou está na SUA área de preparo (up/<usuário>/<sha>): é a única prova de que ela possui os bytes.
+    const stg = await storage.getStaging(user.id, want);
+    if (!cur && !stg) throw E.notFound();                                      // nem registro visível nem bytes: igual a qualquer sha desconhecido (não ensina nada)
+    if (!stg) throw E.conflict('O arquivo ainda não foi enviado ao armazenamento.');
     const discard = async (e, extra) => {
-      // O que está na chave deste SHA e NÃO tem este SHA é lixo por definição (a chave é o hash): apaga e descarta o registro pendente.
-      await storage.delete(want).catch(() => {});
-      await txAsUser(c, async (tx) => { await tx`select app.asset_discard_pending(${want})`; });
-      await auditReject(c, want, e, { size: obj.size, ...extra });
+      await dropStaging();                                                       // o preparo é só desta pessoa: sempre apagado
+      if (cur && cur.uploaded_by === user.id) await txAsUser(c, async (tx) => { await tx`select app.asset_discard_pending(${want})`; });   // o registro pendente, só se foi ela que o criou
+      await auditReject(c, want, e, { size: stg.size, ...extra });
     };
-    if (!sameHash(sha256Hex(obj.body), want)) {
+    if (!sameHash(sha256Hex(stg.body), want)) {
       const e = E.rejected('O arquivo enviado não confere com o hash informado.', { reasons: ['hash_divergente'] });
       await discard(e); throw e;
     }
+    // Bytes conferidos = posse legítima (mesma regra do PUT pela API). Se o registro pendente era de outra pessoa (duas enviando o mesmo arquivo
+    // novo ao mesmo tempo), ele passa a ser visível para ela a partir daqui.
+    if (!cur) {
+      try { cur = (await txAsUser(c, async (tx) => { await grantOwnership(tx, user.id, want); return visible(tx); }))[0] || null; }
+      catch (e) { if (e && e.code === '23503') { await dropStaging(); throw E.notFound(); } throw e; }   // sem registro pendente algum (finalize sem /uploads)
+      if (!cur) { await dropStaging(); throw E.notFound(); }
+      if (cur.status === 'ready') { await dropStaging(); return done(cur, true); }
+    }
     const cap = await txAsUser(c, (tx) => capFor(tx, cur.kind));
     let info;
-    try { info = await validateUpload(obj.body, { kind: cur.kind, maxBytes: cap }); }
+    try { info = await validateUpload(stg.body, { kind: cur.kind, maxBytes: cap }); }
     catch (e) { if (e && e.status) await discard(e, { kind: cur.kind }); throw e; }
+    const prom = await storage.promoteStaging(user.id, want, { mime: info.mime });   // chave canônica: copia se ainda não existir (nada é regravado); o preparo é apagado
     const status = await txAsUser(c, async (tx) => {
+      await grantOwnership(tx, user.id, want);
       const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${cur.kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
-      if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true });
+      if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true, deduplicated: prom.existed });
       return m.status;
     });
     if (status !== 'ready') throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');
-    return c.json(publicInfo({ sha: want, size: info.size, mime: info.mime, width: info.width, height: info.height }, false), 201);
+    return c.json(publicInfo({ sha: want, size: info.size, mime: info.mime, width: info.width, height: info.height }, prom.existed), 201);
   });
 
   // ------------------------------------------------------------------ leitura

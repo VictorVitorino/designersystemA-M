@@ -60,7 +60,14 @@
   }
   function tryRefresh() {
     if (!refreshing) refreshing = (async function () {
-      try { var res = await fetch(API + '/auth/refresh', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': await csrfToken(), Accept: 'application/json' } }); if (!res.ok) return false; await loadSession().catch(function () { }); return true; }
+      try {
+        var res = await fetch(API + '/auth/refresh', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': await csrfToken(), Accept: 'application/json' } });
+        if (res.status === 429) { /* limite de taxa compartilhado (escritório atrás de um só IP): não é sessão expirada — espera e repete uma vez */
+          var wait = Math.min(30, Math.max(1, +res.headers.get('Retry-After') || 5)); await new Promise(function (r) { setTimeout(r, wait * 1000); });
+          res = await fetch(API + '/auth/refresh', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': await csrfToken(), Accept: 'application/json' } });
+        }
+        if (!res.ok) return false; await loadSession().catch(function () { }); return true;
+      }
       catch (e) { return false; } finally { setTimeout(function () { refreshing = null; }, 0); }
     })();
     return refreshing;
@@ -737,7 +744,8 @@
   async function restoreInteractions() {
     try {
       var j = await jreq('GET', '/presentations/' + ID + '/interactions'), items = (j && j.items) || [], L = ls(); if (!L) return;
-      var mine = items.filter(function (it) { return !it.author || !me || it.author.id === me.id; }), forms = {};
+      /* só o que é comprovadamente MEU entra no localStorage: item sem autor, ou sem sessão carregada, nunca é restaurado (E2E-01) */
+      var mine = items.filter(function (it) { var who = it.author || it.user; return !!(who && me && who.id === me.id); }), forms = {};
       mine.forEach(function (it) {
         var key = it.kind === 'form_response' ? 'amForm.' : it.kind === 'board_state' ? 'amBoard.' : it.kind === 'vote_state' ? 'amVote.' : null;
         if (!key || !it.payload) return; key += ID + '.' + it.elementId;

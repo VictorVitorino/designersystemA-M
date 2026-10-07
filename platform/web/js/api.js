@@ -49,6 +49,12 @@ let refreshEpoch = 0;
 export function refreshSession() {
   if (!refreshing) {
     refreshing = request('POST', '/api/auth/refresh', { auth: false })
+      .catch(async (e) => {
+        // 429 = limite de taxa compartilhado (vários usuários atrás do mesmo IP), não sessão expirada: espera o Retry-After (≤ 30 s) e repete uma vez
+        if (!(e instanceof ApiError) || e.status !== 429) throw e;
+        await new Promise((r) => setTimeout(r, Math.min(30, Math.max(1, e.retryAfter || 5)) * 1000));
+        return request('POST', '/api/auth/refresh', { auth: false });
+      })
       .then((r) => { refreshEpoch++; return r; })
       .finally(() => { refreshing = null; });
   }

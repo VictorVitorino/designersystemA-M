@@ -227,9 +227,17 @@ describe('esqueci a senha e recuperação', () => {
     // o link não pode ser reusado
     const c2 = t.anon(); await c2.ensureCsrf(); assert.equal((await c2.post('/api/auth/verify', { tokenHash: m.token_hash, type: 'recovery' })).status, 410);
   });
-  test('trocar a senha encerra as OUTRAS sessões', async () => {
+  test('sessão ativa NÃO troca a senha sem o link de recuperação (uma sessão roubada não toma a conta): 403 e a senha antiga continua valendo', async () => {
+    const x = await t.createUser(); const c = t.anon(); assert.equal((await c.login(x.email, x.password)).status, 200);
+    const r = await c.post('/api/auth/password', { password: 'Tentativa-Sem-Reautenticacao-99!' }); assert.equal(r.status, 403, r.text); assert.match(r.json.error.message, /Esqueci a senha/);
+    assert.equal((await t.anon().login(x.email, x.password)).status, 200, 'a senha antiga continua valendo');
+    assert.equal((await t.anon().login(x.email, 'Tentativa-Sem-Reautenticacao-99!')).status, 401);
+  });
+  test('trocar a senha (pelo link de recuperação) encerra as OUTRAS sessões', async () => {
     const x = await t.createUser(); const c1 = t.anon(), c2 = t.anon();
     assert.equal((await c1.login(x.email, x.password)).status, 200); assert.equal((await c2.login(x.email, x.password)).status, 200);
+    await c1.post('/api/auth/forgot', { email: x.email }); const m = lastMail(x.email, 'recovery');
+    assert.equal((await c1.post('/api/auth/verify', { tokenHash: m.token_hash, type: 'recovery' })).status, 200);
     assert.equal((await c1.post('/api/auth/password', { password: 'Outra-Senha-Forte-Ainda-55!' })).status, 200);
     const r = await c2.post('/api/auth/refresh'); assert.equal(r.status, 401); assert.equal(r.json.error.code, 'session_expired');
     assert.equal((await c1.post('/api/auth/refresh')).status, 200, 'a sessão que trocou a senha continua');

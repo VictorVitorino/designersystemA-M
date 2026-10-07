@@ -11,7 +11,7 @@ export function onError(deps) {
       // zod → 400 com os campos inválidos (sem eco dos valores)
       if (e && e.name === 'ZodError' && Array.isArray(e.issues)) e = E.badRequest('Dados inválidos.', { fields: e.issues.slice(0, 20).map((i) => ({ path: i.path.join('.'), message: i.message })) });
       else if (e && (e.code === '23505')) e = E.exists('Já existe um registro igual.');
-      else if (e && (e.code === '23514' || e.code === '22P02' || e.code === '22023')) e = E.badRequest('Valor inválido.');
+      else if (e && (e.code === '23514' || e.code === '22P02' || e.code === '22023' || e.code === '22021' || e.code === '22P05')) e = E.badRequest('Valor inválido.');   // 22021/22P05: byte NUL ou codificação inválida em texto (AF-3)
       else if (e && e.code === '42501') e = E.forbidden();
       else if (e && (e.type === 'entity.too.large' || e.name === 'PayloadTooLargeError')) e = E.tooLarge();
       else if (e instanceof SyntaxError) e = E.badRequest('JSON inválido.');

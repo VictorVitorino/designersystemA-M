@@ -29,8 +29,8 @@ const URL_ATTRS = new Set(['href', 'src', 'srcset', 'xlink:href', 'action', 'for
 const URL_KEYS = /^(?:href|src|srcset|url|uri|link|action|formaction|xlink:href|poster|background|bgimg|bgimage|icon|ping|cite|sheet|webhook|endpoint)$/i;
 const CSS_KEYS = /^(?:style|css|csstext|stylesheet)$/i;
 // Controles (menos \t \n \r) e caracteres de formato invisíveis (zero-width, bidi, BOM, soft hyphen) — usados para disfarçar "java\0script"
-const INVISIBLE = /[^\P{Cc}\t\n\r]|\p{Cf}/gu;
-const WS_CTRL = /[\t\n\r]/g;
+const INVISIBLE = /[^\P{Cc}\t\n\r\f]|\p{Cf}/gu;   // \f (U+000C) fica: o navegador o trata como separador de atributos, então o tokenizador também precisa vê-lo (AF-4)
+const WS_CTRL = /[\t\n\r\f]/g;
 const SCHEME_BAD = /^(?:javascript|vbscript|livescript|mocha)\s*:/;
 const SCHEME_BAD_FREE = /^(?:javascript|vbscript|livescript):\S/; // valor solto: exige algo colado após ":" (prosa "JavaScript: guia" passa)
 const SCHEME_OTHER = /^(?:file|jar|view-source|mhtml|ms-its|wyciwyg|feed|filesystem):/;

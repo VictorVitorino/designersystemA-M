@@ -213,7 +213,7 @@ Admin → Usuários → **Convidar** (e-mail + nome + papel `membro` ou `adminis
 | `PG_CLIENT_MAJOR` | `17` (versão do Postgres do Supabase) | deploy-*, backup |
 | `WARN_DB_GB`, `WARN_STORAGE_GB` | `6`, `800` | maintenance (alerta de tamanho) |
 
-**Variáveis da Vercel (API)** — modelos completos em `infra/env/api.*.env.example`; contrato em `docs/API.md` §9.
+**Variáveis da Vercel (API)** — modelos completos em `infra/env/api.*.env.example`; contrato em `docs/API.md` §9. Opcional: `RATE_IP_MULTIPLIER` (padrão 25) — quantas vezes o limite por usuário cabe no mesmo IP antes do 429; aumente se mais de ~200 pessoas usarem a plataforma atrás de um único NAT.
 
 ## 16. Problemas comuns
 

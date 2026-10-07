@@ -142,7 +142,7 @@ export function adminRoutes(deps) {
     const admin = requireAdmin(c);
     const { email, displayName, role } = await readJson(c, InviteBody);
     if (!domainAllowed(email)) throw E.badRequest('Este domínio de e-mail não está autorizado a receber convites.', { fields: [{ path: 'email', message: 'Domínio não permitido.' }] });
-    await limit(c, 'admin_invite', admin.id, 3600, 60);
+    await limit(c, 'admin_invite', admin.id, 3600, 300);   // 300 convites/h por admin (API.md §2): onboarding de uma equipe inteira em uma sessão
     let unban = false;
     const out = await db.asUser(admin.id, async (tx) => {
       const days = await inviteTtlDays(tx);
@@ -170,7 +170,7 @@ export function adminRoutes(deps) {
 
   r.post('/invites/:id/resend', async (c) => {
     const admin = requireAdmin(c); const id = uuidParam(c);
-    await limit(c, 'admin_invite', admin.id, 3600, 60);
+    await limit(c, 'admin_invite', admin.id, 3600, 300);   // 300 convites/h por admin (API.md §2): onboarding de uma equipe inteira em uma sessão
     const out = await db.asUser(admin.id, async (tx) => {
       const [inv] = await tx`select id, email, user_id, status, resent_count from app.invites where id = ${id} for update`;
       if (!inv) throw E.notFound();

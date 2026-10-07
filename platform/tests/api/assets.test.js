@@ -15,6 +15,7 @@ after(async () => { await env.stop(); });
 
 const putRaw = (u, sha, buf, headers = {}) => env.put(u, `/api/assets/${sha}`, { body: buf, headers: { 'content-type': 'application/octet-stream', ...headers } });
 const rowOf = async (sha) => (await env.sys((tx) => tx`select * from app.assets where sha256 = ${sha}`))[0];
+const ownersOf = async (sha) => (await env.sys((tx) => tx`select user_id from app.asset_uploads where sha256 = ${sha} order by user_id`)).map((r) => r.user_id);   // posses (prova de bytes)
 const owners = async (sha) => (await env.sys((tx) => tx`select user_id from app.asset_uploads where sha256 = ${sha}`)).map((r) => r.user_id).sort();
 const audits = (action, id) => env.sys((tx) => tx`select actor_id, meta from app.audit_log where action = ${action} and entity_id = ${id} order by id`);
 const noise = (w, h) => sharp(randomBytes(w * h * 3), { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();   // PNG válido e GRANDE
@@ -206,8 +207,17 @@ describe('POST /api/assets/check', () => {
 });
 
 describe('upload direto (arquivos grandes) e finalize', () => {
-  const fakeS3 = () => { env.hooks.driver = 's3'; env.hooks.createUpload = async (sha, o) => ({ url: `https://bucket.example/up/${sha}`, method: 'PUT', headers: { 'Content-Type': o.mime }, expiresAt: new Date(Date.now() + 300000).toISOString() }); };
-  const real = () => { delete env.hooks.driver; delete env.hooks.createUpload; };
+  // S3 falso: URL assinada para a área de PREPARO do usuário (up/<usuário>/<sha>) e preparo em memória; promoteStaging grava na chave canônica do armazenamento real
+  const staged = new Map(); const k = (u, sha) => `${u}/${sha}`;
+  const fakeS3 = () => {
+    env.hooks.driver = 's3';
+    env.hooks.createUpload = async (sha, o) => ({ url: `https://bucket.example/up/${o.stagingFor}/${sha}`, method: 'PUT', headers: { 'Content-Type': o.mime }, expiresAt: new Date(Date.now() + 300000).toISOString() });
+    env.hooks.getStaging = async (u, sha) => { const b = staged.get(k(u, sha)); return b ? { body: b, size: b.length } : null; };
+    env.hooks.promoteStaging = async function (u, sha, o) { const b = staged.get(k(u, sha)); if (!b) return { promoted: false, existed: !!(await this.head(sha)) }; const existed = !!(await this.head(sha)); if (!existed) await this.put(sha, b, { mime: (o && o.mime) || 'application/octet-stream', verify: false }); staged.delete(k(u, sha)); return { promoted: !existed, existed }; };
+    env.hooks.deleteStaging = async (u, sha) => ({ deleted: staged.delete(k(u, sha)) });
+  };
+  const stage = (user, sha, bytes) => { staged.set(k(user.id, sha), Buffer.from(bytes)); };   // = o navegador enviou os bytes para a URL assinada
+  const real = () => { for (const h of ['driver', 'createUpload', 'getStaging', 'promoteStaging', 'deleteStaging']) delete env.hooks[h]; staged.clear(); };
   test('driver local → {mode:"api"} (e nada é registrado); entrada inválida → 400', async () => {
     const sha = sha256Hex(await tiny(140));
     const r = await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: 100, mime: 'image/png', kind: 'image' } }); assert.equal(r.status, 200); assert.deepEqual(r.json, { mode: 'api' });
@@ -222,13 +232,15 @@ describe('upload direto (arquivos grandes) e finalize', () => {
     try {
       const buf = await tiny(141); const sha = sha256Hex(buf);
       const up = await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: buf.length, mime: 'image/png', kind: 'image' } });
-      assert.equal(up.status, 200, up.text); assert.equal(up.json.mode, 'direct'); assert.equal(up.json.method, 'PUT'); assert.ok(up.json.url.startsWith('https://bucket.example/')); assert.ok(Date.parse(up.json.expiresAt));
+      assert.equal(up.status, 200, up.text); assert.equal(up.json.mode, 'direct'); assert.equal(up.json.method, 'PUT'); assert.ok(up.json.url.startsWith(`https://bucket.example/up/${A.id}/`), 'a URL escreve na área de preparo do próprio usuário'); assert.ok(Date.parse(up.json.expiresAt));
       const reg = await rowOf(sha); assert.equal(reg.status, 'pending'); assert.equal(reg.uploaded_by, A.id);
+      assert.deepEqual(await ownersOf(sha), [], 'pedir a URL não concede posse: só o finalize, depois de conferir os bytes');
       assert.equal((await env.get(A, `/api/assets/${sha}`)).status, 404, 'pending não é servido');
       assert.equal((await env.post(B, `/api/assets/${sha}/finalize`)).status, 404, 'quem não iniciou o envio não finaliza');
       assert.equal((await env.post(A, `/api/assets/${sha}/finalize`)).status, 409, 'o objeto ainda não chegou ao bucket');
-      await env.storage.put(sha, buf, { mime: 'image/png' });                      // = o navegador enviou para a URL assinada
+      stage(A, sha, buf);                                                           // = o navegador enviou para a URL assinada (área de preparo de A)
       const fin = await env.post(A, `/api/assets/${sha}/finalize`); assert.equal(fin.status, 201, fin.text);
+      assert.ok(await env.storage.head(sha), 'promovido para a chave canônica'); assert.equal(await env.hooks.getStaging(A.id, sha), null, 'preparo apagado'); assert.deepEqual(await ownersOf(sha), [A.id]);
       assert.deepEqual(fin.json, { sha256: sha, size: buf.length, mime: 'image/png', width: 8, height: 8, deduplicated: false });
       assert.equal((await rowOf(sha)).status, 'ready'); assert.equal((await env.get(A, `/api/assets/${sha}`)).status, 200);
       assert.equal((await env.post(A, `/api/assets/${sha}/finalize`)).status, 200, 'finalize repetido é idempotente');
@@ -240,9 +252,9 @@ describe('upload direto (arquivos grandes) e finalize', () => {
     try {
       const good = await tiny(142); const sha = sha256Hex(good);
       await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: good.length, mime: 'image/png', kind: 'image' } });
-      await env.storage.put(sha, randomBytes(64), { mime: 'image/png', verify: false });   // lixo gravado na chave deste hash
+      stage(A, sha, randomBytes(64));                                                     // lixo enviado para a área de preparo sob este hash
       const r = await env.post(A, `/api/assets/${sha}/finalize`); assert.equal(r.status, 422); assert.deepEqual(r.json.error.details.reasons, ['hash_divergente']);
-      assert.equal(await env.storage.head(sha), null, 'o lixo foi removido'); assert.equal(await rowOf(sha), undefined, 'o registro pendente foi descartado');
+      assert.equal(await env.storage.head(sha), null, 'nada chegou à chave canônica'); assert.equal(await env.hooks.getStaging(A.id, sha), null, 'o lixo foi removido do preparo'); assert.equal(await rowOf(sha), undefined, 'o registro pendente foi descartado');
       assert.equal((await audits('asset.reject', sha)).length, 1);
       // depois disso o arquivo bom ainda pode ser enviado normalmente
       assert.equal((await putRaw(B, sha, good)).status, 201);
@@ -253,7 +265,7 @@ describe('upload direto (arquivos grandes) e finalize', () => {
     try {
       const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'); const sha = sha256Hex(svg);
       assert.equal((await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: svg.length, mime: 'image/png', kind: 'image' } })).status, 200, 'o servidor ainda não viu os bytes');
-      await env.storage.put(sha, svg, { mime: 'image/png' });
+      stage(A, sha, svg);
       const r = await env.post(A, `/api/assets/${sha}/finalize`); assert.equal(r.status, 415);
       assert.equal(await env.storage.head(sha), null); assert.equal(await rowOf(sha), undefined); assert.equal((await audits('asset.reject', sha)).length, 1);
     } finally { real(); }

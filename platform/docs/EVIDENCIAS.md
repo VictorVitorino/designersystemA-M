@@ -38,7 +38,7 @@ PENDENTE_PARIDADE
 
 ## 3. API, autenticação e segurança (suíte completa)
 
-`node --test tests/unit tests/db tests/api tests/security` com a aplicação real (`createApp`) e GoTrue falso: **743 testes, 743 aprovados, 0 falhas**.
+`npm test` (unit + banco + API) e `npm run test:security`, com a aplicação real (`createApp`) e GoTrue falso, reexecutados em 2026-10-07 **depois** das correções da revisão de qualidade (§6–§8): **684 + 111 = 795 testes, 795 aprovados, 0 falhas** (61 s + 35 s).
 
 Inclui: fluxo convite → e-mail → senha → login; respostas equalizadas para e-mail inexistente × senha errada; `forgot` sempre 202; refresh/expiração/logout; tokens nunca no corpo; cookies com flags; JWT `alg none`/confusão/emissor errado recusados; CSRF (ausente, errado, Origin, Content-Type); limites de taxa; admin (membro 403 em tudo, último admin, suspensão derruba sessão); cabeçalhos; configuração de produção rígida; estático (traversal, MIME, CSP por página); 409 de conflito com `overwrite` e `pre_overwrite`; versões/restauração; integridade de referências de arquivo (sha desconhecido ou alheio → 422); deck malicioso → 422 e nada gravado (corpus de XSS); uploads (hash errado 400, SVG 415, 413, dedup com 2ª pessoa, imagem corrompida 422, GET por quem não pode ver 404); comentários e interações (matriz completa + CSV injection); 20 salvamentos concorrentes da mesma apresentação sem perda.
 
@@ -61,11 +61,29 @@ PENDENTE_E2E
 
 ## 7. Carga: 50 usuários simultâneos
 
-PENDENTE_CARGA
+`npm run test:load` (`tests/load/run.js`) contra a pilha completa real (`tools/dev.js --port 4402`: Postgres + GoTrue falso + API + site), 100 usuários criados pela API, decks de 150–400 KB com 3 imagens externalizadas, imagens PNG/JPEG reais de 200–800 KB, autosave a cada 3–5 s + ações secundárias (acervo, abrir alheia, versões, download, cópia, comentário, sonda de vazamento, salvamento obsoleto). Relatório completo: [`evidencias/carga.md`](evidencias/carga.md).
+
+| Fase | Requisições | PUT conteúdo p50 / p95 / p99 | GET p95 | 429 | 5xx | Integridade | Vazamentos | Critério (p95 PUT ≤ 800 ms, GET ≤ 300 ms, 0 × 5xx, sem perda) |
+|---|---|---|---|---|---|---|---|---|
+| 1 — 50 usuários × 180 s, limites por IP como estavam (5×) | 5 294 (29,4 req/s) | 72 / 178 / 235 ms | 91 ms | 537 (19,9 % dos autosaves, balde por IP) | 0 | 50/50 | 0 em 111 sondas | **APROVADA** |
+| 2 — 50 usuários × 180 s, limites por IP neutralizados | 5 286 (29,4 req/s) | 89 / 195 / 260 ms | 104 ms | 0 | 0 | 50/50 | 0 em 123 sondas | **APROVADA** |
+| 3 — 100 usuários × 60 s | 2 922 (48,4 req/s) | 378 / 972 / 1 159 ms | 824 ms | 0 | 0 | 100/100 | 0 | degrada (thread JS a 83 % de CPU), sem erros |
+| Experimento — 150 usuários × 60 s | 43,7 req/s | p95 2 848 ms | 2 679 ms | 0 | 0 | 150/150 | 0 | limite de uma instância |
+
+Também medido: 1 404 objetos (454 MB) = 1 404 linhas em `app.assets` (exatamente um objeto por arquivo distinto; imagens compartilhadas com 1 linha/1 objeto); memória da API estável (204 → 281 MB); abertura do editor em nuvem até “Salvo na nuvem” p50 964 ms (original em `file://` até o editor pronto: 379 ms); 0 violações de CSP.
+
+Os 7 achados do teste (A1–A7: limites por IP que penalizavam um escritório atrás de NAT, saturação a ~100 usuários, inchaço do banco) foram tratados no mesmo dia — tabela em `evidencias/carga.md` §10 (multiplicador por IP 25× configurável, limites de `refresh`/`verify` pelo token, uma ida ao banco para os dois baldes, migração 0005 com autovacuum/lz4, documentação de dimensionamento). A fase de 50 usuários não foi reexecutada depois das alterações nesta máquina.
 
 ## 8. Revisão ofensiva de segurança
 
-PENDENTE_SEGURANCA
+Revisão caixa-branca por um agente independente (modelo de ameaças, controles por camada, resíduos e achados em [`SEGURANCA.md`](SEGURANCA.md)), com duas suítes que ficaram no repositório:
+
+| Suíte | O que faz | Antes das correções | Depois |
+|---|---|---|---|
+| `tests/security/offensive.test.js` (node:test, Postgres+RLS real, GoTrue falso, S3 falso em memória) | 50 testes ofensivos: autenticação (oráculos de tempo, força bruta, reuso de refresh, logout), autorização (IDOR em arquivos, versões, lixeira), injeção (SQL/NUL/protótipo), XSS (corpus + evasões por caracteres de formato), CSRF, uploads, cadeia de suprimento (build reprodutível, `npm audit`) | 45 aprovados, **5 falhas = 5 achados reais** (AF-1 alto, AF-2 alto, AF-3 médio, AF-4 médio, AF-5 baixo) | **50/50** (faz parte de `npm run test:security`: 111/111) |
+| `tests/security/offensive-browser.cjs` (Playwright contra a pilha real do `dev.js`) | 62 verificações no navegador: CSP, cookies, cliques forjados, XSS armazenado no editor/visualizar, exportação | 62/62, 0 violações de CSP espontâneas | não reexecutada (as correções não tocam nas páginas) |
+
+Correções aplicadas no mesmo dia (detalhes e estado em `SEGURANCA.md` §4): **AF-1** senha só em estado de recuperação (403 fora dele); **AF-2** upload direto por área de preparo por usuário, posse só após conferir os bytes; **AF-3** NUL → 400; **AF-4** U+000C tratado como espaço no lint; **AF-5** *policy* de arquivos restrita à cópia de trabalho (migração 0005); **cadeia de suprimento** `sharp` fixado em 0.35.5 (`npm audit --omit=dev` em 2026-10-07: **0 vulnerabilidades**). Resíduos aceitos e documentados: JWT sem estado até expirar após logout (≤ 1 h), ausência de MFA/SSO (recomendações P1).
 
 ## 9. O que não pôde ser testado aqui
 

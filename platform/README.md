@@ -4,7 +4,7 @@ Versão online do editor **Canteiro** (Alvarez & Marsal): cada pessoa entra com 
 continua em outro computador, e todo o acervo fica visível para a equipe. **Só o dono altera a própria apresentação; quem quer usar a de
 outra pessoa cria uma cópia.** Um administrador convida e gerencia; os demais são membros.
 
-O editor em si (`../studio/`) **não foi alterado**: a versão em nuvem é o mesmo editor com uma extensão acrescentada no build e três ajustes de texto verificados.
+O editor em si (`../studio/`) **não foi alterado**: a versão em nuvem é o mesmo editor com uma extensão acrescentada no build e **seis ajustes de texto de uma linha**, verificados (cada um precisa existir exatamente uma vez no fonte, senão o build falha; `studio-cloud/patches.json`).
 A prova disso está em [`docs/evidencias/paridade.md`](docs/evidencias/paridade.md) (todos os efeitos, modelos, layouts e quadros de animação comparados pixel a pixel com o original).
 
 ## Comece em um comando (local)

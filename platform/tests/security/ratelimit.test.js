@@ -56,15 +56,16 @@ test('forgot: 5 por e-mail em 15 min mesmo vindo de IPs diferentes (não dá par
   const c = t.anon(); await c.ensureCsrf(); const r = await c.post('/api/auth/forgot', { email: `  ${email.toUpperCase()} ` }); assert.equal(r.status, 429);
   assert.equal(t.fake.outbox(email).filter((m) => m.type === 'recovery').length, 5);
 });
-test('verify: 5 por IP em 15 min → 429', async () => {
-  const c = t.anon(); await c.ensureCsrf();
-  for (let i = 1; i <= 5; i++) assert.equal((await c.post('/api/auth/verify', { tokenHash: 'a'.repeat(20) + i, type: 'invite' })).status, 410);
-  assert.equal((await c.post('/api/auth/verify', { tokenHash: 'a'.repeat(20) + 'z', type: 'invite' })).status, 429);
+test('verify: 10 tentativas por LINK em 15 min → 429; links diferentes do mesmo IP não se bloqueiam (teto por IP 100: uma equipe abre os convites do mesmo escritório)', async () => {
+  const c = t.anon(); await c.ensureCsrf(); const link = 'a'.repeat(20) + 'x';
+  for (let i = 1; i <= 10; i++) assert.equal((await c.post('/api/auth/verify', { tokenHash: link, type: 'invite' })).status, 410, 'tentativa ' + i);
+  assert.equal((await c.post('/api/auth/verify', { tokenHash: link, type: 'invite' })).status, 429, '11ª tentativa do MESMO link');
+  for (let i = 1; i <= 5; i++) assert.equal((await c.post('/api/auth/verify', { tokenHash: 'b'.repeat(20) + i, type: 'invite' })).status, 410, 'outro link, mesmo IP, continua respondendo');
 });
 test('estourar o limite é auditado (security.rate_limited) sem e-mail nem senha', async () => {
   const rows = await t.ops.asSystem((tx) => tx`select meta, entity_id from app.audit_log where action = 'security.rate_limited'`);
   assert.ok(rows.length >= 4); const buckets = new Set(rows.map((r) => r.entity_id));
-  for (const b of ['login_email_ip', 'login_ip', 'forgot_ip', 'forgot_email', 'verify_ip']) assert.ok(buckets.has(b), b);
+  for (const b of ['login_email_ip', 'login_ip', 'forgot_ip', 'forgot_email', 'verify_tok']) assert.ok(buckets.has(b), b);
   assert.ok(!JSON.stringify(rows).match(/@am\.test|senha-errada/));
 });
 test('o contador é do banco (sobrevive a reinício e vale entre instâncias): janela fixa em app.rate_limits', async () => {

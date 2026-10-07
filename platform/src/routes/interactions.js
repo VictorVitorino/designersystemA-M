@@ -93,7 +93,8 @@ export function interactionsRoutes(deps) {
     });
     const page = rows.slice(0, MAX_LIST);
     return c.json({
-      items: page.map((i) => ({ id: i.id, kind: i.kind, elementId: i.element_id, payload: i.payload, createdAt: i.created_at, updatedAt: i.updated_at, user: { id: i.user_id, displayName: i.user_name || 'Usuário' } })),
+      // `author` é o contrato (API.md §6, igual aos comentários); `user` fica como alias por compatibilidade
+      items: page.map((i) => { const author = { id: i.user_id, displayName: i.user_name || 'Usuário' }; return { id: i.id, kind: i.kind, elementId: i.element_id, payload: i.payload, createdAt: i.created_at, updatedAt: i.updated_at, author, user: author }; }),
       truncated: rows.length > MAX_LIST,
     });
   });

@@ -5,7 +5,7 @@
    SQL só parametrizado (tagged template); nada do cliente é concatenado em texto de consulta. */
 import { randomBytes } from 'node:crypto';
 import { E, HttpError } from './errors.js';
-import { limit } from './request.js';
+import { limitMany } from './request.js';
 import { lintDeck } from './deck-lint.js';
 import { contentHash } from './canonical.js';
 
@@ -16,10 +16,12 @@ export const isUuid = (s) => typeof s === 'string' && UUID_RE.test(s);
 /** :id que não é UUID nunca existe → 404 (não 400: não ensina nada a quem sonda). */
 export function uuidParam(c, name = 'id') { const v = c.req.param(name); if (!isUuid(v)) throw E.notFound(); return v.toLowerCase(); }
 
-/** Limites de taxa (API.md §2): por usuário no valor do contrato; por IP em 5× (vários usuários atrás do mesmo NAT do escritório não se bloqueiam). */
+/** Limites de taxa (API.md §2): por usuário no valor do contrato; por IP em RATE_IP_MULTIPLIER× (padrão 25×: um escritório inteiro atrás do mesmo
+    NAT — 50 pessoas salvando a cada 3–5 s — não se bloqueia; o teto por IP continua existindo contra abuso em massa). Os dois baldes são
+    consultados em UMA ida ao banco (A1/A5 do teste de carga). */
+export const IP_MULTIPLIER = Math.max(5, Number(process.env.RATE_IP_MULTIPLIER) || 25);
 export async function rate(c, user, bucket, windowS, max) {
-  await limit(c, `${bucket}:u`, user.id, windowS, max);
-  await limit(c, `${bucket}:ip`, c.get('ip') || 'sem-ip', windowS, max * 5);
+  await limitMany(c, [[`${bucket}:u`, user.id, windowS, max], [`${bucket}:ip`, c.get('ip') || 'sem-ip', windowS, max * IP_MULTIPLIER]]);
 }
 export const RATES = Object.freeze({ write: [60, 120], upload: [60, 60], comment: [60, 30], read: [60, 600], asset_read: [60, 600] });
 

@@ -3,10 +3,10 @@
    Integridade: o SHA-256 do objeto vai assinado/enviado como x-amz-checksum-sha256 quando o provedor suporta, de modo que o
    próprio servidor de objetos recusa bytes que não sejam os do hash da chave (impede sobrescrever um objeto legítimo por
    lixo via URL pré-assinada). Quando não há suporte, degradamos com elegância e confiamos no verify() do finalize. */
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadBucketCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash } from 'node:crypto';
-import { objectKey, shaFromKey, assertSha, assertShaPrefix, assertCursor, clampLimit, toBuffer, assertMime, contentDisposition, StorageIntegrityError, StorageKeyError } from './keys.js';
+import { objectKey, stagingKey, STAGING_PREFIX, shaFromKey, assertSha, assertShaPrefix, assertCursor, clampLimit, toBuffer, assertMime, contentDisposition, StorageIntegrityError, StorageKeyError } from './keys.js';
 import { sha256Hex } from '../lib/canonical.js';
 
 export const CACHE_CONTROL = 'private, max-age=31536000, immutable'; // conteúdo endereçado por hash nunca muda
@@ -113,8 +113,9 @@ export function createS3Storage(cfg, opts = {}) {
 
     /** URL assinada de ESCRITA (PUT direto do navegador). Assina content-type, content-length e o checksum SHA-256: o provedor
      *  recusa tipo/tamanho/bytes diferentes dos declarados. O cliente deve enviar exatamente `headers` (Content-Length o navegador põe). */
-    async createUpload(sha, { size, mime, ttlS = 300 } = {}) {
-      const Key = objectKey(sha); assertMime(mime);
+    async createUpload(sha, { size, mime, ttlS = 300, stagingFor = null } = {}) {
+      /* stagingFor = uuid do usuário: a URL escreve em up/<usuário>/<sha> (área de preparo só dele); o finalize confere e promove (AF-2) */
+      const Key = stagingFor ? stagingKey(stagingFor, sha) : objectKey(sha); assertMime(mime);
       if (!Number.isInteger(size) || size < 1 || size > MAX_OBJECT_BYTES) throw new StorageKeyError('size inválido');
       const ttl = clampTtl(ttlS);
       const params = { Bucket, Key, ContentType: mime, ContentLength: size, CacheControl: CACHE_CONTROL, ...(checksumOn ? { ChecksumSHA256: b64OfSha(sha) } : {}) };
@@ -127,6 +128,39 @@ export function createS3Storage(cfg, opts = {}) {
       });
       const headers = { 'Content-Type': mime, 'Cache-Control': CACHE_CONTROL, ...(checksumOn ? { 'x-amz-checksum-sha256': b64OfSha(sha) } : {}) };
       return { url, method: 'PUT', headers, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() };
+    },
+
+    /** Área de PREPARO do upload direto (up/<usuário>/<sha>): lê o que a pessoa enviou pela URL assinada — a única prova de que ela possui os bytes. */
+    async getStaging(userId, sha) {
+      const Key = stagingKey(userId, sha);
+      let r; try { r = await client.send(new GetObjectCommand({ Bucket, Key })); } catch (e) { if (isNotFound(e)) return null; throw e; }
+      const body = Buffer.from(await r.Body.transformToByteArray()); return { body, size: body.length };
+    },
+    /** Promove o preparo para a chave canônica (cópia no próprio provedor; se já existir, nada é regravado) e apaga o preparo. */
+    async promoteStaging(userId, sha, { mime } = {}) {
+      const from = stagingKey(userId, sha), to = objectKey(sha);
+      if (!(await headRaw(from))) return { promoted: false, existed: !!(await headRaw(to)) };
+      const existed = !!(await headRaw(to));
+      if (!existed) {
+        try { await client.send(new CopyObjectCommand({ Bucket, Key: to, CopySource: `${Bucket}/${from}`, MetadataDirective: 'REPLACE', ...(mime ? { ContentType: assertMime(mime) } : {}), CacheControl: CACHE_CONTROL })); }
+        catch (e) { /* provedor sem CopyObject: copia pela API (bytes já conferidos pelo chamador) */ const r = await client.send(new GetObjectCommand({ Bucket, Key: from })); const body = Buffer.from(await r.Body.transformToByteArray()); await client.send(new PutObjectCommand({ Bucket, Key: to, Body: body, ContentType: mime ? assertMime(mime) : undefined, CacheControl: CACHE_CONTROL })); }
+      }
+      await client.send(new DeleteObjectCommand({ Bucket, Key: from }));
+      return { promoted: !existed, existed };
+    },
+    async deleteStaging(userId, sha) {
+      const Key = stagingKey(userId, sha); const existed = !!(await headRaw(Key));
+      await client.send(new DeleteObjectCommand({ Bucket, Key })); return { deleted: existed };
+    },
+    /** Apaga preparos abandonados (navegador fechado antes do finalize). Usado pelo GC. */
+    async purgeStaging({ olderThanMs = 48 * 3600 * 1000, limit = 1000 } = {}) {
+      let token, n = 0, bytes = 0; const cutoff = Date.now() - olderThanMs;
+      do {
+        const r = await client.send(new ListObjectsV2Command({ Bucket, Prefix: STAGING_PREFIX, ContinuationToken: token, MaxKeys: 1000 }));
+        for (const o of r.Contents || []) { if (n >= limit) break; if (o.LastModified && o.LastModified.getTime() < cutoff) { await client.send(new DeleteObjectCommand({ Bucket, Key: o.Key })); n++; bytes += Number(o.Size || 0); } }
+        token = r.IsTruncated && n < limit ? r.NextContinuationToken : undefined;
+      } while (token);
+      return { deleted: n, bytes };
     },
 
     /** Relê o objeto em fluxo e confere o SHA-256 (usado no finalize do upload direto). */

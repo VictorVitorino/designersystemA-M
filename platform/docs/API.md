@@ -28,7 +28,7 @@ Pilha: Node 22 (ESM, JavaScript puro com JSDoc), **Hono** (roda igual em Node e 
   (b) `Origin` (ou, na falta, `Sec-Fetch-Site: same-origin`) igual a `APP_ORIGIN`; (c) `Content-Type` JSON ou o tipo permitido do endpoint. Falhou → 403 `csrf`.
 - **Paginação**: `?limit=` (1–100, padrão 30) e `?cursor=` opaco; resposta `{ items: [...], nextCursor: string|null }`.
 - IDs são UUID v4. Datas ISO-8601 UTC.
-- **Limites de taxa** (por usuário e por IP; janela fixa, `app.hit_rate`): login 8/10 min por e-mail+IP e 30/10 min por IP; forgot/verify 5/15 min; escrita de conteúdo 120/min; upload 60/min; comentários 30/min; leitura geral 600/min. Estourou → 429.
+- **Limites de taxa** (janela fixa, `app.hit_rate`; estourou → 429 com `Retry-After`): login 8/10 min por e-mail+IP e 30/10 min por IP; esqueci a senha 5/15 min por IP e por e-mail; `verify` 10/15 min **por link** e 100/15 min por IP; `refresh` 10/min **por token de renovação** e 600/min por IP; convites 300/h por admin. Rotas autenticadas: por **usuário** — escrita de conteúdo 120/min, upload 60/min, comentários 30/min, leitura 600/min — e, por **IP**, o mesmo valor × `RATE_IP_MULTIPLIER` (padrão 25: um escritório inteiro atrás do mesmo NAT não se bloqueia; teto contra abuso em massa continua). Os dois baldes são consultados em uma só ida ao banco.
 - Idempotência: `PUT` de conteúdo e upload de arquivo são idempotentes por conteúdo.
 
 ## 3. Autenticação (BFF sobre Supabase Auth / GoTrue)
@@ -103,8 +103,8 @@ Tipos aceitos (conferidos por **magic bytes**, nunca pelo nome/Content-Type do c
 |---|---|---|
 | `POST /api/assets/check` | `{shas:[hex64…≤200]}` | `{missing:[hex64…]}` — o que ainda precisa enviar para o usuário poder referenciar (já inclui prova de posse quando o servidor já tem o arquivo e o usuário o reenviar via `PUT`). |
 | `PUT /api/assets/:sha256` | corpo binário; `Content-Type` do arquivo; `X-Asset-Kind: image\|thumb\|attachment` | 201/200 `{sha256,size,mime,width?,height?,deduplicated:boolean}`. O servidor recalcula o SHA-256 e compara com `:sha256` (400 se diferente), valida o tipo, grava (idempotente) e registra a posse do usuário. Corpo ≤ 4 MB (limite das Functions da Vercel); acima disso use o fluxo direto abaixo. |
-| `POST /api/assets/uploads` | `{sha256,size,mime,kind}` | `{mode:'direct', url, method:'PUT', headers, expiresAt}` (URL assinada do bucket, 5 min) **ou** `{mode:'api'}` quando o driver não suporta (local). |
-| `POST /api/assets/:sha256/finalize` | — | Lê o objeto enviado, confere SHA-256 e tipo, marca `ready`. 200 igual ao `PUT`. |
+| `POST /api/assets/uploads` | `{sha256,size,mime,kind}` | `{mode:'direct', url, method:'PUT', headers, expiresAt}` (URL assinada, 5 min, que escreve na **área de preparo da própria pessoa** `up/<usuário>/<sha>` — nunca na chave canônica) **ou** `{mode:'api'}` quando o driver não suporta (local). Registra o arquivo como `pending`; **não** concede posse. |
+| `POST /api/assets/:sha256/finalize` | — | Lê o que a pessoa enviou à sua área de preparo, confere o SHA-256 e o tipo pelos bytes, **só então** concede a posse, promove o objeto para a chave canônica (nada é regravado se já existir) e marca `ready`. 201 igual ao `PUT` (200 se já estava pronto). 404 se não há registro visível nem bytes enviados; 409 se os bytes ainda não chegaram; 422/415 se não conferem (preparo apagado). |
 | `GET /api/assets/:sha256` | — | Bytes (≤ 8 MB: transmitidos) ou `302` para URL assinada (5 min). Cabeçalhos: `Content-Type` do banco, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, max-age=31536000, immutable`, `Content-Disposition: inline` só para imagens (demais `attachment`). 404 se o usuário não puder ver. |
 
 Coleta de lixo: `tools/gc-assets.js` (padrão simulação) remove objetos sem referência há > 14 dias.
@@ -118,7 +118,7 @@ Coleta de lixo: `tools/gc-assets.js` (padrão simulação) remove objetos sem re
 | `PATCH /api/comments/:id` | `{body?}` (autor) ou `{resolved:boolean}` (dono/admin/autor) | 200 |
 | `DELETE /api/comments/:id` | — | 204 (autor, dono da apresentação ou admin; exclusão lógica) |
 | `POST /api/presentations/:id/interactions` | `{kind:'form_response'\|'board_state'\|'vote_state'\|'view'\|'reaction', elementId, payload}` | 201/200. `board_state`/`vote_state` fazem upsert por (usuário, elemento); os demais acumulam. payload ≤ 64 KB; ≤ 500 respostas por usuário/elemento. |
-| `GET /api/presentations/:id/interactions?kind=&elementId=` | — | `{items:[…]}`: dono/admin veem tudo (com autor); demais, só as próprias. |
+| `GET /api/presentations/:id/interactions?kind=&elementId=` | — | `{items:[{id, kind, elementId, payload, createdAt, updatedAt, author:{id, displayName}}], truncated}`: dono/admin veem tudo; demais, só as próprias. O cliente só restaura no dispositivo o que tem `author.id` igual ao da sessão (`user` é um alias de `author`, mantido por compatibilidade). |
 | `GET /api/presentations/:id/interactions.csv?kind=form_response&elementId=` | — | CSV (UTF-8 com BOM; células iniciadas por `= + - @` recebem apóstrofo — anti CSV-injection). Dono/admin. |
 
 ## 7. Administração (somente admin; tudo auditado)

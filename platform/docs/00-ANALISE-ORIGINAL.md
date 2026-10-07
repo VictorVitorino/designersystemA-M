@@ -44,18 +44,23 @@ Um editor de apresentações completo em **um único HTML** (sem servidor): edit
 
 **Não muda (e é verificado):** todo o código de `studio/` (editor, efeitos, animações, modelos, atalhos, componentes interativos, importação/exportação). O build **standalone** (`python3 studio/assemble.py`) continua sendo exatamente o arquivo original.
 
-**O que a versão online acrescenta, sem tocar em `studio/`:** o build "cloud" é feito numa **cópia temporária** de `studio/`, onde se adicionam a extensão de nuvem (`platform/studio-cloud/ed-50-cloud.js`) e **três ajustes de texto cirúrgicos e verificados** (cada um exige que o trecho original exista exatamente uma vez, senão o build falha):
+**O que a versão online acrescenta, sem tocar em `studio/`:** o build "cloud" é feito numa **cópia temporária** de `studio/`, onde se adicionam a extensão de nuvem (`platform/studio-cloud/ed-50-cloud.js`) e **seis ajustes de texto cirúrgicos e verificados** (`studio-cloud/patches.json`; cada um exige que o trecho original exista exatamente uma vez, senão o build falha):
 
 1. `commit()` do editor emite um evento (`am:commit`) para o salvamento automático saber que algo mudou;
-2. o carregamento do leitor de PDF deixa de usar `new Function` (incompatível com uma política de segurança estrita) e passa a usar `import()` nativo;
-3. a capa não abre quando o editor roda dentro da plataforma (o ponto de entrada passa a ser o acervo).
+2. `restore()` (desfazer/refazer) emite o mesmo aviso — sem isso um Ctrl+Z não seria salvo;
+3. `loadDeck()` (Abrir…, Novo, importar, modelos prontos) avisa a nuvem que o deck inteiro trocou, para fixar o id da apresentação e salvar;
+4. o carregamento do leitor de PDF deixa de usar `new Function` (incompatível com uma política de segurança estrita) e passa a usar `import()` nativo;
+5. a capa não abre quando o editor roda dentro da plataforma (o ponto de entrada passa a ser o acervo);
+6. a pergunta “sair sem salvar?” do navegador passa a ser decidida pela extensão (só com alterações ainda não confirmadas na nuvem).
+
+Sem `window.AM_CLOUD` (modo inerte) nenhum dos seis muda comportamento; a prova é o portão de 35 baterias do editor sobre o build em nuvem (EVIDENCIAS §1.1).
 
 ## 4. Como a preservação é provada
 
 | Prova | O que garante |
 |---|---|
 | Hash do build standalone = hash do arquivo original | `studio/` não foi alterado em nada |
-| Gate de 35 suítes do editor executado sobre o **build cloud em modo inerte** (sem `window.AM_CLOUD`) | os 3 ajustes e a extensão não quebram nenhum comportamento existente |
+| Gate de 35 suítes do editor executado sobre o **build cloud em modo inerte** (sem `window.AM_CLOUD`) | os 6 ajustes e a extensão não quebram nenhum comportamento existente |
 | Suítes novas em modo nuvem: abrir/editar/salvar, importar PPTX/PDF, exportar HTML/PDF/PowerPoint com imagens hidratadas, player, atalhos, formulários | as funções continuam funcionando **dentro** da plataforma |
 | Zero violações de CSP em Chromium real durante todos os fluxos | a política de segurança estrita não desliga nenhum recurso |
 | Medição do tempo de abertura/salvamento e do peso do arquivo | a fluidez não piora |

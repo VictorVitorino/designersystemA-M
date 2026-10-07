@@ -26,6 +26,16 @@ export function objectKey(sha) {
   return `${KEY_PREFIX}${sha.slice(0, 2)}/${sha.slice(2, 4)}/${sha}`;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const STAGING_PREFIX = 'up/';
+/** up/<uuid do usuário>/<sha> — área de PREPARO do upload direto: cada pessoa só escreve (URL assinada) e só lê a SUA pasta; o finalize confere o
+ *  SHA-256 do que está lá e só então promove o objeto para a chave canônica e concede a posse. Sem isso, pedir uma URL para o hash de um
+ *  arquivo alheio já existente bastaria para "finalizar" e ganhar acesso a ele (AF-2). */
+export function stagingKey(userId, sha) {
+  if (typeof userId !== 'string' || !UUID_RE.test(userId)) throw new StorageKeyError('userId inválido');
+  return `${STAGING_PREFIX}${userId.toLowerCase()}/${assertSha(sha)}`;
+}
+
 /** Inverso de objectKey: devolve o sha ou null se a chave não tiver exatamente o formato canônico. */
 export function shaFromKey(key) {
   if (typeof key !== 'string') return null;

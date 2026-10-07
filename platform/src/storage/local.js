@@ -9,7 +9,7 @@ import { promises as fsp, constants as C } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { objectKey, assertSha, assertShaPrefix, assertCursor, clampLimit, toBuffer, assertMime, StorageIntegrityError } from './keys.js';
+import { objectKey, assertSha, assertShaPrefix, assertCursor, clampLimit, toBuffer, assertMime, StorageIntegrityError, stagingKey } from './keys.js';
 import { sha256Hex } from '../lib/canonical.js';
 
 const DIR_MODE = 0o700, FILE_MODE = 0o600;
@@ -132,6 +132,10 @@ export function createLocalStorage(localDir) {
     /** Local não tem URL assinada: o chamador transmite os bytes pela API. */
     async signedGetUrl(sha) { assertSha(sha); return null; },     // mesmo com retorno nulo, a entrada é validada (contrato igual ao do driver s3)
     async createUpload(sha) { assertSha(sha); return null; },
+    async getStaging(userId, sha) { stagingKey(userId, sha); return null; },
+    async promoteStaging(userId, sha) { stagingKey(userId, sha); const o = await openObject(sha); if (o) await o.fh.close(); return { promoted: false, existed: !!o }; },
+    async deleteStaging(userId, sha) { stagingKey(userId, sha); return { deleted: false }; },
+    async purgeStaging() { return { deleted: 0, bytes: 0 }; },
 
     /** Relê o objeto em fluxo (memória constante) e confere o hash. */
     async verify(sha) {

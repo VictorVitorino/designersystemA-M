@@ -135,7 +135,8 @@ export function authRoutes(deps) {
   // ------------------------------------------------------------------------------------------------ link do e-mail (convite / recuperação)
   r.post('/verify', async (c) => {
     const { tokenHash, type } = await readJson(c, VerifyBody);
-    await limit(c, 'verify_ip', c.get('ip') || 'unknown', 900, 5);
+    await limit(c, 'verify_tok', sha256hex(tokenHash).slice(0, 32), 900, 10);   // por link (token de uso único e imprevisível): força bruta inviável
+    await limit(c, 'verify_ip', c.get('ip') || 'unknown', 900, 100);           // teto por IP alto: uma equipe inteira abre os convites do mesmo escritório (A3)
     const tokens = await gotrue.verify({ type, tokenHash });
     const claims = await claimsOf(tokens.accessToken);
     const user = await kit.resolve(claims, { allowLink: true, touch: false });   // vincula a identidade ao convite; ainda NÃO ativa (falta a senha)
@@ -152,6 +153,8 @@ export function authRoutes(deps) {
   // ------------------------------------------------------------------------------------------------ definir senha
   r.post('/password', async (c) => {
     const user = requireUser(c, { allowInvited: true });
+    // só quem acabou de provar a posse do e-mail (convite ou link de recuperação) define a senha: uma sessão ativa roubada não toma a conta (AF-1)
+    if (!(user.status === 'invited' || readCookie(c, names.np) === '1')) throw E.forbidden('Para trocar a senha, use "Esqueci a senha" na tela de entrada: enviaremos um link ao seu e-mail.');
     const { password } = await readJson(c, PasswordBody);
     const v = validatePassword(password, user.email);
     if (!v.ok) throw E.badRequest(v.reason, { fields: [{ path: 'password', message: v.reason }] });
@@ -185,7 +188,8 @@ export function authRoutes(deps) {
   r.post('/refresh', async (c) => {
     const rt = readCookie(c, names.rt);
     if (!rt) throw E.sessionExpired();
-    await limit(c, 'refresh_ip', c.get('ip') || 'unknown', 60, 30);
+    await limit(c, 'refresh_tok', sha256hex(rt).slice(0, 32), 60, 10);        // por token de renovação (HttpOnly, rotativo): não é superfície de força bruta
+    await limit(c, 'refresh_ip', c.get('ip') || 'unknown', 60, 600);           // teto por IP alto: dezenas de pessoas atrás do mesmo NAT renovam sem derrubar umas às outras (A2)
     const user = await refreshSession(c, rt);
     return c.json(sessionBody(user, ensureCsrf(c), user.status === 'invited' || readCookie(c, names.np) === '1'));
   });

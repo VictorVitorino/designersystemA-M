@@ -19,6 +19,7 @@ Objetivo: **saber antes dos usuários** que algo está errado, com o mínimo de 
 | 11 | **E-mail** (convites) | bounce/complaint no painel do provedor SMTP | taxa de rejeição > 5% | média | TI | provedor de e-mail |
 | 12 | **Usuários admin** | `stats` | menos de 2 administradores ativos | média | TI | aviso no `stats` |
 | 13 | **Custos/cotas** | painéis Vercel e Supabase | > 80% da cota do mês | média | TI + gestor | alertas de cobrança dos provedores |
+| 14 | **Inchaço de `app.presentations`** (o autosave reescreve o deck inteiro) | `stats` → `bloat` (tuplas vivas × mortas, último autovacuum) | mortas > vivas e > 10 000 (aviso do `stats`), ou `last_autovacuum` > 1 dia com uso | média | TI | `maintenance.yml` (semanal); limiares de autovacuum já reduzidos na migração 0005 |
 
 Gravidade → resposta: **crítica** (§1 do OPERACAO: 15 min), **alta** (mesmo dia útil), **média** (esta semana).
 

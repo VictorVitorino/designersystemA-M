@@ -94,11 +94,11 @@ describe('ler', () => {
     await post(A2, { kind: 'form_response', elementId: 'f2', payload: { q: ['Comentário'], a: ['ok'] } }, Q.id); await post(A1, { kind: 'vote_state', elementId: 'v1', payload: { pts: [1] } }, Q.id);
   });
   test('membro vê SÓ as próprias; dono e admin veem todas, com o autor', async () => {
-    const own = await env.get(A1, url(Q.id)); assert.equal(own.status, 200); assert.equal(own.json.items.length, 2); assert.ok(own.json.items.every((i) => i.user.id === A1.id)); assert.equal(own.json.truncated, false);
-    const owner = await env.get(OWNER, url(Q.id)); assert.equal(owner.json.items.length, 4); assert.deepEqual([...new Set(owner.json.items.map((i) => i.user.displayName))].sort(), ['Respondente A', 'Respondente B']);
+    const own = await env.get(A1, url(Q.id)); assert.equal(own.status, 200); assert.equal(own.json.items.length, 2); assert.ok(own.json.items.every((i) => i.author.id === A1.id && i.user.id === A1.id), 'author (contrato) e user (compatibilidade) apontam para quem respondeu'); assert.equal(own.json.truncated, false);
+    const owner = await env.get(OWNER, url(Q.id)); assert.equal(owner.json.items.length, 4); assert.deepEqual([...new Set(owner.json.items.map((i) => i.author.displayName))].sort(), ['Respondente A', 'Respondente B']);
     assert.equal((await env.get(ADM, url(Q.id))).json.items.length, 4);
     assert.equal((await env.get(V1, url(Q.id))).json.items.length, 0, 'quem não respondeu não vê nada');
-    assert.deepEqual(Object.keys(owner.json.items[0]).sort(), ['createdAt', 'elementId', 'id', 'kind', 'payload', 'updatedAt', 'user']);
+    assert.deepEqual(Object.keys(owner.json.items[0]).sort(), ['author', 'createdAt', 'elementId', 'id', 'kind', 'payload', 'updatedAt', 'user']);
   });
   test('filtros kind/elementId; valores inválidos → 400', async () => {
     assert.equal((await env.get(OWNER, url(Q.id) + '?kind=form_response')).json.items.length, 3);

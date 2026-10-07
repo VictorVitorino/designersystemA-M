@@ -33,6 +33,20 @@ export async function limit(c, bucket, key, windowS, max) {
   return r;
 }
 
+/** Vários limites de uma vez, em UMA consulta (uma ida ao banco em vez de uma por balde). specs: [[bucket, key, windowS, max], …]. Lança 429 no primeiro estourado. */
+export async function limitMany(c, specs) {
+  const { db } = c.get('deps');
+  const rows = await db.anon((tx) => {
+    let q = null;
+    specs.forEach(([bucket, key, windowS, max], i) => { const part = tx`select ${i}::int as i, * from app.hit_rate(${bucket}, ${String(key)}, ${windowS}::int, ${max}::int)`; q = q ? tx`${q} union all ${part}` : part; });
+    return q;
+  });
+  for (const r of rows) {
+    if (!r.allowed) { const [bucket, key] = specs[r.i]; try { await auditAnon(c, 'security.rate_limited', 'bucket', bucket, { key_kind: String(key).length > 40 ? 'hash' : 'id' }); } catch { /* auditoria nunca derruba o bloqueio */ } throw E.rateLimited(r.reset_in); }
+  }
+  return rows;
+}
+
 const SENSITIVE = /pass(word)?|senha|token|secret|authorization|cookie|apikey|api_key|jwt|bearer|credential/i;
 /** Remove chaves sensíveis e corta strings longas dos metadados de auditoria/log. */
 export function redact(obj, depth = 0) {
