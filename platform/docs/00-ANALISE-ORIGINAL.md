@@ -32,11 +32,11 @@ Um editor de apresentações completo em **um único HTML** (sem servidor): edit
 
 | Hoje (arquivo local) | Online |
 |---|---|
-| Rascunho em `localStorage` (`amStudio.draft`, ≤ 4,5 MB) a cada alteração | **mantido** como rede de segurança local; a fonte da verdade passa a ser o servidor |
-| "Minhas obras" (IndexedDB `canteiro`, `AMHist`) | **mantido** intacto; o acervo da nuvem é um segundo lugar. "Exportar acervo (.json)" alimenta a importação para a nuvem |
+| Rascunho em `localStorage` (`amStudio.draft`, ≤ 4,5 MB) a cada alteração | no editor original, **mantido**; na nuvem o rascunho local é **descartado** e substituído pela fila do IndexedDB `canteiro-cloud` (apagada após o salvamento confirmado; ver `editor-em-nuvem.md` §3 e §6) — a fonte da verdade é o servidor |
+| "Minhas obras" (IndexedDB `canteiro`, `AMHist`) | no editor original, **mantido** intacto. Na nuvem nada entra lá e "Minhas obras…" leva ao acervo da nuvem (`/acervo?aba=minhas`); o acervo local antigo chega à nuvem pelo "Exportar acervo (.json)" + `/importar` |
 | "Salvar" baixa um `.html` com o deck em `<script id="am-deck-data">` | **mantido** (exportação offline continua); salvar na nuvem é automático e confirmado |
 | Imagens como `data:` URI dentro do JSON do deck | externalizadas para o armazenamento de arquivos (endereçadas por SHA-256, sem duplicação); o editor continua trabalhando com `data:` em memória (hidratação ao abrir) |
-| Respostas de formulário/quadro/votação em `localStorage` do espectador | ponte para a API (centraliza as respostas de todos); `localStorage` continua como cache |
+| Respostas de formulário/quadro/votação em `localStorage` do espectador | ponte para a API: cada envio vai ao servidor **com o nome de quem respondeu**, e o servidor guarda as respostas de todos (o dono as lê por `GET …/interactions` e `…/interactions.csv`; ainda não há tela para isso no editor nem no acervo — no player, "Baixar CSV" continua lendo só este navegador); `localStorage` continua como cache, apagado ao Sair (ver `editor-em-nuvem.md` §6) |
 | Fontes do Google e pdf.js por CDN | pdf.js passa a ser servido pela própria plataforma (`/vendor`); fontes do Google continuam permitidas na política de segurança |
 | Sem login, sem permissões, sem versões | login por convite, acervo comum com regras de acesso, histórico de versões, comentários |
 

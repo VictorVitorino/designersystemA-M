@@ -6,8 +6,8 @@ Sem `window.AM_CLOUD` o resultado se comporta como o editor original (modo inert
 
 | Arquivo | Para quê |
 |---|---|
-| `cloud-core.js` | Módulo isomórfico (navegador e Node 22, sem dependências): `window.AMCloudCore`. Hash, JSON canônico, trocar imagens `data:` por `asset:sha256:…` e vice-versa, ler `.html`/acervo exportados. Usado pelas páginas (B1), pela extensão e por ferramentas Node. |
-| `ed-50-cloud.js` / `ed-50-cloud.css` | A extensão em si (login por cookie, carregar/hidratar, autosave, fila local, conflito, histórico, visualizar, interações, pílula de estado). Entra no editor como `ed-50-*` (o `assemble.py` inclui qualquer `ed-*.js/.css`). |
+| `cloud-core.js` | Módulo isomórfico (navegador e Node 22, sem dependências): `window.AMCloudCore`. Hash, JSON canônico, desenhar em PNG as imagens que o servidor não guarda (SVG, BMP, AVIF, ICO…), trocar imagens `data:` por `asset:sha256:…` e vice-versa, ler `.html`/acervo exportados. Usado pelas páginas (B1, inclusive `/importar`), pela extensão e por ferramentas Node. |
+| `ed-50-cloud.js` / `ed-50-cloud.css` | A extensão em si (login por cookie, carregar/hidratar, autosave, fila local, conflito, conteúdo recusado, histórico, Novo/Abrir/projetos prontos na nuvem, parâmetros `?modelo`/`?historico`/`?exportar`, comentários, preferências, computador compartilhado, visualizar, interações, pílula de estado). Entra no editor como `ed-50-*` (o `assemble.py` inclui qualquer `ed-*.js/.css`). O build cloud tem de caber no orçamento de 2000 KB do `test-s90-perf`. |
 | `patches.json` | Os **6 patches** de texto (cada `antes` precisa existir exatamente 1× — senão o build falha). |
 | `package.json` | Marca a pasta como CommonJS para `cloud-core.js` carregar como script clássico **e** em Node (`import cc from '…/cloud-core.js'`). |
 
@@ -39,8 +39,8 @@ Se `studio/` mudar e um `antes` deixar de bater, **o build falha** (`aparece 0×
 
 ## Depuração e automação
 
-Na página do editor existe `window.AMCloud` (somente leitura + `saveNow()`/`saveVersion()`): `status` (`loading|saved|saving|offline|reconnecting|conflict|readonly|expired|error`),
-`rev`, `dirty`, `inflight`, `outbox`. Os testes usam isso; não é contrato de produto.
+Na página do editor existe `window.AMCloud` (somente leitura + `saveNow()`/`saveVersion()`/`comments.open()`): `status` (`loading|saved|saving|offline|reconnecting|throttled|conflict|readonly|expired|rejected|error`),
+`rev`, `dirty`, `inflight`, `outbox`, `rejected` (problemas do último 422). Os testes usam isso; não é contrato de produto.
 
 ## Testes
 

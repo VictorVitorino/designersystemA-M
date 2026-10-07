@@ -1,9 +1,10 @@
 /* Servidor mock do Canteiro online (em memória) para os testes do editor em nuvem.
    Segue platform/docs/API.md: cookies (am_at/am_rt/am_csrf no modo local), CSRF (cabeçalho + cookie + Origin), erros no formato do contrato,
-   revisão otimista (409), versões, arquivos endereçados por conteúdo (check/put/get com "prova de posse" por usuário), interações,
-   duplicar, compartilhar. Também serve o site de platform/dist/public com a CSP de dist/csp.json (rewrites /editor/:uuid e /visualizar/:uuid).
+   revisão otimista (409), versões, arquivos endereçados por conteúdo (check/put/get com "prova de posse" por usuário), interações (com clientId,
+   tetos por tipo e DELETE), comentários, preferências da pessoa (/api/me/prefs), sair, duplicar, compartilhar. Também serve o site de
+   platform/dist/public com a CSP de dist/csp.json (rewrites /editor/:uuid e /visualizar/:uuid; sem UUID → /acervo, como src/static.js).
    Ganchos de teste (fora do contrato, só aqui): /__test/login, /__test/logout, /__test/expire, /__test/seed, /__test/bump, /__test/faults,
-   /__test/requests, /__test/state, /__test/reset.
+   /__test/requests, /__test/state, /__test/reset, /__test/comment, /__test/prefs, /__test/inerte (o editor fora de /editor/<uuid>).
    Uso:  node tests/cloud/mock-api.js [porta=4202]     ou     import { startMock } from './mock-api.js' */
 import http from 'node:http';
 import { createHash, randomUUID, randomBytes } from 'node:crypto';
@@ -11,6 +12,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cspFor, readCspJson, SECURITY_HEADERS, COMMON_CSP } from '../../tools/csp.js';
+import { editorWithoutId } from '../../src/static.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PLATFORM = path.resolve(here, '../..');
@@ -48,8 +50,8 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
       adm: { id: randomUUID(), email: 'adm@example.com', displayName: 'Admin A&M', role: 'admin', status: 'active' }
     };
     S.tokens = new Map(); /* access/refresh → {userId, kind, valid, csrf} */
-    S.pres = new Map(); S.assets = new Map(); S.owned = new Map(); S.interactions = []; S.log = [];
-    S.faults = { put5xx: 0, putDelayMs: 0, assetPut5xx: 0, refreshFails: false, versionIntervalMs: 10 * 60 * 1000, getDelayMs: 0, interactions5xx: 0 };
+    S.pres = new Map(); S.assets = new Map(); S.owned = new Map(); S.interactions = []; S.log = []; S.comments = []; S.prefs = new Map();
+    S.faults = { put5xx: 0, putDelayMs: 0, assetPut5xx: 0, assetPut429: 0, refreshFails: false, versionIntervalMs: 10 * 60 * 1000, getDelayMs: 0, presDelayMs: 0, interactions5xx: 0, interactionsLoseResponse: 0, noPrefs: false, prefs429: 0 };
     S.counters = { puts: 0, assetPuts: 0, assetChecks: 0 };
   }
   reset();
@@ -81,12 +83,28 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
 
   /* ---------- apresentações ---------- */
   function blankDeck(id, title) { return { v: 1, app: 'AM Studio', id, title, slides: [{ id: 's' + randomBytes(3).toString('hex'), bg: '#FFFFFF', tr: 'fade', els: [] }] }; }
+  /* motivo de recusa de um trecho (como src/lib/deck-lint.js: entidades decodificadas também contam) */
+  const reasonOf = (txt) => {
+    const t = txt.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+    if (/data:image\/svg/i.test(t)) return 'svg_embutido';
+    if (/"data:image\/(?!(?:png|jpeg|webp|gif)[;,])/i.test(t)) return 'url_perigosa';
+    if (/<\s*(script|iframe|form|object|embed)\b/i.test(t)) return 'tag_perigosa';
+    if (/javascript:/i.test(t)) return 'url_perigosa';
+    return null;
+  };
   function lint(content) {
     const s = JSON.stringify(content);
     if (s.length > 12 * 1024 * 1024) throw new ApiError(413, 'too_large', 'A apresentação é grande demais.');
     if (/data:image\/(png|jpeg|webp|gif);base64,/i.test(s)) throw new ApiError(422, 'rejected_content', 'As imagens precisam ser enviadas como arquivos (asset:sha256:…).', { reason: 'inline_image' });
-    if (/data:image\/svg\+xml/i.test(s)) throw new ApiError(422, 'rejected_content', 'SVG embutido não é aceito.', { reason: 'svg' });
-    if (/<script|<iframe|javascript:/i.test(s)) throw new ApiError(422, 'rejected_content', 'Conteúdo ativo não é aceito.', { reason: 'active_content' });
+    if (reasonOf(s)) {
+      const issues = [];
+      (content.slides || []).forEach((sl, i) => {
+        (sl.els || []).forEach((e) => { const r = reasonOf(JSON.stringify(e)); if (r && issues.length < 20) issues.push({ slide: i + 1, elementId: e.id || null, reason: r }); });
+        const rest = { ...sl, els: undefined }, r = reasonOf(JSON.stringify(rest)); if (r && issues.length < 20) issues.push({ slide: i + 1, elementId: null, reason: r });
+      });
+      const top = { ...content, slides: undefined }, rt = reasonOf(JSON.stringify(top)); if (rt && issues.length < 20) issues.push({ slide: null, elementId: null, reason: rt });
+      throw new ApiError(422, 'rejected_content', 'Conteúdo recusado por segurança.', { reasons: [...new Set(issues.map((x) => x.reason))], issues });
+    }
     const missing = new Set(); let m; const re = /asset:sha256:([0-9a-f]{64})/g;
     while ((m = re.exec(s))) if (!S.assets.has(m[1])) missing.add(m[1]);
     if (missing.size) throw new ApiError(422, 'rejected_content', 'Há imagens que não estão no servidor.', { reason: 'missing_assets', missing: [...missing] });
@@ -124,8 +142,40 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
       const u = byId(t.userId); const old = ck.am_at && S.tokens.get(ck.am_at); if (old) old.valid = false; t.valid = false;
       issue(u, res); return json(200, { authenticated: true, user: { id: u.id, email: u.email, displayName: u.displayName, role: u.role, status: u.status }, needsPassword: false });
     }
+    if (p === '/auth/logout' && m === 'POST') {
+      const ck = cookies(req); for (const t of [ck.am_at, ck.am_rt]) { const x = t && S.tokens.get(t); if (x) x.valid = false; }
+      res.writeHead(204, { 'Set-Cookie': ['am_at=; Path=/; Max-Age=0', 'am_rt=; Path=/; Max-Age=0'], 'Cache-Control': 'no-store' }); return res.end();
+    }
     const user = user0 || whoAmI(req);
     if (S.faults.getDelayMs && m === 'GET') await new Promise((r) => setTimeout(r, S.faults.getDelayMs));
+    if (S.faults.presDelayMs && m === 'GET' && /^\/presentations\/[^/]+$/.test(p)) await new Promise((r) => setTimeout(r, S.faults.presDelayMs));
+
+    /* ----- preferências da pessoa (contrato: {prefs} ≤ 64 KB, profundidade ≤ 10; só a própria pessoa) ----- */
+    if (p === '/me/prefs') {
+      if (S.faults.noPrefs) throw new ApiError(404, 'not_found', 'Rota inexistente.');
+      if (m === 'GET') return json(200, { prefs: S.prefs.get(user.id) || {} });
+      if (m === 'PUT') { /* como src/routes/prefs.js: substitui o objeto inteiro; forma, chaves proibidas, profundidade (prefs conta 1), 64 KB em bytes, HTML ativo, 60/min */
+        if (S.faults.prefs429 > 0) { S.faults.prefs429--; throw new ApiError(429, 'rate_limited', 'Muitas gravações de preferências.'); }
+        const pr = body && body.prefs, isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+        const depth = (v) => (v && typeof v === 'object' ? 1 + Math.max(0, ...Object.values(v).map(depth)) : 0);
+        const badKey = (v) => !!v && typeof v === 'object' && Object.keys(v).some((k) => ['__proto__', 'constructor', 'prototype'].includes(k) || badKey(v[k]));
+        if (!isObj(pr) || Object.keys(body).length !== 1 || badKey(pr) || depth(pr) > 10 || (pr.brandKits !== undefined && !Array.isArray(pr.brandKits)) || (pr.editor !== undefined && !isObj(pr.editor))) throw new ApiError(400, 'invalid_request', 'Preferências inválidas.');
+        if (Buffer.byteLength(JSON.stringify(pr)) > 64 * 1024) throw new ApiError(413, 'too_large', 'As preferências passam de 64 KB.');
+        if (reasonOf(JSON.stringify(pr))) throw new ApiError(422, 'rejected_content', 'As preferências têm conteúdo recusado por segurança.');
+        S.prefs.set(user.id, structuredClone(pr)); return json(200, { prefs: pr });
+      }
+    }
+    /* ----- comentários (docs/API.md §6) ----- */
+    if (seg[0] === 'comments' && seg[1]) {
+      const c = S.comments.find((x) => x.id === seg[1] && !x.deleted); if (!c) throw new ApiError(404, 'not_found', 'Comentário não encontrado.');
+      const pr = getP(c.presentationId), mod = canEdit(user, pr);
+      if (m === 'PATCH') {
+        if (typeof body?.resolved === 'boolean') { if (!(c.authorId === user.id || mod)) throw new ApiError(403, 'forbidden', 'Sem permissão.'); c.resolvedAt = body.resolved ? new Date().toISOString() : null; }
+        if (typeof body?.body === 'string') { if (c.authorId !== user.id) throw new ApiError(403, 'forbidden', 'Só o autor edita.'); c.body = body.body; c.editedAt = new Date().toISOString(); }
+        return json(200, commentOut(c, user, mod));
+      }
+      if (m === 'DELETE') { if (!(c.authorId === user.id || mod)) throw new ApiError(403, 'forbidden', 'Sem permissão.'); c.deleted = true; res.writeHead(204); return res.end(); }
+    }
 
     /* ----- arquivos ----- */
     if (p === '/assets/check' && m === 'POST') {
@@ -139,6 +189,7 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
       if (m === 'PUT') {
         S.counters.assetPuts++;
         if (S.faults.assetPut5xx > 0) { S.faults.assetPut5xx--; throw new ApiError(503, 'unavailable', 'Armazenamento indisponível.'); }
+        if (S.faults.assetPut429 > 0) { S.faults.assetPut429--; throw new ApiError(429, 'rate_limited', 'Muitos envios. Tente de novo em instantes.'); }
         if (body.length > 4 * 1024 * 1024) throw new ApiError(413, 'too_large', 'Arquivo grande demais para este envio.');
         if (sha256(body) !== sha) throw new ApiError(400, 'invalid_request', 'O hash não confere com o conteúdo.');
         const mime = sniff(body); if (!mime) throw new ApiError(415, 'unsupported_media', 'Tipo de arquivo não aceito.');
@@ -205,18 +256,42 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
           return json(200, { rev: pr.rev, savedAt: pr.updatedAt, hash: pr.hash, unchanged: false });
         }
       }
+      if (seg[2] === 'comments' && seg.length === 3) {
+        const mod = canEdit(user, pr);
+        if (m === 'GET') { const all = url.searchParams.get('includeResolved') === '1'; return json(200, { items: S.comments.filter((c) => c.presentationId === pr.id && !c.deleted && (all || !c.resolvedAt)).map((c) => commentOut(c, user, mod)) }); }
+        if (m === 'POST') {
+          const text = typeof body?.body === 'string' ? body.body.trim() : '', si = body?.slideIndex;
+          if (!text || text.length > 2000 || (si != null && !(Number.isInteger(si) && si >= 0 && si <= 499)) || Object.keys(body).some((k) => !['body', 'slideIndex'].includes(k))) throw new ApiError(400, 'invalid_request', 'Comentário inválido.');
+          const c = { id: randomUUID(), presentationId: pr.id, authorId: user.id, body: text, slideIndex: si ?? null, createdAt: new Date().toISOString(), editedAt: null, resolvedAt: null, deleted: false };
+          S.comments.push(c); return json(201, commentOut(c, user, mod));
+        }
+      }
+      if (seg[2] === 'interactions' && m === 'DELETE') { /* contrato: dono/admin apagam tudo do elemento; os demais, só os próprios */
+        const el = url.searchParams.get('elementId'), kind = url.searchParams.get('kind');
+        if (!el || !/^[\w.:-]{1,80}$/.test(el)) throw new ApiError(400, 'invalid_request', 'Informe o elemento.');
+        const mod = canEdit(user, pr), before = S.interactions.length;
+        S.interactions = S.interactions.filter((i) => !(i.presentationId === pr.id && i.elementId === el && (!kind || i.kind === kind) && (mod || i.userId === user.id)));
+        return json(200, { deleted: before - S.interactions.length });
+      }
       if (seg[2] === 'interactions' && (m === 'POST' || m === 'GET')) {
         if (m === 'POST') {
           if (S.faults.interactions5xx > 0) { S.faults.interactions5xx--; throw new ApiError(503, 'unavailable', 'Indisponível.'); }
-          const { kind, elementId, payload } = body || {};
+          const { kind, elementId, payload, clientId } = body || {};
           if (!['form_response', 'board_state', 'vote_state', 'view', 'reaction'].includes(kind) || typeof elementId !== 'string' || !/^[\w-]{1,40}$/.test(elementId) || payload === undefined) throw new ApiError(400, 'invalid_request', 'Interação inválida.');
-          if (JSON.stringify(payload).length > 64 * 1024) throw new ApiError(413, 'too_large', 'Resposta grande demais.');
+          if (clientId !== undefined && (typeof clientId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(clientId))) throw new ApiError(400, 'invalid_request', 'clientId inválido.');
+          const state = kind === 'board_state' || kind === 'vote_state', cap = state ? 256 * 1024 : 64 * 1024 - 1;   /* como o servidor: estado ≤ 256 KB; demais < 64 KB */
+          if (Buffer.byteLength(JSON.stringify(payload)) > cap) throw new ApiError(413, 'too_large', 'Resposta grande demais.');
+          /* clientId: o mesmo (apresentação, pessoa, clientId) devolve o item gravado; em board_state/vote_state é aceito e ignorado (o estado já é único) */
+          if (clientId && !state) { const dup = S.interactions.find((i) => i.presentationId === pr.id && i.userId === user.id && i.clientId === clientId); if (dup) return json(200, { id: dup.id, kind: dup.kind, elementId: dup.elementId }); }
           const now = new Date().toISOString();
+          let out;
           if (kind === 'board_state' || kind === 'vote_state') {
             const ex = S.interactions.find((i) => i.presentationId === pr.id && i.userId === user.id && i.kind === kind && i.elementId === elementId);
-            if (ex) { ex.payload = payload; ex.updatedAt = now; return json(200, { id: ex.id }); }
+            if (ex) { ex.payload = payload; ex.updatedAt = now; out = [200, { id: ex.id }]; }
           }
-          const it = { id: randomUUID(), presentationId: pr.id, userId: user.id, kind, elementId, payload, createdAt: now, updatedAt: now }; S.interactions.push(it); return json(201, { id: it.id });
+          if (!out) { const it = { id: randomUUID(), presentationId: pr.id, userId: user.id, kind, elementId, payload, createdAt: now, updatedAt: now, clientId: (!state && clientId) || null }; S.interactions.push(it); out = [201, { id: it.id }]; }
+          if (S.faults.interactionsLoseResponse > 0) { S.faults.interactionsLoseResponse--; throw new ApiError(503, 'unavailable', 'Resposta perdida (gravado no servidor).'); }
+          return json(out[0], out[1]);
         }
         const kind = url.searchParams.get('kind'), el = url.searchParams.get('elementId');
         const items = S.interactions.filter((i) => i.presentationId === pr.id && (!kind || i.kind === kind) && (!el || i.elementId === el) && (canEdit(user, pr) || i.userId === user.id))
@@ -227,6 +302,7 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
     throw new ApiError(404, 'not_found', 'Rota inexistente.');
   }
   function whoAmIQuiet(req) { try { return whoAmI(req, { optional: true }); } catch { return null; } }
+  function commentOut(c, user, mod) { return { id: c.id, slideIndex: c.slideIndex, body: c.body, author: pub(byId(c.authorId) || { id: c.authorId, displayName: '?' }), createdAt: c.createdAt, editedAt: c.editedAt, resolvedAt: c.resolvedAt, canDelete: c.authorId === user.id || mod, canResolve: c.authorId === user.id || mod, canEdit: c.authorId === user.id }; }
 
   /* ---------- ganchos de teste ---------- */
   async function testHook(req, res, url, body) {
@@ -257,6 +333,13 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
     }
     if (p === '/transfer') { const pr = getP(body.id); pr.owner = S.users[body.to].id; return json(200, { owner: pr.owner }); }
     if (p === '/presentation') { const pr = getP(body.id); return json(200, { rev: pr.rev, title: pr.title, content: pr.content, hash: pr.hash, versions: pr.versions.map((v) => ({ no: v.no, kind: v.kind, label: v.label })) }); }
+    if (p === '/comment') { const pr = getP(body.id), by = S.users[body.by || 'ana']; const c = { id: randomUUID(), presentationId: pr.id, authorId: by.id, body: String(body.body || 'Comentário'), slideIndex: body.slideIndex ?? null, createdAt: new Date().toISOString(), editedAt: null, resolvedAt: null, deleted: false }; S.comments.push(c); return json(201, { id: c.id }); }
+    if (p === '/comments') return json(200, S.comments);
+    if (p === '/prefs') { /* {set:{ana:{…}}} grava como se fosse outro computador; sem corpo, devolve as preferências de todos */
+      if (body && body.set) for (const [k, v] of Object.entries(body.set)) S.prefs.set(S.users[k].id, structuredClone(v));
+      return json(200, Object.fromEntries(Object.entries(S.users).map(([k, u]) => [k, S.prefs.get(u.id) || null])));
+    }
+    if (p === '/inerte') { const f = path.join(distDir, 'editor', 'index.html'); return sendFile(res, f, { 'Content-Security-Policy': csp('/editor/'), ...SECURITY_HEADERS, 'Cache-Control': 'no-cache' }); }
     return json(404, {});
   }
 
@@ -278,6 +361,7 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
   function serveStatic(req, res, url) {
     let p = decodeURIComponent(url.pathname);
     const hdr = { 'Content-Security-Policy': csp(p), ...SECURITY_HEADERS, 'Cache-Control': 'no-cache' };
+    if (editorWithoutId(p)) { res.writeHead(302, { Location: '/acervo', 'Cache-Control': 'no-store' }); return res.end(); }
     const m = /^\/(editor|visualizar)\/([^/]+)\/?$/.exec(p);
     if (m) return existsSync(path.join(distDir, 'editor', 'index.html')) ? sendFile(res, path.join(distDir, m[1] === 'editor' ? 'editor' : 'visualizar', 'index.html'), hdr) : stub(res, 'Editor não construído', 'Rode node tools/build-web.js', p);
     let f = path.join(distDir, p);
