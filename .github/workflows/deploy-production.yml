@@ -92,6 +92,7 @@ jobs:
           DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
           BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
           BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
@@ -108,6 +109,7 @@ jobs:
           DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
           BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
           BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
           BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}

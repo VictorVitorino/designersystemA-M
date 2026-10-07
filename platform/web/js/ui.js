@@ -165,6 +165,25 @@ export function confirmDialog({ title, message, confirmLabel = 'Confirmar', canc
   });
 }
 
+/** Escolha entre opções (select) com confirmação; resolve com o valor escolhido ou null. */
+export function chooseDialog({ title, message, options, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', selectLabel = 'Opções' }) {
+  return new Promise((resolve) => {
+    const id = `dlg-${Math.random().toString(36).slice(2, 8)}`;
+    const sel = h('select', { class: 'input', id: `${id}-s`, 'aria-label': selectLabel }, ...options.map((o) => h('option', { value: o.value }, o.label)));
+    const cancel = button({ label: cancelLabel, attrs: { 'data-act': 'cancel' }, onClick: () => dlg.close('cancel') });
+    const ok = button({ label: confirmLabel, variant: 'primary', attrs: { 'data-act': 'confirm' }, onClick: () => dlg.close('ok') });
+    const dlg = h('dialog', { class: 'dlg', 'aria-labelledby': `${id}-t`, 'aria-describedby': `${id}-d` },
+      h('div', { class: 'dlg__in' },
+        h('h2', { id: `${id}-t` }, title),
+        message ? h('p', { id: `${id}-d` }, message) : null,
+        h('label', { class: 'field', for: `${id}-s` }, h('span', { class: 'field__label' }, selectLabel), sel),
+        h('div', { class: 'row' }, cancel, ok)));
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok' ? sel.value : null), { once: true });
+    mountDialog(dlg);
+    sel.focus();
+  });
+}
+
 /** Mostra um texto copiável (quando a área de transferência não está disponível). */
 export function textDialog({ title, message, value, closeLabel = 'Fechar' }) {
   return new Promise((resolve) => {

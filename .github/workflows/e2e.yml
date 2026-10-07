@@ -66,6 +66,12 @@ jobs:
       - name: Gerar o site
         run: npm run build:web
 
+      - name: Instalar python-pptx (o cenário 7 abre o .pptx exportado fora do navegador)
+        run: python3 -m pip install --user --break-system-packages python-pptx==1.0.2 || python3 -m pip install --user python-pptx==1.0.2
+
+      - name: Suítes do cliente web (264 verificações) e do editor em nuvem (Chromium real, CSP estrita)
+        run: node tests/web/web.test.js && node --test --test-concurrency=1 tests/cloud/cloud-core.test.js tests/cloud/editor-cloud.test.js
+
       - name: Executar os testes E2E
         run: npm run test:e2e
 

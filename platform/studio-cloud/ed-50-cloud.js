@@ -12,7 +12,7 @@
   if (!S || !RT || !CC) { try { console.error('Canteiro online: editor ou cloud-core ausente'); } catch (e) { } return; }
 
   var ID = String(CFG.presentationId), VIEW = CFG.mode === 'view', API = String(CFG.apiBase || '/api').replace(/\/$/, '');
-  var DEBOUNCE = 3000, THUMB_EVERY = 60000, MAX_UP = 3.6 * 1024 * 1024;
+  var DEBOUNCE = 3000, THUMB_EVERY = 60000, MAX_UP = 3.6 * 1024 * 1024, MAX_DECK = 4 * 1024 * 1024;   /* corpo de um salvamento: a função da Vercel aceita ~4,5 MB */
 
   /* ---------------------------------------------------------------- utilidades */
   function $(s, r) { return (r || document).querySelector(s); }
@@ -444,6 +444,8 @@
     if (o.snapshot) { body.snapshot = true; if (o.label) body.label = String(o.label).slice(0, 80); }
     if (o.resolution) body.resolution = o.resolution;
     var th = await maybeThumb(deck); if (th) body.thumbSha = th;
+    var bodyLen = JSON.stringify(body).length;
+    if (bodyLen > MAX_DECK) { var big = new ApiError(413, 'too_large', 'A apresentação ficou grande demais para salvar de uma vez (' + (bodyLen / 1048576).toFixed(1) + ' MB; limite ' + Math.round(MAX_DECK / 1048576) + ' MB por salvamento). Reduza ou remova imagens pesadas, ou divida em duas apresentações. Seu trabalho continua guardado neste navegador.', null, false); throw big; }
     var r;
     try { r = await putContent(body); }
     catch (e) { if (e.status === 422 && e.details && e.details.missing && !o.retried422) { forgetKnown(); return doSave(Object.assign({}, o, { retried422: true })); } throw e; }
@@ -482,6 +484,7 @@
       clearTimeout(A.retryTimer); A.retryTimer = setTimeout(function () { if (A.dirty && !A.blocked) { setStatus('reconnecting'); saveNow({ force: true }); } }, wait);
       return false;
     }
+    if (e.status === 413) { setStatus('error'); toast(e.code === 'too_large' ? e.message : 'A apresentação é grande demais para o servidor aceitar de uma vez (limite de ~4 MB por salvamento). Reduza ou remova imagens pesadas, ou divida em duas apresentações. Seu trabalho continua guardado neste navegador.'); return false; }
     setStatus('error'); toast(e.message || 'Não foi possível salvar.'); return false;
   }
   addEventListener('online', function () {

@@ -126,7 +126,7 @@ O dump principal contém o **schema `app`** (usuários, apresentações, permiss
 | **Projeto Supabase inteiro perdido** | perdem-se as contas do Auth (as pessoas continuam existindo em `app.users`, mas sem credencial) | **melhor:** restaurar o **backup do próprio Supabase** (inclui o schema `auth`) em um novo projeto **ou** usar o backup de Auth abaixo |
 | Backup de Auth ativado (`BACKUP_INCLUDE_AUTH=1`) | cada backup traz também `db/<nome>.authdata.enc` (dados de `auth.users`/`auth.identities`, cifrados) | no projeto novo (que já criou o schema `auth` vazio): `node tools/restore.js auth --to <banco-do-projeto-novo>` (recusa tabela não vazia; confere contagens). Em seguida o login funciona com as mesmas senhas |
 
-Para ativar o backup de Auth: defina `BACKUP_INCLUDE_AUTH=1` no ambiente `production-ops` (e `production`). **Não validado contra um Supabase real** (sem acesso): teste no primeiro ensaio em staging — em particular se o papel `postgres` consegue ler/escrever `auth.users`. O arquivo contém hashes de senha: está **cifrado** como o resto.
+Para ativar o backup de Auth: cadastre a **variável do repositório** `BACKUP_INCLUDE_AUTH=1` (GitHub → Settings → Secrets and variables → Actions → *Variables*); os workflows `backup.yml` e `deploy-production.yml` a repassam ao `tools/backup.js` (padrão `0`). **Não validado contra um Supabase real** (sem acesso): teste no primeiro ensaio em staging — em particular se o papel `postgres` consegue ler/escrever `auth.users`. O arquivo contém hashes de senha: está **cifrado** como o resto.
 Se nada disso existir: cada pessoa precisa de **novo convite** (pendência: ferramenta de reconvite em lote, **não implementada**).
 
 ## 9. Limitações conhecidas (e decisões)

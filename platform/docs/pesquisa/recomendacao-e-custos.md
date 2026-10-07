@@ -341,6 +341,11 @@ Extras recomendados fora do total: cofre de senhas 24,95 (NC) e log drain 1,50, 
 | Decisões de compliance | Residência no Brasil, DPAs assinados, encarregado (DPO), registro das operações, plano de incidente com prazo de 3 dias úteis para comunicar a ANPD [73], retenção, aprovação de fornecedores (Sentry, Cloudflare ou Backblaze, Resend) | Parecer jurídico e da segurança da informação; definir se o relatório SOC 2 é exigido |
 | Responsáveis operacionais | Rotação de segredos, plantão (e-mail ou Teams), cofre de senhas, chaves de criptografia do backup | As chaves de backup ficam com a A&M, nunca no provedor da cópia |
 | Acervo local para importação | Importar 500 GB a 1 TB | Banda de upload e janela de importação; spend cap desligado |
+| GitHub com GitHub Advanced Security (CodeQL em repositório privado) **ou** desligar o workflow `codeql.yml` | Análise estática no CI | Em organização sem GHAS o CodeQL falha em repositório privado |
+| Python 3 no build da Vercel e no CI | O site é montado por `build-web`, que chama `python3` para montar o editor | A imagem padrão da Vercel e o `ubuntu-latest` do GitHub já trazem Python 3 |
+| Ferramentas de teste locais: Node 22, PostgreSQL 16 ou 17 (servidor e cliente), Chromium via Playwright, Python 3 com `moto[server]` e `python-pptx` | Rodar as suítes, o ensaio de restauração e a prova de paridade fora do CI | `platform/README.md` → “Pré-requisitos” |
+| Saída do *sandbox* do Amazon SES e verificação do remetente (se SES) | Enviar e-mails a destinatários não verificados | Pedido à AWS; costuma levar 24–48 h |
+| Confirmação do uso comercial do monitor de uptime gratuito (UptimeRobot/Better Stack) | Monitoramento externo | Ou contratar o plano pago |
 | Conferência dos preços NC nas páginas oficiais | Fechar o orçamento | Seção 6 |
 
 ## 6. Itens não confirmados

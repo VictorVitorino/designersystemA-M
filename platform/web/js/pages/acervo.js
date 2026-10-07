@@ -2,7 +2,7 @@
 import { api, ApiError } from '../api.js';
 import { requireUser } from '../session.js';
 import {
-  h, icon, button, avatar, menuButton, tabs, confirmDialog, textDialog, copyText, toast, toastError, announce, debounce,
+  h, icon, button, avatar, menuButton, tabs, confirmDialog, chooseDialog, textDialog, copyText, toast, toastError, announce, debounce,
   withBusy, replace, clear, $, stateBlock, updateQuery,
 } from '../ui.js';
 import { timeAgo, formatDateTime, plural, isUuid } from '../format.js';
@@ -210,6 +210,7 @@ function cardFor(it) {
       if (!trash) {
         if (canEdit) list.push({ label: 'Criar cópia', icon: 'copy', action: 'duplicate', onSelect: () => doDuplicate(it) });
         list.push({ label: 'Compartilhar', icon: 'link', action: 'share', onSelect: () => doShare(it) });
+        if (user.role === 'admin') list.push({ label: 'Transferir propriedade…', icon: 'user', action: 'transfer', onSelect: () => doTransfer(it) });
         if (canEdit) list.push({ sep: true }, { label: 'Excluir', icon: 'trash', danger: true, action: 'delete', onSelect: () => doDelete(it) });
       } else if (user.role === 'admin') {
         list.push({ sep: true }, { label: 'Apagar de vez', icon: 'trash', danger: true, action: 'purge', onSelect: () => doPurge(it) });
@@ -297,6 +298,23 @@ async function doRestore(it, btn) {
   }, 'Restaurando…');
 }
 
+/** Admin: passa a apresentação para outra pessoa (quem recebe passa a ser a única que a edita; o histórico e os comentários acompanham). */
+async function doTransfer(it) {
+  let people;
+  try { people = (await api.get('/api/admin/users', { query: { status: 'active', limit: 200 } })).items || []; }
+  catch (e) { toastError(e, 'Não foi possível listar as pessoas.'); return; }
+  const options = people.filter((p) => p.id !== it.owner?.id).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || '', 'pt-BR')).map((p) => ({ value: p.id, label: `${p.displayName || 'Sem nome'} (${p.email})` }));
+  if (!options.length) { toast('Não há outra pessoa ativa para receber a apresentação.'); return; }
+  const toUserId = await chooseDialog({ title: 'Transferir propriedade', message: `“${it.title || 'Sem título'}” passará a pertencer à pessoa escolhida, que será a única a editá-la. O histórico de versões e os comentários acompanham a apresentação.`, options, confirmLabel: 'Transferir', selectLabel: 'Nova dona ou novo dono' });
+  if (!toUserId) return;
+  try {
+    const meta = await api.post(`/api/presentations/${it.id}/transfer`, { toUserId });
+    const who = people.find((p) => p.id === toUserId);
+    toast(`Apresentação transferida para ${who?.displayName || 'a pessoa escolhida'}.`, { kind: 'ok' });
+    if (meta && meta.owner) it.owner = meta.owner; else it.owner = { id: toUserId, displayName: who?.displayName || '' };
+    await load();
+  } catch (e) { toastError(e, 'Não foi possível transferir.'); }
+}
 async function doPurge(it) {
   const ok = await confirmDialog({ title: 'Apagar de vez?', message: `“${it.title || 'Sem título'}” será apagada definitivamente, com o histórico de versões e comentários. Isso não pode ser desfeito.`, confirmLabel: 'Apagar de vez', danger: true });
   if (!ok) return;

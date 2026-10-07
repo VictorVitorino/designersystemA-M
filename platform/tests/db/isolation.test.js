@@ -213,6 +213,19 @@ describe('usuários, convites, configurações e auditoria', () => {
     assert.equal((await call('s-1', other.email, true, true)).length, 1); // continua sendo o MESMO usuário (identidade não é sequestrada)
     assert.equal((await call('s-1', other.email, true, true))[0].user_id, inv.id);
   });
+  test('resolve_identity: uma SEGUNDA identidade (SSO) vincula ao MESMO usuário pelo e-mail verificado — conta, papel e apresentações preservados', async () => {
+    const u = await mkUser(ops, { status: 'active', name: 'Pessoa com SSO futuro' });
+    const sup = await db.anon((tx) => tx`select * from app.resolve_identity('supabase', 'sub-sup-1', ${u.email}, true, true, true)`); assert.equal(sup.length, 1); assert.equal(sup[0].user_id, u.id);
+    const pres = await db.asUser(u.id, (tx) => tx`insert into app.presentations(owner_id, title, content, content_hash, slide_count) values (${u.id}, 'Antes do SSO', '{"slides":[]}'::jsonb, ${'a'.repeat(64)}, 0) returning id`);
+    const sso = await db.anon((tx) => tx`select * from app.resolve_identity('sso:entra', 'oid-0001', ${u.email.toUpperCase()}, true, true, true)`);
+    assert.equal(sso.length, 1); assert.equal(sso[0].user_id, u.id, 'o SSO entra na MESMA conta (e-mail verificado, sem distinção de maiúsculas)'); assert.equal(sso[0].role, sup[0].role);
+    const ids = await ops.asSystem((tx) => tx`select provider, subject from app.user_identities where user_id = ${u.id} order by provider`);
+    assert.deepEqual(ids.map((r) => r.provider + ':' + r.subject), ['sso:entra:oid-0001', 'supabase:sub-sup-1']);
+    assert.equal((await db.asUser(u.id, (tx) => tx`select count(*)::int as n from app.presentations where owner_id = ${u.id}`))[0].n, 1, 'as apresentações continuam da mesma pessoa');
+    assert.equal((await db.anon((tx) => tx`select * from app.resolve_identity('sso:entra', 'oid-0001', '', false, false, false)`))[0].user_id, u.id, 'nas próximas entradas o SSO resolve direto pela identidade, sem e-mail');
+    assert.equal((await db.anon((tx) => tx`select * from app.resolve_identity('sso:entra', 'oid-9999', 'desconhecida@am.test', true, true, true)`)).length, 0, 'SSO de quem não foi convidado não cria conta');
+    void pres;
+  });
   test('resolve_identity: suspenso nunca entra — nem vincula identidade nova, nem é reativado ao logar', async () => {
     const never = await mkUser(ops, { status: 'suspended' });
     assert.equal((await db.anon((tx) => tx`select * from app.resolve_identity('supabase', 'susp-0', ${never.email}, true, true, true)`)).length, 0, 'suspenso sem identidade não vincula');

@@ -287,6 +287,11 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
         const np = { ...pr, id, title: String(body.title || `Cópia de ${pr.title}`).slice(0, 200), rev: 1, ownerId: user.id, updatedAt: now, createdAt: now, sourceId: pr.id, deleted: false };
         S.pres.unshift(np); audit(user.id, 'presentation.duplicate', 'presentation', id, { from: pr.id }); return send(res, 201, meta(np));
       }
+      if (sub === 'transfer' && m === 'POST') {
+        if (!isAdmin) return fail(res, 403, 'forbidden', 'Somente administradores.');
+        const to = S.users.get(String(body.toUserId || '')); if (!to || to.status !== 'active') return fail(res, 400, 'invalid_request', 'Pessoa inválida.', { fields: [{ path: 'toUserId', message: 'Escolha uma pessoa ativa.' }] });
+        pr.ownerId = to.id; pr.updatedAt = new Date().toISOString(); audit(user.id, 'presentation.transfer', 'presentation', pr.id, { to: to.id }); return send(res, 200, meta(pr));
+      }
       if (sub === 'share' && m === 'GET') { audit(user.id, 'presentation.share', 'presentation', pr.id); return send(res, 200, { url: `${origin}/visualizar/${pr.id}`, visibility: 'acervo' }); }
       if (sub === 'comments' && m === 'GET') {
         const items = S.comments.filter((c) => c.presentationId === pr.id && !c.deleted && (q.get('includeResolved') || !c.resolvedAt)).map((c) => commentOut(c, user, pr));
@@ -466,7 +471,7 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
     if (p === '/__test/refresh-fails') { S.refreshFails = url.searchParams.get('on') === '1'; return send(res, 200, { ok: true }); }
     if (p === '/__test/state') {
       return send(res, 200, { mockErrors: S.mockErrors || 0, refreshCount: S.refreshCount, csrfBlocked: S.csrfBlocked, requests: S.requests, created: S.created.map((c) => ({ id: c.id, source: c.source, hasDataUrl: /data:image\//.test(JSON.stringify(c.content || {})), content: c.content })), uploads: S.uploads, checks: S.checks || 0, forgot: S.forgot || [],
-        presentations: S.pres.map((x) => ({ id: x.id, title: x.title, ownerId: x.ownerId, deleted: x.deleted })), assets: S.assets.size, audit: S.audit.slice(0, 10).map((a) => a.action) });
+        presentations: S.pres.map((x) => ({ id: x.id, title: x.title, ownerId: x.ownerId, deleted: x.deleted })), users: [...S.users.values()].map((u) => ({ id: u.id, displayName: u.displayName, status: u.status })), assets: S.assets.size, audit: S.audit.slice(0, 10).map((a) => a.action) });
     }
     if (p === '/__test/more-users') { const n = Number(url.searchParams.get('n') || 60); for (let i = 0; i < n; i++) { const id = crypto.randomUUID(); S.users.set(id, { id, email: `extra${i}@am.test`, displayName: `Extra ${String(i).padStart(2, '0')}`, role: 'member', status: 'active', password: PASSWORD, createdAt: new Date(Date.now() - (100 + i) * 864e5).toISOString(), activatedAt: new Date().toISOString(), lastLoginAt: null }); } return send(res, 200, { ok: true }); }
     if (p === '/__test/clear-requests') { S.requests.length = 0; return send(res, 200, { ok: true }); }

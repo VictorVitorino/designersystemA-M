@@ -144,8 +144,8 @@ Admin → Usuários → **Convidar** (e-mail + nome + papel `membro` ou `adminis
 
 ## 11. Importar o acervo local existente
 
-1. Cada pessoa abre `https://canteiro.<seu-dominio>/importar` e seleciona os arquivos `.html` do Canteiro que já tem (ou arrasta a pasta). O navegador separa as imagens (que vão para o armazenamento, **sem duplicar**: o mesmo arquivo vira um só objeto) e cria as apresentações **no nome de quem importou**; tudo fica visível no acervo para os demais (somente leitura; para editar, **Criar cópia**).
-2. Importação em lote feita pela TI (acervo de uma pasta compartilhada): peça a lista dos arquivos aos donos e faça a importação **pela conta de cada dono** (ou de uma conta administrativa e depois **transfira** a propriedade: Admin → Apresentação → Transferir).
+1. Cada pessoa abre `https://canteiro.<seu-dominio>/importar` e seleciona os arquivos `.html` do Canteiro que já tem (ou arrasta a pasta: os `.json`/`.html` dentro dela são lidos). O navegador separa as imagens (que vão para o armazenamento, **sem duplicar**: o mesmo arquivo vira um só objeto) e cria as apresentações **no nome de quem importou**; tudo fica visível no acervo para os demais (somente leitura; para editar, **Criar cópia**).
+2. Importação em lote feita pela TI (acervo de uma pasta compartilhada): peça a lista dos arquivos aos donos e faça a importação **pela conta de cada dono** (ou de uma conta administrativa e depois **transfira** a propriedade: no acervo, menu “Mais ações” do cartão → “Transferir propriedade…” (só administradores; chama `POST /api/presentations/:id/transfer`)).
 3. Acompanhe: `node tools/maintenance.js stats` (número de apresentações e bytes) e a auditoria (`import.acervo`).
 4. ✔ Confirmado quando o número de apresentações bate com o esperado e um arquivo importado abre no editor sem imagens quebradas.
 
@@ -212,6 +212,7 @@ Admin → Usuários → **Convidar** (e-mail + nome + papel `membro` ou `adminis
 | `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | (Project Settings → General) | deploy-staging, deploy-production |
 | `PG_CLIENT_MAJOR` | `17` (versão do Postgres do Supabase) | deploy-*, backup |
 | `WARN_DB_GB`, `WARN_STORAGE_GB` | `6`, `800` | maintenance (alerta de tamanho) |
+| `BACKUP_INCLUDE_AUTH` | `1` | backup e deploy-production: inclui o esquema `auth` do Supabase (contas e identidades) no dump cifrado — recomendado `1` em produção |
 
 **Variáveis da Vercel (API)** — modelos completos em `infra/env/api.*.env.example`; contrato em `docs/API.md` §9. Opcional: `RATE_IP_MULTIPLIER` (padrão 25) — quantas vezes o limite por usuário cabe no mesmo IP antes do 429; aumente se mais de ~200 pessoas usarem a plataforma atrás de um único NAT.
 

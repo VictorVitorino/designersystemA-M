@@ -16,6 +16,8 @@ APP_ENV=local node tools/dev.js --admin voce@empresa.com --name "Seu Nome"
 ```
 
 Sobe o Postgres local, aplica as migrações, um GoTrue falso (login sem Supabase), o site e a API em `http://localhost:3000`, e imprime o link para você definir a senha do primeiro administrador.
+
+**Pré-requisitos** (máquina local e CI): Node 22; PostgreSQL 16 ou 17 (servidor local para `dev.js`/testes e cliente `pg_dump`/`psql` para backup); Python 3 (`build-web` monta o editor com `python3`); para as suítes: Chromium via Playwright (`npx playwright install chromium`), `pip install "moto[server]" python-pptx` (S3 falso dos testes de armazenamento/backup e abertura do `.pptx` exportado no E2E).
 Tudo o que é de produção (Supabase, Vercel, domínio, e-mail) está em [`docs/CONFIGURACAO.md`](docs/CONFIGURACAO.md), passo a passo.
 
 ## Mapa do repositório

@@ -191,7 +191,26 @@ async function addFiles(files) {
 input.addEventListener('change', async () => { await addFiles(input.files); input.value = ''; });
 for (const ev of ['dragenter', 'dragover']) dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add('is-over'); });
 for (const ev of ['dragleave', 'dragend']) dropzone.addEventListener(ev, () => dropzone.classList.remove('is-over'));
-dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('is-over'); addFiles(e.dataTransfer?.files || []); });
+/* Arrastar uma PASTA: percorre as entradas (FileSystemEntry) e recolhe os .json/.html de dentro; arquivos soltos seguem como antes. */
+async function filesFromDrop(dt) {
+  const items = dt?.items ? [...dt.items] : [];
+  const entries = items.map((it) => (typeof it.webkitGetAsEntry === 'function' ? it.webkitGetAsEntry() : null));
+  if (!entries.some((en) => en && en.isDirectory)) return dt?.files || [];
+  const out = [];
+  const walk = (entry) => new Promise((resolve) => {
+    if (!entry) return resolve();
+    if (entry.isFile) return entry.file((f) => { if (/\.(json|html?)$/i.test(f.name)) out.push(f); resolve(); }, () => resolve());
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readAll = () => reader.readEntries(async (ents) => { if (!ents.length) return resolve(); for (const en of ents) await walk(en); readAll(); }, () => resolve());
+      return readAll();
+    }
+    resolve();
+  });
+  for (const en of entries) await walk(en);
+  return out;
+}
+dropzone.addEventListener('drop', async (e) => { e.preventDefault(); dropzone.classList.remove('is-over'); addFiles(await filesFromDrop(e.dataTransfer)); });
 
 /* ───────── execução ───────── */
 const guard = (e) => { e.preventDefault(); e.returnValue = ''; };

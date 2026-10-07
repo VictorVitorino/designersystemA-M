@@ -421,6 +421,7 @@ async function acervoTests() {
   check('Lixeira: oferece "Restaurar" e a nota explica quem apaga de vez', (await page.locator('li.card [data-action=restore]').count()) === 1 && /administrador/.test(await page.innerText('#nota-lixeira')));
   await page.locator('li.card button[aria-haspopup=menu]').click();
   check('membro NÃO vê "Apagar de vez" na lixeira', (await page.getByRole('menuitem', { name: 'Apagar de vez' }).count()) === 0);
+  check('membro NÃO vê "Transferir propriedade…"', (await page.getByRole('menuitem', { name: 'Transferir propriedade…' }).count()) === 0);
   await page.keyboard.press('Escape');
   // permissões por cartão (dono × outro)
   await page.getByRole('tab', { name: 'Todas' }).click(); await page.waitForSelector(CARD);
@@ -554,6 +555,18 @@ async function acervoTests() {
   check('admin: "Editar" em TODOS os cartões (moderação); "Criar cópia" fica no menu', ap.every((p) => p.edit && !p.dup), ap.filter((p) => !p.edit).length);
   await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
   check('admin: menu de cartão alheio tem Excluir e Criar cópia', (await page.getByRole('menuitem', { name: 'Excluir' }).count()) === 1 && (await page.getByRole('menuitem', { name: 'Criar cópia' }).count()) === 1);
+  check('admin: menu oferece "Transferir propriedade…"', (await page.getByRole('menuitem', { name: 'Transferir propriedade…' }).count()) === 1);
+  await page.getByRole('menuitem', { name: 'Transferir propriedade…' }).click();
+  await page.waitForSelector('dialog.dlg select');
+  const optTexts = await page.$$eval('dialog.dlg select option', (os) => os.map((o) => o.textContent));
+  check('transferir: o diálogo lista só pessoas ativas, sem o dono atual (Caio)', optTexts.length >= 2 && !optTexts.some((t) => /Caio/.test(t)) && optTexts.some((t) => /Bia/.test(t)), optTexts);
+  await page.selectOption('dialog.dlg select', { label: optTexts.find((t) => /Bia/.test(t)) });
+  await page.click('dialog.dlg [data-act=confirm]');
+  await page.waitForFunction(() => [...document.querySelectorAll('li.card')].some((c) => /Banco Aurora/.test(c.textContent) && /Bia/.test(c.querySelector('.card__owner')?.textContent || '')), null, { timeout: 8000 }).catch(() => null);
+  const moved = (await mstate()).presentations.find((p) => p.title === 'Proposta Caio — Banco Aurora');
+  check('transferir: a API recebeu POST …/transfer e a dona do cartão passou a ser a Bia', moved && moved.ownerId === (await mstate()).users.find((u) => /Bia/.test(u.displayName))?.id && /Bia/.test(await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('.card__owner').innerText()), moved);
+  await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
+  check('admin: depois da transferência o menu continua coerente (Excluir presente)', (await page.getByRole('menuitem', { name: 'Excluir' }).count()) === 1);
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Lixeira' }).click(); await page.waitForFunction(() => document.querySelectorAll('li.card:not(.card--skel)').length === 2);
   check('admin: a lixeira mostra as de todos (2)', (await page.locator('li.card').count()) === 2);
