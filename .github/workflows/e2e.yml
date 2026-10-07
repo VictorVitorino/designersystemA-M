@@ -36,7 +36,8 @@ jobs:
       APP_ENV: test
       TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
       DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
-      # Versão FIXA do Playwright (sem "latest"). Ao subir a versão, atualize aqui e rode os testes.
+      # Versão FIXA do Playwright: vem do package-lock.json (devDependency exata). Ao subir a versão, mude os DOIS juntos
+      # (npm install --save-dev --save-exact playwright@X.Y.Z) e rode os testes; o passo abaixo reprova se divergirem.
       PLAYWRIGHT_VERSION: 1.63.0
     defaults:
       run:
@@ -57,8 +58,9 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Garantir o Playwright na versão fixa (se ainda não for devDependency)
-        run: npm ls playwright >/dev/null 2>&1 || npm install --no-save --no-package-lock "playwright@${PLAYWRIGHT_VERSION}"
+      - name: Conferir o Playwright instalado pelo lockfile (versão e integridade fixas)
+        run: |
+          node -e 'const v=require("playwright/package.json").version; if (v !== process.env.PLAYWRIGHT_VERSION) { console.error("::error::Playwright " + v + " veio do package-lock.json, mas o workflow espera " + process.env.PLAYWRIGHT_VERSION + " — atualize os dois juntos"); process.exit(1); } console.log("Playwright " + v + " (package-lock.json)")'
 
       - name: Instalar o Chromium e as bibliotecas do sistema
         run: npx playwright install --with-deps chromium
@@ -69,7 +71,7 @@ jobs:
       - name: Instalar python-pptx (o cenário 7 abre o .pptx exportado fora do navegador)
         run: python3 -m pip install --user --break-system-packages python-pptx==1.0.2 || python3 -m pip install --user python-pptx==1.0.2
 
-      - name: Suítes do cliente web (264 verificações) e do editor em nuvem (Chromium real, CSP estrita)
+      - name: Suítes do cliente web (269+ verificações) e do editor em nuvem (Chromium real, CSP estrita)
         run: node tests/web/web.test.js && node --test --test-concurrency=1 tests/cloud/cloud-core.test.js tests/cloud/editor-cloud.test.js
 
       - name: Executar os testes E2E

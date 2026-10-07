@@ -4,6 +4,7 @@
    • DATABASE_ADMIN_URL: conexão com um papel que pode criar papéis/schemas (Supabase: usuário `postgres`, conexão direta 5432).
    • Papéis (idempotente): app_owner (dono dos objetos), app_user e app_system (NOLOGIN; RLS), app_api (LOGIN da API; APP_API_DB_PASSWORD), app_ops (LOGIN de ferramentas/jobs; APP_OPS_DB_PASSWORD).
    • --check: não altera nada; falha se houver migração pendente ou arquivo alterado depois de aplicado.
+   • public.schema_migrations fica FECHADA: RLS ligada e nenhum privilégio para PUBLIC, anon/authenticated/service_role (Supabase) nem papéis da aplicação.
    Cada migração roda numa transação. Arquivos aplicados nunca podem mudar (checksum): crie uma migração nova. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,6 +39,24 @@ export async function bootstrapRoles(sql, { apiPassword, opsPassword = process.e
   await sql.unsafe(`grant create on database "${db.replace(/"/g, '""')}" to app_owner`);
 }
 const lit = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+
+/** Papéis que NUNCA podem acessar o controle de migrações: os do Supabase (Data API) e os da própria aplicação. */
+export const SCHEMA_MIGRATIONS_LOCKED_FROM = ['anon', 'authenticated', 'service_role', 'app_api', 'app_user', 'app_system', 'app_ops'];
+/** Fecha public.schema_migrations (achado PUB-05): no Supabase ela nasceria com ALL para anon/authenticated (privilégios padrão do schema public)
+ *  e sem RLS — com a Data API ligada, quem tem a chave pública poderia ler ou apagar o controle e travar o próximo deploy.
+ *  Liga a RLS (sem políticas: só o DONO, que roda migrate/backup/verify, acessa) e revoga tudo de PUBLIC e desses papéis, se existirem.
+ *  Idempotente; roda em todo migrate e depois de toda restauração (restore.js). A API não lê esta tabela (src/routes/health.js). */
+export async function lockSchemaMigrations(sql) {
+  await sql.unsafe(`do $$
+    declare r text;
+    begin
+      alter table public.schema_migrations enable row level security;
+      revoke all on table public.schema_migrations from public;
+      foreach r in array array[${SCHEMA_MIGRATIONS_LOCKED_FROM.map(lit).join(', ')}] loop
+        if exists (select 1 from pg_roles where rolname = r) then execute format('revoke all on table public.schema_migrations from %I', r); end if;
+      end loop;
+    end $$;`);
+}
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 export function listMigrations() {
@@ -53,6 +72,7 @@ export async function migrate(url, { check = false, roles = true, apiPassword = 
     await sql`select pg_advisory_lock(${LOCK_KEY})`;
     if (roles && !check) await bootstrapRoles(sql, { apiPassword, opsPassword });
     await sql.unsafe(`create table if not exists public.schema_migrations (version text primary key, name text not null, checksum text not null, applied_at timestamptz not null default now())`);
+    if (!check) await lockSchemaMigrations(sql);
     const done = new Map((await sql`select version, name, checksum from public.schema_migrations`).map((r) => [r.version, r]));
     const all = listMigrations(); const pending = []; let drift = 0;
     for (const m of all) {
