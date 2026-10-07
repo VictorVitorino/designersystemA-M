@@ -5,6 +5,7 @@
 
    Uso:  node tools/parity.cjs --a <original.html> --b <candidato.html> --out <pasta> [--groups anims,gallery,models,structure] [--no-frames] [--quick]
                                [--deck <pasta de uma execução anterior>] [--only 12,57,300]   (reutiliza o deck de prova; compara só esses índices)
+                               [--resume]   (continua uma execução interrompida: lê <out>/progress.jsonl e <out>/deck-prova.json; cada slide é gravado ao terminar)
 
    Como funciona
    1. Abre A e B no MESMO Chromium (--disable-lcd-text, viewport 1280×720), fontes do Google roteadas para ../fonts2 (sem rede),
@@ -41,7 +42,9 @@ const ACAO = { 'Access-Control-Allow-Origin': '*' };
 const FRAME_T = QUICK ? [0, 400, 1500] : [0, 150, 400, 800, 1500, 3000];
 const TR_T = QUICK ? [250] : [80, 250, 500];
 const FIXED_TIME = Date.UTC(2026, 9, 6, 12, 0, 0);
-fs.rmSync(path.join(OUT, 'diff'), { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, 'diff'), { recursive: true });
+const RESUME = !!args.resume; if (RESUME && !args.deck) args.deck = OUT;   /* --resume: continua uma execução interrompida (mesmo deck de prova, mesmos builds), a partir de <out>/progress.jsonl */
+if (!RESUME) fs.rmSync(path.join(OUT, 'diff'), { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, 'diff'), { recursive: true });
+const PROG = path.join(OUT, 'progress.jsonl');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const log = (...m) => console.error(new Date().toISOString().slice(11, 19), ...m);
@@ -239,8 +242,8 @@ async function framesOf(p, i, times, attempt = 1) {
     await pauseAll(p, t);
     if (t > prev) await p.clock.runFor(t - prev); prev = t;
     await settleAnims(p); await pinAll(p, t);
-    const el = await p.$('#presenter .amp-view'); const png = await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' });
-    const bar = await p.$('#presenter .amp-bar'); const barPng = bar ? await stableShot(bar, { type: 'png', animations: 'allow', caret: 'hide' }) : null;
+    const el = await p.$('#presenter .amp-view'); const png = await el.screenshot({ type: 'png', animations: 'allow', caret: 'hide' });
+    const bar = await p.$('#presenter .amp-bar'); const barPng = bar ? await bar.screenshot({ type: 'png', animations: 'allow', caret: 'hide' }) : null;
     out.push({ t, png, barPng });
   }
   await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
@@ -314,6 +317,7 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     deckJson = await A.p.evaluate(() => JSON.stringify(AMStudio.deck));
   }
   fs.writeFileSync(path.join(OUT, 'deck-prova.json'), deckJson); fs.writeFileSync(path.join(OUT, 'tags.json'), JSON.stringify(tags));
+  if (!RESUME) fs.writeFileSync(PROG, '');
   report.deck = { slides: JSON.parse(deckJson).slides.length, bytes: deckJson.length, tags: tags.length, notApplied: tags.filter((t) => t.applied === false).length, notInserted: tags.filter((t) => t.inserted === 0).length, buildErrors: tags.filter((t) => t.err) };
   log('deck de prova:', JSON.stringify({ slides: report.deck.slides, bytes: report.deck.bytes, notApplied: report.deck.notApplied, notInserted: report.deck.notInserted, errs: report.deck.buildErrors.length }));
 
@@ -365,8 +369,15 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     return { row, mism, noise, files, n };
   }
   const idx = [...Array(N).keys()].filter((i) => !ONLY || ONLY.has(i)); report.only = ONLY ? idx : null;
+  const done = new Map();
+  if (RESUME && fs.existsSync(PROG)) { for (const line of fs.readFileSync(PROG, 'utf8').split('\n')) { if (!line.trim()) continue; try { const rec = JSON.parse(line); if (rec.deckSha === sha(deckJson).slice(0, 16)) done.set(rec.i, rec); } catch (e) { } } log('retomando: ' + done.size + ' slides já comparados nesta pasta (progress.jsonl)'); report.resumedFrom = done.size; }
   for (let k = 0; k < idx.length; k++) {
     const i = idx[k]; const tag = byIndex[i] || { it: 'slide:' + i, kind: 'outro', name: '' };
+    if (done.has(i)) {
+      const rec = done.get(i); report.mismatches.push(...rec.mism); report.noise.push(...rec.noise); report.slides.push(rec.row); if (rec.unstable) { report.unstable.push(rec.unstable); unstable++; } if (rec.row.retried || rec.row.unstableFirstCapture) retried++;
+      domSame += rec.n.dom; rasterSame += rec.n.raster; framesSame += rec.n.frames; framesTotal += rec.n.framesTotal; trSame += rec.n.tr; trTotal += rec.n.trTotal; idOnly += rec.n.idOnly; barChecks += rec.n.barChecks; barAntialias += rec.n.barAntialias; framesNoise += rec.n.framesNoise; trNoise += rec.n.trNoise;
+      continue;
+    }
     let r = await compareSlide(i, tag, 1);
     if (r.mism.length) {
       /* Divergência na 1ª captura → recaptura imediata, UMA vez, com faixa própria do relógio. Uma diferença REAL entre A e B (CSS/JS/DOM
@@ -380,6 +391,7 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     }
     for (const [name, buf] of r.files) wr(name, buf);
     report.mismatches.push(...r.mism); report.noise.push(...r.noise); report.slides.push(r.row);
+    fs.appendFileSync(PROG, JSON.stringify({ i, deckSha: sha(deckJson).slice(0, 16), row: r.row, mism: r.mism, noise: r.noise, n: r.n, unstable: r.row.unstableFirstCapture ? report.unstable[report.unstable.length - 1] : null }) + '\n');   /* cada slide fica gravado: uma interrupção não perde o trabalho (--resume) */
     domSame += r.n.dom; rasterSame += r.n.raster; framesSame += r.n.frames; framesTotal += r.n.framesTotal; trSame += r.n.tr; trTotal += r.n.trTotal; idOnly += r.n.idOnly; barChecks += r.n.barChecks; barAntialias += r.n.barAntialias; framesNoise += r.n.framesNoise; trNoise += r.n.trNoise;
     if (k % 25 === 0 || k === idx.length - 1) log(`slide ${i + 1}/${N}${ONLY ? ' (' + (k + 1) + '/' + idx.length + ')' : ''} · dom ${domSame} · raster ${rasterSame} · quadros ${framesSame}/${framesTotal} · transições ${trSame}/${trTotal} · divergências ${report.mismatches.length} · recapturas ${retried} (instáveis ${unstable})`);
   }
