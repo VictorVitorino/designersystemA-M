@@ -30,7 +30,7 @@ describe('cota por pessoa (1 MB neste teste)', () => {
     const second = await pngOf(600); const puts = env.calls.put;
     const r = await putRaw(A, second);
     assert.equal(r.status, 413, r.text); assert.equal(r.json.error.code, 'quota_exceeded');
-    assert.match(r.json.error.message, /limite é de 1 MB por pessoa/); assert.match(r.json.error.message, /administrador/);
+    assert.match(r.json.error.message, /limite é de 1 MB por pessoa e você já usa 0,6 MB/); assert.match(r.json.error.message, /administrador/);
     assert.deepEqual(Object.keys(r.json.error.details).sort(), ['fileBytes', 'quotaBytes', 'usedBytes']); assert.equal(r.json.error.details.quotaBytes, 1048576); assert.equal(r.json.error.details.usedBytes, first.length);
     assert.equal(env.calls.put, puts, 'os bytes não foram gravados');
     assert.equal((await env.sys((tx) => tx`select count(*)::int n from app.assets where sha256 = ${sha256Hex(second)}`))[0].n, 0, 'nem o registro pendente ficou');

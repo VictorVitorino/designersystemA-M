@@ -72,7 +72,6 @@ export function assetsRoutes(deps) {
       (deduplicação) não conta. Trava consultiva por pessoa na MESMA transação do registro: dois envios simultâneos não passam juntos do limite.
       `sha`/`size` = o arquivo novo (fica fora da soma, que pode já conter o próprio registro pendente). */
   const quota = config.storage.quotaUserBytes || 0;
-  const mb = (n) => Math.max(1, Math.ceil(n / 1048576));
   async function assertQuota(tx, userId, { sha, size }) {
     if (!quota) return;
     await tx`select pg_advisory_xact_lock(hashtextextended(${'cota|' + userId}, 0))`;
@@ -80,7 +79,7 @@ export function assetsRoutes(deps) {
         where uploaded_by = ${userId}::uuid and status in ('ready', 'pending') and sha256 <> ${sha}`;   // RLS assets_select: a pessoa vê o que enviou
     const used = Number(u.used);
     if (used + size > quota) {
-      throw E.quotaExceeded(`Seu espaço de armazenamento acabou: o limite é de ${mb(quota)} MB por pessoa e você já usa ${mb(used)} MB. Imagens que nenhuma apresentação usa mais são liberadas automaticamente em alguns dias; se precisar de espaço agora, fale com um administrador.`,
+      throw E.quotaExceeded(`Seu espaço de armazenamento acabou: o limite é de ${fmtMb(quota)} por pessoa e você já usa ${fmtMb(used)}. Imagens que nenhuma apresentação usa mais são liberadas automaticamente em alguns dias; se precisar de espaço agora, fale com um administrador.`,
         { quotaBytes: quota, usedBytes: used, fileBytes: size });
     }
   }
