@@ -10,7 +10,7 @@ Como rodar um workflow: GitHub → **Actions** → nome do workflow na lista da 
 ## Etapa 1 — Staging (um ensaio completo, sem dados reais)
 
 1. **Supabase:** *New project* → organização da A&M → nome `canteiro-staging`, região **South America (São Paulo)**, senha do banco = a do cofre ("Canteiro staging — senha do banco"), *Compute* **Micro**.
-2. **GitHub:** crie os ambientes e as regras (`docs/CONFIGURACAO.md` §3) e cole os valores do **repositório** (4) e do ambiente **`staging`** (10) — `docs/CHAVES.md`.
+2. **GitHub:** crie os ambientes e as regras (`docs/CONFIGURACAO.md` §3) e cole, conforme `docs/CHAVES.md`, os valores do **repositório** — `PRODUCTION_URL`, `STAGING_URL` e o token temporário `SUPABASE_ACCESS_TOKEN` (o `R2_ACCOUNT_ID` entra na etapa 2) — e os 10 do ambiente **`staging`**.
 3. **Actions → Configurar Supabase** → ambiente `staging` → Run. Configura login (sem cadastro aberto, senha ≥ 12, convites em português, e-mail pelo Resend, endereços de retorno — inclusive o do login corporativo), arquivos privados, banco e confere **relendo tudo**. O resumo termina com a **tabela de DNS do e-mail**: envie-a à TI.
 4. **Actions → Configurar Vercel** → `staging` → Run. Cria/ajusta o projeto (região São Paulo, Node 22, ambiente `staging`), grava as variáveis da API (segredos como *Sensitive*) e o domínio; o resumo traz o **registro de DNS do site** (CNAME de `staging.canteiro…`): envie à TI.
 5. **TI cria os registros de DNS** (e-mail e site). Pronto quando: no Resend o domínio fica **Verified** e na Vercel o domínio fica **Valid Configuration** (minutos a algumas horas). Rode o **Configurar Supabase** (staging) de novo: a linha do e-mail passa a "domínio verificado".
@@ -39,7 +39,7 @@ Algo falhou? Anote o item, o horário e o que apareceu na tela, e peça a corre�
 
 1. **Supabase:** *New project* → `canteiro-prod`, **South America (São Paulo)**, senha do cofre ("Canteiro produção — senha do banco"), *Compute* **Small**.
 2. **Cloudflare R2:** *Create bucket* → nome `canteiro-backup` (local automático). Crie os **dois tokens** (escrita e só leitura) como em `docs/CHAVES.md`.
-3. **GitHub:** cole os valores do ambiente **`production-ops`** (13) e **`monitoring`** (2).
+3. **GitHub:** cole o `R2_ACCOUNT_ID` (variável do repositório) e os valores dos ambientes **`production-ops`** (13) e **`monitoring`** (2).
 4. **Actions → Configurar Supabase** → `production`; depois **Actions → Configurar Vercel** → `production`. Envie à TI o DNS do site de produção (`canteiro.<dominio>`; o do e-mail já existe desde o staging). Espere o domínio ficar **Valid Configuration** na Vercel.
 5. **Publique a versão 1.0.0** — é assim que se aprova a produção: GitHub → **Releases → Draft a new release → Choose a tag** → digite `v1.0.0` → **Create new tag: v1.0.0 on publish** → *Target* `main` → título "Canteiro 1.0.0" → **Publish release**. O **Deploy produção** começa sozinho: espera o CI, passa pelo portão (só versões `v*`), faz o **backup obrigatório** (cifrado e relido), aplica as migrações, confere banco e login, publica e confere o site. Acompanhe em Actions.
 6. **Ligue a produção:** variável do repositório `PRODUCTION_ENABLED = true` (monitor do GitHub e manutenção semanal).
