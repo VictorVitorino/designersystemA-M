@@ -2,6 +2,8 @@
    Layout no destino:
      db/<nome>.dump.enc            dump do banco (pg_dump -Fc) cifrado
      db/<nome>.authdata.enc        (opcional) dados de auth.users/auth.identities do Supabase Auth, cifrados
+     db/<nome>.refs.enc            lista (SHA-256 por linha, gzip, cifrada) dos arquivos que o banco daquele backup referencia — é o que
+                                   permite podar o espelho com segurança (um arquivo só sai do espelho quando nenhum backup retido precisa dele)
      db/<nome>.manifest.json       manifesto (SHA-256, tamanhos, contagens, versão do esquema…) com MAC; existe SÓ se o backup terminou
      objects/a/xx/yy/<sha>.enc     espelho cifrado dos arquivos
      status/objects-last-run.json  relatório do último espelho
@@ -14,6 +16,7 @@ export const backupName = (env, d = new Date()) => `canteiro-${String(env).toLow
 export const dumpKey = (name) => `db/${name}.dump.enc`;
 export const manifestKey = (name) => `db/${name}.manifest.json`;
 export const authKey = (name) => `db/${name}.authdata.enc`;   // dados do Supabase Auth (opcional; BACKUP_INCLUDE_AUTH=1)
+export const refsKey = (name) => `db/${name}.refs.enc`;       // arquivos referenciados pelo banco deste backup (para a poda segura do espelho)
 export const STATUS_OBJECTS = 'status/objects-last-run.json';
 
 export function parseName(name) { const m = NAME_RE.exec(name); return m ? { env: m[1], at: parseUtcStamp(m[2]) } : null; }

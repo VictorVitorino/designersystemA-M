@@ -2,7 +2,9 @@
 # docs/MONITORAMENTO.md), porque o agendamento do GitHub pode atrasar alguns minutos e pausa em repositórios sem atividade por 60 dias.
 # Sonda de hora em hora (e não a cada 5 min): em repositório PRIVADO cada execução consome minutos do plano (GitHub Pro: 3.000/mês);
 # de 5 em 5 min seriam ~8.600 minutos/mês só nesta sonda. A checagem frequente é papel do monitor externo.
-# O frescor do backup só roda quando o backup estiver configurado (variável do repositório BACKUP_ENABLED=true).
+# Cada endereço só é sondado depois de LIGADO (variáveis do repositório PRODUCTION_ENABLED=true / STAGING_ENABLED=true): antes disso as URLs
+# já existem (os assistentes de configuração usam), mas o site ainda não está no ar. O frescor do backup só roda com BACKUP_ENABLED=true.
+# Se o domínio estiver atrás da proteção da Vercel, o segredo do repositório VERCEL_AUTOMATION_BYPASS_SECRET vai no cabeçalho x-vercel-protection-bypass.
 # Falha → abre (ou atualiza) uma issue "Indisponibilidade" e termina com erro (o GitHub avisa por e-mail quem acompanha o repositório).
 name: Uptime
 
@@ -23,29 +25,34 @@ concurrency:
 jobs:
   disponibilidade:
     name: /api/health e /api/ready (produção e staging)
-    if: github.event.schedule != '17 */4 * * *'
+    # só depois de ligar um dos ambientes (antes disso não gasta minutos do plano); manual sempre roda
+    if: github.event.schedule != '17 */4 * * *' && (vars.PRODUCTION_ENABLED == 'true' || vars.STAGING_ENABLED == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
-      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-      STAGING_URL: ${{ vars.STAGING_URL }}
+      # manual ("Run workflow") sonda o que estiver configurado; agendado, só o que já foi ligado
+      PRODUCTION_URL: ${{ (vars.PRODUCTION_ENABLED == 'true' || github.event_name == 'workflow_dispatch') && vars.PRODUCTION_URL || '' }}
+      STAGING_URL: ${{ (vars.STAGING_ENABLED == 'true' || github.event_name == 'workflow_dispatch') && vars.STAGING_URL || '' }}
     steps:
       - name: Consultar os endereços
         id: sonda
         continue-on-error: true
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           falhas=""; total=0
+          extra=(); if [ -n "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then extra=(-H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET"); fi
           for par in "produção|$PRODUCTION_URL" "staging|$STAGING_URL"; do
             nome="${par%%|*}"; url="${par#*|}"
-            [ -n "$url" ] || { echo "variável de $nome não definida: pulando"; continue; }
+            [ -n "$url" ] || { echo "$nome ainda não ligado (ou variável não definida): pulando"; continue; }
             for caminho in /api/health /api/ready; do
               total=$((total+1))
-              codigo="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 5 --retry-all-errors "${url%/}${caminho}" || echo 000)"
+              codigo="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 5 --retry-all-errors "${extra[@]}" "${url%/}${caminho}" || echo 000)"
               echo "$nome $caminho -> $codigo"
               [ "$codigo" = "200" ] || falhas="${falhas}- ${nome} ${url%/}${caminho} respondeu ${codigo}"$'\n'
             done
           done
-          [ "$total" -gt 0 ] || { echo "::warning::nenhuma URL configurada (variáveis PRODUCTION_URL/STAGING_URL)"; exit 0; }
+          [ "$total" -gt 0 ] || { echo "::notice::nenhum endereço ligado ainda (variáveis PRODUCTION_ENABLED/STAGING_ENABLED): nada a sondar"; exit 0; }
           if [ -n "$falhas" ]; then { echo "falhas<<EOF"; printf '%s' "$falhas"; echo "EOF"; } >> "$GITHUB_OUTPUT"; exit 1; fi
 
       - name: Abrir ou atualizar a issue "Indisponibilidade"
@@ -56,7 +63,7 @@ jobs:
         with:
           script: |
             const titulo = 'Indisponibilidade';
-            const corpo = `Detectado em ${new Date().toISOString()} (execução ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}):\n\n${process.env.FALHAS}\nRoteiro: docs/OPERACAO.md → "Login fora do ar" / "Banco cheio".`;
+            const corpo = `Detectado em ${new Date().toISOString()} (execução ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}):\n\n${process.env.FALHAS}\nRoteiro: docs/OPERACAO.md → "Login fora do ar" / "Banco cheio". HTTP 401 em staging: o domínio está atrás da proteção da Vercel (docs/CHAVES.md → VERCEL_AUTOMATION_BYPASS_SECRET).`;
             const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
             const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
             if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
@@ -82,7 +89,11 @@ jobs:
     if: vars.BACKUP_ENABLED == 'true' && (github.event.schedule == '17 */4 * * *' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: monitoring        # ambiente só com credencial de LEITURA do bucket de backup
+    environment: monitoring        # ambiente só com o token de LEITURA do R2 (sem a chave de criptografia)
+    env:
+      AMBIENTE: production
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
     steps:
       - name: Baixar o código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,14 +116,11 @@ jobs:
         continue-on-error: true
         working-directory: platform
         env:
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
         run: |
           set +e
-          saida="$(node tools/maintenance.js backup-freshness --max-hours 26 2>&1)"; codigo=$?
+          saida="$(node tools/chaves.js exec --precisa backup-leitura -- node tools/maintenance.js backup-freshness --max-hours 26 2>&1)"; codigo=$?
           echo "$saida"
           if [ "$codigo" -ne 0 ]; then { echo "relatorio<<EOF"; echo "$saida"; echo "EOF"; } >> "$GITHUB_OUTPUT"; exit 1; fi
 
@@ -129,6 +137,17 @@ jobs:
             const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
             if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
             else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
+
+      - name: Fechar a issue "Backup desatualizado" quando voltar ao normal
+        if: steps.fresco.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            for (const i of abertas.filter((x) => x.title === 'Backup desatualizado' && !x.pull_request)) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, body: `Backup em dia em ${new Date().toISOString()}. Fechando automaticamente.` });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, state: 'closed', state_reason: 'completed' });
+            }
 
       - name: Terminar com erro se o backup estiver velho
         if: steps.fresco.outcome == 'failure'

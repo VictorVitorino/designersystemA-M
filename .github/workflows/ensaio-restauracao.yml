@@ -1,0 +1,168 @@
+# Ensaio de restauração (achado F8: a restauração só tinha sido ensaiada localmente, com dados sintéticos). Mensal e manual.
+# Dentro do runner: baixa o backup MAIS RECENTE do R2, sobe um Postgres DESCARTÁVEL da MESMA versão do servidor (container), restaura,
+# roda migrate --check e verify-deploy (offline), confere contagens e amostras de linhas de todas as tabelas contra o manifesto,
+# baixa e confere (SHA-256) uma amostra de arquivos do espelho cifrado e a integridade das contas do login — e publica o relatório.
+# Nada de produção é tocado: só LEITURA do bucket de backup. Agendado só com o backup ligado (BACKUP_ENABLED=true); manual sempre roda.
+# Falha → issue "Falha no ensaio de restauração" (fecha sozinha no próximo ensaio aprovado).
+name: Ensaio de restauração
+
+on:
+  schedule:
+    - cron: '40 6 3 * *'      # dia 3 de cada mês, 06:40 UTC (03:40 em Brasília), depois do backup do dia
+  workflow_dispatch:
+    inputs:
+      backup:
+        description: 'Nome do backup (vazio = o mais recente)'
+        required: false
+        type: string
+        default: ''
+      amostra:
+        description: 'Quantos arquivos baixar e conferir'
+        required: false
+        type: string
+        default: '50'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ensaio-restauracao
+  cancel-in-progress: false
+
+jobs:
+  ensaio:
+    name: Restaurar o backup num Postgres descartável e conferir
+    if: vars.BACKUP_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    environment: production-ops      # só usa a LEITURA do bucket de backup e a chave de criptografia
+    env:
+      AMBIENTE: production
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+      NOME_BACKUP: ${{ inputs.backup }}
+      AMOSTRA: ${{ inputs.amostra || '50' }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção (ferramentas)
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Conferir as chaves do backup
+        id: chaves
+        continue-on-error: true
+        working-directory: platform
+        env:
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js conferir --precisa backup --resumo "$GITHUB_STEP_SUMMARY"
+
+      - name: Qual backup e qual versão do Postgres
+        id: info
+        if: steps.chaves.outcome == 'success'
+        continue-on-error: true
+        working-directory: platform
+        env:
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          args=(info --github-output "$GITHUB_OUTPUT"); if [ -n "$NOME_BACKUP" ]; then args+=(--name "$NOME_BACKUP"); fi
+          node tools/chaves.js exec --precisa backup -- node tools/restore-rehearsal.js "${args[@]}"
+
+      - name: Subir um Postgres descartável da mesma versão do backup (container dentro do runner)
+        id: pg
+        if: steps.info.outcome == 'success'
+        continue-on-error: true
+        env:
+          PG_MAJOR: ${{ steps.info.outputs.pg_major }}
+        run: |
+          case "$PG_MAJOR" in ''|*[!0-9]*) echo "::error::versão do Postgres do backup desconhecida: '$PG_MAJOR'"; exit 1;; esac
+          docker run -d --name ensaio-pg -e POSTGRES_PASSWORD=ensaio-descartavel -e POSTGRES_DB=canteiro_ensaio -p 127.0.0.1:55432:5432 "postgres:${PG_MAJOR}"
+          # pronto de verdade = aceita conexão TCP (durante a inicialização o servidor temporário só escuta no socket local)
+          for _ in $(seq 1 60); do docker exec ensaio-pg pg_isready -h 127.0.0.1 -U postgres -d canteiro_ensaio >/dev/null 2>&1 && break; sleep 2; done
+          docker exec ensaio-pg pg_isready -h 127.0.0.1 -U postgres -d canteiro_ensaio
+          echo "PG_CLIENT_MAJOR=$PG_MAJOR" >> "$GITHUB_ENV"
+
+      - name: Instalar o cliente PostgreSQL (mesma versão do backup)
+        id: cliente
+        if: steps.pg.outcome == 'success'
+        continue-on-error: true
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -q
+          sudo apt-get install -y -q "postgresql-client-${PG_CLIENT_MAJOR}"
+          echo "PG_BIN_DIR=/usr/lib/postgresql/${PG_CLIENT_MAJOR}/bin" >> "$GITHUB_ENV"
+
+      - name: Ensaiar (baixar, restaurar, migrate --check, verify-deploy offline, contagens, amostra de arquivos, contas do login)
+        id: ensaio
+        if: steps.cliente.outcome == 'success'
+        continue-on-error: true
+        working-directory: platform
+        env:
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          args=(run --to "postgres://postgres:ensaio-descartavel@127.0.0.1:55432/canteiro_ensaio" --amostra "$AMOSTRA" --relatorio "$RUNNER_TEMP/ensaio-restauracao.md" --json "$RUNNER_TEMP/ensaio-restauracao.json")
+          if [ -n "$NOME_BACKUP" ]; then args+=(--name "$NOME_BACKUP"); fi
+          node tools/chaves.js exec --precisa backup -- node tools/restore-rehearsal.js "${args[@]}"
+
+      - name: Publicar o relatório no resumo
+        if: always()
+        run: |
+          if [ -s "$RUNNER_TEMP/ensaio-restauracao.md" ]; then cat "$RUNNER_TEMP/ensaio-restauracao.md" >> "$GITHUB_STEP_SUMMARY"
+          else echo "## Ensaio de restauração não chegou a rodar — veja o primeiro passo com erro acima" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Guardar o relatório (90 dias)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ensaio-restauracao-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ensaio-restauracao.md
+            ${{ runner.temp }}/ensaio-restauracao.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Abrir ou atualizar a issue "Falha no ensaio de restauração"
+        if: steps.ensaio.outcome != 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const titulo = 'Falha no ensaio de restauração';
+            const corpo = `O ensaio de restauração NÃO foi aprovado em ${new Date().toISOString()}. Relatório no resumo da execução: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRoteiro: docs/BACKUP-E-RESTAURACAO.md → "Ensaio mensal". Enquanto não houver ensaio aprovado, trate os backups como NÃO comprovados.`;
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
+            if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
+            else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
+
+      - name: Fechar a issue quando o ensaio for aprovado
+        if: steps.ensaio.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            for (const i of abertas.filter((x) => x.title === 'Falha no ensaio de restauração' && !x.pull_request)) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, body: `Ensaio aprovado em ${new Date().toISOString()}. Fechando automaticamente.` });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, state: 'closed', state_reason: 'completed' });
+            }
+
+      - name: Terminar com erro se o ensaio não foi aprovado
+        if: steps.ensaio.outcome != 'success'
+        run: exit 1
