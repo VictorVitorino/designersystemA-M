@@ -9,10 +9,15 @@
      canonicalJSON(valor)                     → string (chaves ordenadas recursivamente, sem espaços; igual a src/lib/canonical.js)
      dataUrlToBytes(dataUrl)                  → { mime, bytes:Uint8Array }
      bytesToDataUrl(bytes, mime)              → string
+     rasterizeForeignImages(deck, opts)       → Promise<deck>   (SVG/BMP/AVIF/ICO… viram PNG antes de externalizar; opts.rasterize, opts.cache, opts.stats)
+     browserRasterize(dataUrl)                → Promise<data:image/png | null>   (só no navegador: Image + canvas)
      externalizeDeck(deck, opts)              → Promise<{ content, stats:{found, uploaded, deduplicated, bytes, unique, placeholders} }>
      hydrateDeck(content, opts)               → Promise<deck>   (opts.stats recebe {found, fetched, cached, missing:[sha]}; também em deck.hydration, não enumerável)
      extractDeckFromHtml(htmlText)            → deck | null
      parseAcervoJson(text)                    → [{ id, title, deck }]
+     switchLocalUser(userId)                  → true se apagou os dados locais de quem usou antes (computador compartilhado)
+     pendingLocalCount()                      → Promise<n>  (alterações e respostas da fila local que ainda não chegaram ao servidor)
+     clearLocalData()                         → Promise     (apaga os dados locais da nuvem: "Sair")
    Referências de imagem: "asset:sha256:<64 hex>". Imagens que não puderam ser baixadas ao hidratar viram um SVG de aviso que carrega o hash
    no próprio data URL (parâmetro ;am-missing=<sha>): ao externalizar de novo, voltam a ser "asset:sha256:<sha>" (nada se perde por uma falha
    de rede passageira) — o SVG nunca sobe ao servidor (o servidor recusa data:image/svg+xml). */
@@ -163,6 +168,54 @@
     });
   }
 
+  /* ---------------- imagens em formatos que o servidor não guarda ---------------- */
+  /* O servidor só aceita PNG, JPEG, WebP e GIF (e recusa data:image/svg+xml). O editor aceita qualquer imagem que o navegador desenhe
+     (SVG, BMP, AVIF, ICO…): antes de externalizar, cada string INTEIRA data:image/<outro tipo> (src, bgImg…) é desenhada e vira PNG.
+     opts: { rasterize(dataUrl) → Promise<data URL png|jpeg|webp|gif | null>, cache?:Map(original → convertido), stats?:{} → {found, converted, failed} }.
+     O deck de entrada nunca é alterado (sem nada a converter, devolve o próprio deck). O que não puder ser convertido fica como está:
+     o servidor recusa e quem chamou mostra onde. O aviso de imagem ausente (am-missing) não é tocado: ele volta a ser asset:sha256 ao externalizar. */
+  var FOREIGN_RE = /^data:image\/(?!(?:png|jpeg|webp|gif)[;,])[\w.+-]+[;,]/i, OK_IMG = /^data:image\/(?:png|jpeg|webp|gif);base64,/;
+  function isForeignImage(s) { return typeof s === 'string' && s.length > 20 && FOREIGN_RE.test(s) && s.indexOf('am-missing=') < 0; }
+  function rasterizeForeignImages(deck, opts) {
+    opts = opts || {};
+    var fn = opts.rasterize, cache = opts.cache || new Map(), found = new Set(), out = new Map();
+    eachString(deck, function (s) { if (isForeignImage(s)) found.add(s); });
+    var urls = Array.from(found);
+    return pool(typeof fn === 'function' ? urls : [], 2, function (u) {
+      if (cache.has(u)) { out.set(u, cache.get(u)); return null; }
+      return Promise.resolve().then(function () { return fn(u); }).then(function (r) {
+        if (typeof r === 'string' && OK_IMG.test(r)) { out.set(u, r); cache.set(u, r); if (cache.size > 48) cache.delete(cache.keys().next().value); }
+      }, function () { /* não convertida: fica como está */ });
+    }).then(function () {
+      var st = { found: urls.length, converted: out.size, failed: urls.length - out.size };
+      if (opts.stats && typeof opts.stats === 'object') Object.assign(opts.stats, st);
+      return out.size ? mapStrings(deck, function (s) { return out.has(s) ? out.get(s) : s; }) : deck;
+    });
+  }
+  /* desenho no navegador: SVG com o maior lado em 1920 px (nítido em tela cheia; sem tamanho próprio, usa o viewBox); as demais no tamanho natural, até 1920 px */
+  function svgBox(u) {
+    try { var t = new TextDecoder().decode(dataUrlToBytes(u).bytes), m = /viewBox\s*=\s*["']\s*[-\d.e]+[\s,]+[-\d.e]+[\s,]+([\d.e]+)[\s,]+([\d.e]+)/i.exec(t); return m && +m[1] > 0 && +m[2] > 0 ? [+m[1], +m[2]] : null; } catch (e) { return null; }
+  }
+  function browserRasterize(dataUrl) {
+    if (typeof document === 'undefined' || typeof Image === 'undefined') return Promise.resolve(null);
+    return new Promise(function (res) {
+      var img = new Image(), done = false, t = setTimeout(function () { fin(null); }, 15000);
+      function fin(v) { if (!done) { done = true; clearTimeout(t); res(v); } }
+      img.onload = function () {
+        try {
+          var svg = /^data:image\/svg/i.test(dataUrl), w = img.naturalWidth, hh = img.naturalHeight, M = 1920;
+          if (svg) { var vb = svgBox(dataUrl); if (vb && (!w || !hh || Math.abs(w / hh - vb[0] / vb[1]) > 0.02)) { w = vb[0]; hh = vb[1]; } }
+          if (!w || !hh) { w = M; hh = M; }
+          var k = svg ? M / Math.max(w, hh) : Math.min(1, M / Math.max(w, hh)), cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(hh * k));
+          var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch; cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+          fin(cv.toDataURL('image/png'));
+        } catch (e) { fin(null); }
+      };
+      img.onerror = function () { fin(null); };
+      img.src = dataUrl;
+    });
+  }
+
   /* ---------------- externalizar ---------------- */
   /* opts: { api:{check(shas)→faltantes, put(sha, bytes, mime, kind)}, onProgress?, maxConcurrent=4, cache?:Map, kind='image', dropMissing?:boolean }
      cache (Map): string do data URL → {sha, mime, size}; 'known:<sha>' → true quando o servidor já confirmou o arquivo.
@@ -301,9 +354,47 @@
     return out;
   }
 
+  /* ---------------- dados locais da nuvem (computador compartilhado) ---------------- */
+  /* O editor em nuvem guarda neste navegador: a fila do que não chegou ao servidor (IndexedDB "canteiro-cloud"), respostas/quadros/votos
+     (amForm./amBoard./amVote.), notas do player (amPlayer.), kits e preferências (amStudio.) e quem usou por último (amCloud.user).
+     O editor e as páginas usam estas funções: outra pessoa entrou → o que é de quem usou antes sai; "Sair" → tudo sai. */
+  var PERSON_KEYS = /^(?:amForm|amBoard|amVote|amPlayer|amStudio)\./, CLOUD_KEYS = /^(?:amForm|amBoard|amVote|amPlayer|amStudio|amCloud)\.|^am\.import\./;
+  function webStore(k) { try { return root[k] || null; } catch (e) { return null; } }
+  function dropKeys(st, re) { try { for (var i = st.length - 1; i >= 0; i--) { var k = st.key(i); if (k && re.test(k)) st.removeItem(k); } } catch (e) { } }
+  function switchLocalUser(id) {
+    var L = webStore('localStorage'), prev = null; if (!L || !id) return false;
+    try { prev = L.getItem('amCloud.user'); } catch (e) { }
+    if (prev === id) return false;
+    if (prev) dropKeys(L, PERSON_KEYS);
+    try { L.setItem('amCloud.user', id); } catch (e) { }
+    return !!prev;
+  }
+  /* abre só um banco que JÁ existe (a criação de um vazio é abortada) */
+  function openExisting(name) {
+    return new Promise(function (res) {
+      try { var r = root.indexedDB.open(name); r.onupgradeneeded = function () { try { r.transaction.abort(); } catch (e) { } }; r.onsuccess = function () { res(r.result); }; r.onerror = r.onblocked = function () { res(null); }; }
+      catch (e) { res(null); }
+    });
+  }
+  function pendingLocalCount() {
+    if (!root.indexedDB) return Promise.resolve(0);
+    return openExisting('canteiro-cloud').then(function (db) {
+      if (!db) return 0;
+      var count = function (n) { return new Promise(function (res) { try { if (!db.objectStoreNames.contains(n)) return res(0); var q = db.transaction(n).objectStore(n).count(); q.onsuccess = function () { res(q.result || 0); }; q.onerror = function () { res(0); }; } catch (e) { res(0); } }); };
+      return Promise.all([count('pending'), count('outbox')]).then(function (a) { db.close(); return a[0] + a[1]; });
+    });
+  }
+  function deleteDb(name) { return new Promise(function (res) { try { var r = root.indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; setTimeout(res, 2000); } catch (e) { res(); } }); }
+  function clearLocalData() {
+    ['localStorage', 'sessionStorage'].forEach(function (k) { var st = webStore(k); if (st) dropKeys(st, CLOUD_KEYS); });
+    return root.indexedDB ? Promise.all(['canteiro-cloud', 'canteiro'].map(deleteDb)) : Promise.resolve();   /* "canteiro" = Minhas obras do editor original nesta origem */
+  }
+
   var api = {
     sha256Hex: sha256Hex, canonicalJSON: canonicalJSON, dataUrlToBytes: dataUrlToBytes, bytesToDataUrl: bytesToDataUrl,
     externalizeDeck: externalizeDeck, hydrateDeck: hydrateDeck, extractDeckFromHtml: extractDeckFromHtml, parseAcervoJson: parseAcervoJson,
+    rasterizeForeignImages: rasterizeForeignImages, browserRasterize: browserRasterize, isForeignImage: isForeignImage,
+    switchLocalUser: switchLocalUser, pendingLocalCount: pendingLocalCount, clearLocalData: clearLocalData,
     placeholderDataUrl: placeholderDataUrl, sniffMime: sniffMime, isAssetSha: function (s) { return HEX64.test(String(s)); },
     IMG_RE_SOURCE: IMG_RE.source, GRAY_PNG: GRAY_PNG, version: 1
   };

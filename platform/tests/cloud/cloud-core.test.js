@@ -289,3 +289,50 @@ test('externalizeDeck: imagem acima de maxBytes passa por shrink (recompressão)
   const r3 = await cc.externalizeDeck(deck, { api: f.api, cache, maxBytes: 10000, shrink });
   assert.equal(r3.stats.uploaded, 1); assert.equal(f.store.get(shrunkPut.sha).bytes.length, 4000);
 });
+
+test('rasterizeForeignImages: SVG, BMP, AVIF e ICO viram PNG antes de externalizar; PNG/JPEG/WebP/GIF e o aviso am-missing não mudam; a entrada não muda', async () => {
+  const svg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>').toString('base64');
+  const bmp = 'data:image/bmp;base64,Qk0' + 'A'.repeat(40), avif = 'data:image/avif;base64,AAAA' + 'B'.repeat(40), ico = 'data:image/x-icon;base64,AAAB' + 'C'.repeat(40);
+  const keep = png(100, 5), missing = cc.placeholderDataUrl('a'.repeat(64)), utf8svg = 'data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E';
+  const deck = { v: 1, slides: [{ id: 's1', bgImg: svg, els: [{ id: 'a', type: 'image', src: svg }, { id: 'b', type: 'image', src: bmp }, { id: 'c', type: 'image', src: avif }, { id: 'd', type: 'image', src: ico }, { id: 'e', type: 'image', src: keep }, { id: 'f', type: 'image', src: missing }, { id: 'g', type: 'image', src: utf8svg }, { id: 'h', type: 'text', html: 'texto com data:image/svg+xml no meio' }] }] };
+  const before = JSON.stringify(deck), calls = [], cache = new Map(), st = {};
+  const fake = async (u) => { calls.push(u.slice(0, 20)); return png(60, calls.length); };
+  const out = await cc.rasterizeForeignImages(deck, { rasterize: fake, cache, stats: st });
+  assert.equal(JSON.stringify(deck), before, 'a entrada não muda');
+  const els = out.slides[0].els;
+  for (const k of [0, 1, 2, 3, 6]) assert.match(els[k].src, /^data:image\/png;base64,/, 'convertida: ' + els[k].id);
+  assert.match(out.slides[0].bgImg, /^data:image\/png;base64,/);
+  assert.equal(els[4].src, keep); assert.equal(els[5].src, missing); assert.equal(els[7].html, deck.slides[0].els[7].html);
+  assert.equal(calls.length, 5, 'cada imagem diferente é desenhada uma vez (o SVG repetido no fundo reaproveita)');
+  assert.deepEqual(st, { found: 5, converted: 5, failed: 0 });
+  /* segundo salvamento: cache, nada é desenhado de novo */
+  await cc.rasterizeForeignImages(deck, { rasterize: fake, cache }); assert.equal(calls.length, 5);
+  /* o que não pôde ser desenhado fica como está (o servidor recusa e o editor mostra o slide) */
+  const st2 = {}, out2 = await cc.rasterizeForeignImages({ slides: [{ els: [{ src: 'data:image/tiff;base64,SUkqAAgAAAA=AAAA' }] }] }, { rasterize: async () => null, stats: st2 });
+  assert.equal(out2.slides[0].els[0].src, 'data:image/tiff;base64,SUkqAAgAAAA=AAAA'); assert.deepEqual(st2, { found: 1, converted: 0, failed: 1 });
+  /* sem nada a converter, devolve o próprio deck (sem copiar decks grandes à toa) */
+  const plain = { slides: [{ els: [{ src: keep }] }] }; assert.equal(await cc.rasterizeForeignImages(plain, { rasterize: fake }), plain);
+  /* e depois externaliza normalmente: só asset:sha256 no conteúdo */
+  const f = fakeApi(), ext = await cc.externalizeDeck(out, { api: f.api });
+  assert.ok(ext.content.slides[0].els.slice(0, 7).every((e) => /^asset:sha256:[0-9a-f]{64}$/.test(e.src)) && /^asset:sha256:/.test(ext.content.slides[0].bgImg), 'imagens (convertidas, originais e o aviso) viram asset:sha256');
+  assert.equal(ext.content.slides[0].els[0].src.slice(0, 13), 'asset:sha256:'); assert.equal(ext.content.slides[0].els[5].src, 'asset:sha256:' + 'a'.repeat(64));
+  assert.equal(cc.isForeignImage(svg), true); assert.equal(cc.isForeignImage(keep), false); assert.equal(cc.isForeignImage(missing), false);
+  assert.equal(await cc.browserRasterize(svg), null, 'em Node (sem DOM) o desenho não existe: devolve null');
+});
+
+test('dados locais da nuvem: outra pessoa → apaga respostas/votos/notas/preferências de quem usou antes; "Sair" apaga tudo da nuvem e nada mais', async () => {
+  const mk = (init) => { const m = new Map(Object.entries(init)); return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), keys: () => [...m.keys()].sort() }; };
+  const L = mk({ 'amForm.p.e': '1', 'amBoard.p.e': '1', 'amVote.p.e': '1', 'amPlayer.notes:p': '1', 'amStudio.brandKits': '[]', 'amCloud.user': 'A', 'outra.chave': 'fica', 'canteiro.obrasOrdem': 'name' });
+  const SS = mk({ 'am.import.done': '{}', 'outra': 'fica' });
+  globalThis.localStorage = L; globalThis.sessionStorage = SS;
+  try {
+    assert.equal(cc.switchLocalUser('A'), false, 'mesma pessoa: nada muda'); assert.equal(L.length, 8);
+    assert.equal(cc.switchLocalUser('B'), true, 'outra pessoa: apaga o que era de A');
+    assert.deepEqual(L.keys(), ['amCloud.user', 'canteiro.obrasOrdem', 'outra.chave']); assert.equal(L.getItem('amCloud.user'), 'B');
+    L.setItem('amForm.p.x', '1'); assert.equal(cc.switchLocalUser('B'), false);
+    assert.equal(await cc.pendingLocalCount(), 0, 'sem IndexedDB (Node): 0');
+    await cc.clearLocalData();
+    assert.deepEqual(L.keys(), ['canteiro.obrasOrdem', 'outra.chave'], 'Sair: só as chaves da nuvem saem'); assert.deepEqual(SS.keys(), ['outra']);
+    const N = mk({}); globalThis.localStorage = N; assert.equal(cc.switchLocalUser('C'), false, 'primeiro uso: só marca quem está'); assert.equal(N.getItem('amCloud.user'), 'C');
+  } finally { delete globalThis.localStorage; delete globalThis.sessionStorage; }
+});

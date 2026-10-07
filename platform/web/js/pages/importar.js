@@ -218,7 +218,9 @@ const guard = (e) => { e.preventDefault(); e.returnValue = ''; };
 async function importOne(it) {
   it.status = 'running'; it.msg = 'Preparando imagens…'; it.progress = null; it.stats = null;
   updateItem(it);
-  const { content, stats } = await core.externalizeDeck(it.deck, {
+  /* SVG, BMP, AVIF, ICO… (o servidor só guarda PNG, JPEG, WebP e GIF) viram PNG no navegador antes de subir */
+  const deck = typeof core.rasterizeForeignImages === 'function' ? await core.rasterizeForeignImages(it.deck, { rasterize: core.browserRasterize }) : it.deck;
+  const { content, stats } = await core.externalizeDeck(deck, {
     api: assetApi, cache: state.cache, maxConcurrent: 4, maxBytes: SHRINK_TARGET, shrink: shrinkImage,
     onProgress: (info) => {
       if (!info) return;
