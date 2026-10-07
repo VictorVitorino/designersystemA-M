@@ -66,12 +66,14 @@ test('deploy-production: manual+tags, ambiente production (revisores), backup AN
   assert.ok(order.every((i) => i >= 0), `passos ausentes: ${order}`); assert.deepEqual([...order].sort((a, b) => a - b), order, 'ordem dos passos');
   assert.match(text, /rollback/i); assert.match(text, /if: failure\(\)/);
 });
-test('uptime.yml: a cada 5 min, health e ready de produção e staging, issue "Indisponibilidade", exit≠0 e frescor do backup', () => {
+test('uptime.yml: de hora em hora (repositório privado; a checagem a cada 3 min é do monitor externo), health e ready de produção e staging, issue "Indisponibilidade", exit≠0 e frescor do backup só com BACKUP_ENABLED', () => {
   const text = read(path.join(WF, 'uptime.yml'));
-  assert.match(text, /cron: '\*\/5 \* \* \* \*'/); assert.match(text, /\/api\/health/); assert.match(text, /\/api\/ready/); assert.match(text, /PRODUCTION_URL/); assert.match(text, /STAGING_URL/); assert.match(text, /titulo = 'Indisponibilidade'/); assert.match(text, /run: exit 1/); assert.match(text, /backup-freshness --max-hours 26/); assert.match(text, /issues: write/);
+  assert.match(text, /cron: '7 \* \* \* \*'/); assert.doesNotMatch(text, /cron: '\*\/5 /, 'de 5 em 5 min gastaria ~8.600 min/mês do plano em repositório privado');
+  assert.match(text, /cron: '17 \*\/4 \* \* \*'/); assert.match(text, /if: vars\.BACKUP_ENABLED == 'true' && \(github\.event\.schedule == '17 \*\/4 \* \* \*'/);
+  assert.match(text, /\/api\/health/); assert.match(text, /\/api\/ready/); assert.match(text, /PRODUCTION_URL/); assert.match(text, /STAGING_URL/); assert.match(text, /titulo = 'Indisponibilidade'/); assert.match(text, /run: exit 1/); assert.match(text, /backup-freshness --max-hours 26/); assert.match(text, /issues: write/);
 });
 test('backup.yml: diário 05:15 UTC, backup all, poda só depois de verificado, falha abre issue e sai com erro', () => {
-  const text = read(path.join(WF, 'backup.yml')); assert.match(text, /cron: '15 5 \* \* \*'/); assert.match(text, /backup\.js all/); assert.match(text, /prune --apply/); assert.match(text, /steps\.backup\.outcome == 'success'/); assert.match(text, /Falha no backup/); assert.match(text, /environment: production-ops/);
+  const text = read(path.join(WF, 'backup.yml')); assert.match(text, /cron: '15 5 \* \* \*'/); assert.match(text, /if: vars\.BACKUP_ENABLED == 'true' \|\| github\.event_name == 'workflow_dispatch'/, 'agendado só com o backup configurado; manual sempre'); assert.match(text, /backup\.js all/); assert.match(text, /prune --apply/); assert.match(text, /steps\.backup\.outcome == 'success'/); assert.match(text, /Falha no backup/); assert.match(text, /environment: production-ops/);
 });
 test('maintenance.yml: semanal; GC só relatório no cron e apagar só por dispatch + confirmação + ambiente production', (t) => {
   const text = read(path.join(WF, 'maintenance.yml')); assert.match(text, /cron: '30 4 \* \* 0'/); assert.match(text, /purge-expired/); assert.match(text, /prune-versions/); assert.match(text, /audit-retention/);
