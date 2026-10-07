@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.resolve(HERE, '../../web');
+const MODELOS = path.join(WEB, 'assets', 'modelos');   // miniaturas reais (1º slide dos projetos prontos) usadas como capas no acervo simulado
 const BRAND = path.resolve(HERE, '../../../am/brand');
 const REAL_CORE = path.resolve(HERE, '../../studio-cloud/cloud-core.js');
 const STUB_CORE = path.join(HERE, 'cloud-core-stub.js');
@@ -24,6 +25,22 @@ export const TOKENS = { invite: 'tok-invite-eva-0123456789abcdef', recovery: 'to
 export const XSS_NAME = '<img src=x onerror="window.__xss=1">Mallory';
 export const XSS_TITLE = '<img src=x onerror="window.__xss=2"> Título perigoso';
 export const XSS_COMMENT = '<script>window.__xss=3</script><img src=x onerror="window.__xss=4"> comentário';
+export const XSS_ANSWER = '<img src=x onerror="window.__xss=5"> resposta com HTML';
+export const XSS_NOTE = '<script>window.__xss=6</script> revisão em pares';
+export const VOTE_OPTS = ['Automação do intake', 'Portal do cliente', 'Torre de controle'];
+const INTER_KINDS = ['form_response', 'board_state', 'vote_state', 'view', 'reaction'];
+const ELEMENT_RE = /^[\w.:-]{1,80}$/;
+
+/* CSV de interações no MESMO formato do servidor (src/lib/csv.js): BOM, separador ';', CRLF e apóstrofo antes de = + - @ (anti CSV-injection). */
+const cellText = (v) => (v == null ? '' : typeof v === 'string' ? v : Array.isArray(v) ? v.map(cellText).join('; ') : typeof v === 'object' ? JSON.stringify(v) : String(v));
+function csvCell(v) { let s = cellText(v).replace(/\u0000/g, ''); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function interactionsCsv(kind, items) {
+  const line = (cells) => cells.map(csvCell).join(';');
+  if (kind !== 'form_response') return `﻿${[line(['Data/hora (UTC)', 'Respondente', 'Tipo', 'Elemento', 'Conteúdo (JSON)']), ...items.map((i) => line([i.createdAt, i.userName, i.kind, i.elementId, JSON.stringify(i.payload ?? {})]))].join('\r\n')}\r\n`;
+  const cols = []; const rows = items.map((it) => { const q = Array.isArray(it.payload?.q) ? it.payload.q : []; const a = Array.isArray(it.payload?.a) ? it.payload.a : []; const cells = new Map();
+    q.forEach((qq, i) => { const name = cellText(qq).trim() || `Pergunta ${i + 1}`; if (!cols.includes(name)) cols.push(name); cells.set(name, a[i]); }); return { it, cells }; });
+  return `﻿${[line(['Data/hora (UTC)', 'Respondente', 'Elemento', ...cols]), ...rows.map(({ it, cells }) => line([it.createdAt, it.userName, it.elementId, ...cols.map((c) => (cells.has(c) ? cells.get(c) : ''))]))].join('\r\n')}\r\n`;
+}
 
 /* ───────── PNGs reais (mínimos) para testar o envio de imagens ───────── */
 function crc32(buf) { let c, crc = 0xffffffff; for (let n = 0; n < buf.length; n++) { c = (crc ^ buf[n]) & 0xff; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; } return (crc ^ 0xffffffff) >>> 0; }
@@ -60,7 +77,8 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
       [IDS.eva, mkUser(IDS.eva, 'eva@am.test', 'Eva Convidada', 'member', 'invited', { password: null })],
       [IDS.mallory, mkUser(IDS.mallory, 'mallory@am.test', XSS_NAME, 'member', 'active')],
     ]);
-    const png = [makePng(0, 42, 70), makePng(247, 140, 22), makePng(126, 161, 195)];
+    const real = (n) => { try { return fs.readFileSync(path.join(MODELOS, `modelo-${n}.png`)); } catch { return null; } };
+    const png = [makePng(0, 42, 70), real(4) || makePng(247, 140, 22), real(3) || makePng(126, 161, 195)];
     const assets = new Map(); // sha -> {bytes, mime}
     for (const b of png) assets.set(sha256(b), { bytes: b, mime: 'image/png', size: b.length, owners: new Set() });
     const thumbs = [...assets.keys()];
@@ -81,6 +99,26 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
     named(4, { title: 'Rascunho excluído da Bia', ownerId: IDS.bia, id: uuidN('22222222', 5), deleted: true });
     named(5, { title: 'Rascunho excluído do Caio', ownerId: IDS.caio, id: uuidN('22222222', 6), deleted: true });
     pres.forEach((p) => { p.content = { v: 1, app: 'AM Studio', id: p.id, title: p.title, slides: Array.from({ length: p.slideCount }, (_, k) => ({ id: `s${k}`, els: [] })) }; });
+    // "Plano estratégico 2027 (Bia)": formulário (slide 2), votação (slide 3) e quadro de post-its (slide 4) com participações de várias pessoas
+    const plano = pres[0];
+    plano.content.slides[1].els.push({ id: 'frm1', type: 'fx', kind: 'form', data: { title: 'Pesquisa de satisfação', qs: 'Nota geral = 1-5\nO que podemos melhorar? = texto longo' } });
+    plano.content.slides[2].els.push({ id: 'vot1', type: 'fx', kind: 'vote', data: { title: 'Priorização', opts: VOTE_OPTS.join('\n'), pts: 3 } });
+    plano.content.slides[3].els.push({ id: 'brd1', type: 'fx', kind: 'board', data: { title: 'Retrospectiva', cols: 'Começar\nParar\nContinuar', notes: [{ c: 0, t: 'Reunião semanal de 15 min', k: 'y' }] } });
+    const ago = (min) => new Date(now - min * 60e3).toISOString();
+    const FQ = ['Nota geral', 'O que podemos melhorar?'];
+    const inter = [
+      { kind: 'form_response', elementId: 'frm1', userId: IDS.caio, payload: { at: '07/10/2026 09:12', q: FQ, a: ['5', 'Mais exemplos práticos do setor.'] }, createdAt: ago(300) },
+      { kind: 'form_response', elementId: 'frm1', userId: IDS.mallory, payload: { at: '07/10/2026 09:20', q: FQ, a: ['4', XSS_ANSWER] }, createdAt: ago(280) },
+      { kind: 'form_response', elementId: 'frm1', userId: IDS.admin, payload: { at: '07/10/2026 10:02', q: FQ, a: ['3', '=SOMA(1;2) cronograma mais detalhado'] }, createdAt: ago(240) },
+      { kind: 'vote_state', elementId: 'vot1', userId: IDS.caio, payload: { v: 1, q: VOTE_OPTS, rows: [{ at: '07/10/2026 10:30', a: [2, 1, 0] }] }, createdAt: ago(200) },
+      { kind: 'vote_state', elementId: 'vot1', userId: IDS.mallory, payload: { v: 1, q: VOTE_OPTS, rows: [{ at: '07/10/2026 10:31', a: [0, 1, 2] }] }, createdAt: ago(190) },
+      { kind: 'vote_state', elementId: 'vot1', userId: IDS.bia, payload: { v: 1, q: VOTE_OPTS, rows: [{ at: '07/10/2026 10:32', a: [1, 1, 1] }, { at: '07/10/2026 10:33', a: [3, 0, 0] }] }, createdAt: ago(180) },
+      { kind: 'board_state', elementId: 'brd1', userId: IDS.caio, payload: { v: 1, notes: [{ id: 'n1', c: 0, t: 'Reunião semanal de 15 min', k: 'y' }, { id: 'n2', c: 1, t: 'Relatórios em PDF por e-mail', k: 'p' }] }, createdAt: ago(150) },
+      { kind: 'board_state', elementId: 'brd1', userId: IDS.mallory, payload: { v: 1, notes: [{ id: 'n3', c: 0, t: 'Reunião semanal de 15 min', k: 'y' }, { id: 'n4', c: 2, t: XSS_NOTE, k: 'g' }] }, createdAt: ago(140) },
+      // na apresentação do Caio (elemento que já saiu do conteúdo), respostas da Bia e da Ana: a Bia (membro) só vê e apaga a própria; o dono e o admin veem tudo
+      { kind: 'form_response', elementId: 'frm9', presentationId: pres[1].id, userId: IDS.bia, payload: { at: '07/10/2026 11:00', q: ['Comentário'], a: ['Ótima proposta'] }, createdAt: ago(100) },
+      { kind: 'form_response', elementId: 'frm9', presentationId: pres[1].id, userId: IDS.admin, payload: { at: '07/10/2026 11:05', q: ['Comentário'], a: ['Revisar o cronograma'] }, createdAt: ago(90) },
+    ].map((x, i) => ({ id: uuidN('44444444', i + 1), presentationId: plano.id, updatedAt: x.createdAt, ...x }));
     const comments = [
       { id: uuidN('33333333', 1), presentationId: uuidN('22222222', 1), slideIndex: 2, authorId: IDS.caio, body: 'Rever o gráfico de receita no slide 3.', createdAt: new Date(now - 7200e3).toISOString(), resolvedAt: null, deleted: false },
       { id: uuidN('33333333', 2), presentationId: uuidN('22222222', 1), slideIndex: null, authorId: IDS.bia, body: 'Obrigada! Ajustado.', createdAt: new Date(now - 3600e3).toISOString(), resolvedAt: new Date(now - 1800e3).toISOString(), deleted: false },
@@ -96,7 +134,7 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
       ['acervo.visibility', { value: 'all_members', updatedAt: null }], ['versions.keep_last', { value: 50, updatedAt: null }], ['versions.keep_daily_days', { value: 90, updatedAt: null }],
       ['uploads.max_bytes', { value: 104857600, updatedAt: null }], ['invites.ttl_days', { value: 7, updatedAt: null }],
     ]);
-    S = { users, pres, comments, audit, settings, assets, thumbs, png, at: new Map(), rt: new Map(), linkTokens: new Map(), requests: [], refreshCount: 0, refreshFails: false, csrfBlocked: 0, auditSeq: 2000, created: [], uploads: [], loginFails: new Map(), invites: new Map([[uuidN('99999999', 1), { id: uuidN('99999999', 1), email: 'eva@am.test', userId: IDS.eva, status: 'pending', expiresAt: new Date(now + 5 * 864e5).toISOString(), resent: 0 }]]) };
+    S = { users, pres, comments, inter, audit, settings, assets, thumbs, png, at: new Map(), rt: new Map(), linkTokens: new Map(), requests: [], refreshCount: 0, refreshFails: false, csrfBlocked: 0, auditSeq: 2000, created: [], uploads: [], loginFails: new Map(), invites: new Map([[uuidN('99999999', 1), { id: uuidN('99999999', 1), email: 'eva@am.test', userId: IDS.eva, status: 'pending', expiresAt: new Date(now + 5 * 864e5).toISOString(), resent: 0 }]]) };
     S.linkTokens.set(TOKENS.invite, { type: 'invite', userId: IDS.eva, used: false });
     S.linkTokens.set(TOKENS.recovery, { type: 'recovery', userId: IDS.bia, used: false });
     RL.clear();
@@ -265,7 +303,7 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
       const title = String(body.title || content?.title || 'Apresentação sem título').slice(0, 200);
       const slides = content?.slides?.length ?? 1;
       const np = { id, title, slideCount: slides, rev: 1, ownerId: user.id, updatedAt: now, createdAt: now, thumbSha: null, sourceId: null, deleted: false, content: content || { v: 1, title, slides: [{ id: 's1', els: [] }] } };
-      S.pres.unshift(np); S.created.push({ id, source: body.source || 'new', content }); audit(user.id, 'presentation.create', 'presentation', id, { source: body.source || 'new' });
+      S.pres.unshift(np); S.created.push({ id, source: body.source || 'new', title: body.title ?? null, content }); audit(user.id, 'presentation.create', 'presentation', id, { source: body.source || 'new' });
       return send(res, 201, { ...meta(np) });
     }
     let mt = p.match(/^\/api\/presentations\/([0-9a-f-]{36})(?:\/(.*))?$/);
@@ -302,6 +340,40 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
         if (!b || b.length > 2000) return fail(res, 400, 'invalid_request', 'Comentário inválido.', { fields: [{ path: 'body', message: 'Entre 1 e 2000 caracteres.' }] });
         const c = { id: crypto.randomUUID(), presentationId: pr.id, slideIndex: Number.isInteger(body.slideIndex) ? body.slideIndex : null, authorId: user.id, body: b, createdAt: new Date().toISOString(), resolvedAt: null, deleted: false };
         S.comments.push(c); audit(user.id, 'comment.create', 'comment', c.id); return send(res, 201, commentOut(c, user, pr));
+      }
+      /* ---- interações (docs/API.md §6 + DELETE do contrato): dono/admin veem e apagam tudo; os demais, só as próprias ---- */
+      if (sub === 'interactions' || sub === 'interactions.csv') {
+        const kind = q.get('kind') || ''; const el = q.get('elementId') || '';
+        if (kind && !INTER_KINDS.includes(kind)) return fail(res, 400, 'invalid_request', 'Dados inválidos.', { fields: [{ path: 'kind', message: 'Tipo inválido.' }] });
+        if (el && !ELEMENT_RE.test(el)) return fail(res, 400, 'invalid_request', 'Dados inválidos.', { fields: [{ path: 'elementId', message: 'Identificador do elemento inválido.' }] });
+        const mine = (x) => canEdit || x.userId === user.id;
+        const match = (x) => x.presentationId === pr.id && mine(x) && (!kind || x.kind === kind) && (!el || x.elementId === el);
+        if (sub === 'interactions' && m === 'GET') {
+          const items = S.inter.filter(match).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((x) => ({ id: x.id, kind: x.kind, elementId: x.elementId, payload: x.payload, createdAt: x.createdAt, updatedAt: x.updatedAt, author: owner(x.userId), user: owner(x.userId) }));
+          return send(res, 200, { items, truncated: false });
+        }
+        if (sub === 'interactions.csv' && m === 'GET') {
+          if (!canEdit) return fail(res, 403, 'forbidden', 'Somente o dono da apresentação e os administradores exportam as respostas.');
+          const k = kind || 'form_response';
+          const rows = S.inter.filter((x) => x.presentationId === pr.id && x.kind === k && (!el || x.elementId === el)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+          audit(user.id, 'interactions.export', 'presentation', pr.id, { kind: k, rows: rows.length });
+          return send(res, 200, interactionsCsv(k, rows.map((x) => ({ ...x, userName: owner(x.userId).displayName }))), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${k === 'form_response' ? 'respostas' : k}-${pr.id.slice(0, 8)}.csv"`, 'Cache-Control': 'private, no-store' });
+        }
+        if (sub === 'interactions' && m === 'DELETE') {
+          if (!ELEMENT_RE.test(el)) return fail(res, 400, 'invalid_request', 'Informe o elemento (elementId).', { fields: [{ path: 'elementId', message: 'Identificador do elemento inválido.' }] });
+          const gone = S.inter.filter(match);
+          S.inter = S.inter.filter((x) => !gone.includes(x));
+          audit(user.id, 'interactions.delete', 'presentation', pr.id, { elementId: el, kind: kind || null, deleted: gone.length });
+          return send(res, 200, { deleted: gone.length });
+        }
+        if (sub === 'interactions' && m === 'POST') {
+          if (!INTER_KINDS.includes(body.kind) || !(body.elementId === '' ? body.kind === 'view' : ELEMENT_RE.test(String(body.elementId || ''))) || !body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) return fail(res, 400, 'invalid_request', 'Dados inválidos.');
+          const now2 = new Date().toISOString();
+          const prev = ['board_state', 'vote_state'].includes(body.kind) && S.inter.find((x) => x.presentationId === pr.id && x.userId === user.id && x.kind === body.kind && x.elementId === body.elementId);
+          if (prev) { prev.payload = body.payload; prev.updatedAt = now2; return send(res, 200, { id: prev.id, kind: prev.kind, elementId: prev.elementId, createdAt: prev.createdAt, updatedAt: now2 }); }
+          const x = { id: crypto.randomUUID(), presentationId: pr.id, userId: user.id, kind: body.kind, elementId: body.elementId, payload: body.payload, createdAt: now2, updatedAt: now2 };
+          S.inter.push(x); return send(res, 201, { id: x.id, kind: x.kind, elementId: x.elementId, createdAt: now2, updatedAt: now2 });
+        }
       }
       return fail(res, 404, 'not_found', 'Rota não encontrada.');
     }
@@ -470,7 +542,8 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
     if (p === '/__test/kill-sessions') { S.at.clear(); S.rt.clear(); return send(res, 200, { ok: true }); }
     if (p === '/__test/refresh-fails') { S.refreshFails = url.searchParams.get('on') === '1'; return send(res, 200, { ok: true }); }
     if (p === '/__test/state') {
-      return send(res, 200, { mockErrors: S.mockErrors || 0, refreshCount: S.refreshCount, csrfBlocked: S.csrfBlocked, requests: S.requests, created: S.created.map((c) => ({ id: c.id, source: c.source, hasDataUrl: /data:image\//.test(JSON.stringify(c.content || {})), content: c.content })), uploads: S.uploads, checks: S.checks || 0, forgot: S.forgot || [],
+      return send(res, 200, { mockErrors: S.mockErrors || 0, refreshCount: S.refreshCount, csrfBlocked: S.csrfBlocked, requests: S.requests, created: S.created.map((c) => ({ id: c.id, source: c.source, title: c.title, hasDataUrl: /data:image\//.test(JSON.stringify(c.content || {})), content: c.content })), uploads: S.uploads, checks: S.checks || 0, forgot: S.forgot || [],
+        interactions: S.inter.map((x) => ({ id: x.id, presentationId: x.presentationId, kind: x.kind, elementId: x.elementId, userId: x.userId })),
         presentations: S.pres.map((x) => ({ id: x.id, title: x.title, ownerId: x.ownerId, deleted: x.deleted })), users: [...S.users.values()].map((u) => ({ id: u.id, displayName: u.displayName, status: u.status })), assets: S.assets.size, audit: S.audit.slice(0, 10).map((a) => a.action) });
     }
     if (p === '/__test/more-users') { const n = Number(url.searchParams.get('n') || 60); for (let i = 0; i < n; i++) { const id = crypto.randomUUID(); S.users.set(id, { id, email: `extra${i}@am.test`, displayName: `Extra ${String(i).padStart(2, '0')}`, role: 'member', status: 'active', password: PASSWORD, createdAt: new Date(Date.now() - (100 + i) * 864e5).toISOString(), activatedAt: new Date().toISOString(), lastLoginAt: null }); } return send(res, 200, { ok: true }); }

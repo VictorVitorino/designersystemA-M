@@ -79,6 +79,7 @@ function render(reason) {
   });
 
   replace(card,
+    h('div', { class: 'ey' }, 'Acesso ao Canteiro'),
     h('h1', null, 'Entrar'),
     h('p', { class: 'lead' }, 'Use o e-mail do seu convite e a senha que você definiu.'),
     form,

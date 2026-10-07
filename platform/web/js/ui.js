@@ -111,12 +111,15 @@ export function announce(msg) {
 }
 
 let toastsEl = null;
+/** Onde os avisos ficam: dentro do diálogo modal aberto por cima (fora dele, a página fica inerte e o aviso nem apareceria). */
+const toastHost = () => [...document.querySelectorAll('dialog[open]')].pop() || document.body;
+/** Ao fechar um diálogo, os avisos que estavam nele voltam para a página (não somem junto). */
+export function releaseToasts(dlg) { if (toastsEl && dlg.contains(toastsEl)) document.body.append(toastsEl); }
 /** toast('Salvo', { kind: 'ok'|'error'|'info', action: { label, onClick }, timeout }) */
 export function toast(message, { kind = 'info', action, timeout = 6000 } = {}) {
-  if (!toastsEl) {
-    toastsEl = h('div', { class: 'toasts', id: 'toasts' });
-    document.body.append(toastsEl);
-  }
+  if (!toastsEl) toastsEl = h('div', { class: 'toasts', id: 'toasts' });
+  const host = toastHost();
+  if (toastsEl.parentNode !== host) host.append(toastsEl);
   const node = h('div', { class: `toast toast--${kind}`, role: kind === 'error' ? 'alert' : 'status' });
   node.append(icon(kind === 'error' ? 'alert' : kind === 'ok' ? 'check' : 'info'), h('span', { class: 'break' }, message));
   const remove = () => { clearTimeout(timer); node.remove(); };
@@ -139,64 +142,93 @@ export function alertBox(kind, message, { live = true } = {}) {
     icon(kind === 'ok' ? 'check' : kind === 'info' ? 'info' : 'alert'), h('p', null, message));
 }
 
-/* ───────── diálogos ───────── */
-function mountDialog(dlg) {
+/* ───────── diálogos (= .mdl do editor: faixa laranja/navy, ícone em caixa de 44 px, sobretítulo em mono, "Cancelar Esc") ───────── */
+/** Monta e abre um <dialog> modal; clique no fundo fecha; o nó sai do DOM ao fechar. */
+export function mountDialog(dlg) {
   document.body.append(dlg);
-  const done = () => dlg.remove();
+  const done = () => { releaseToasts(dlg); dlg.remove(); };
   dlg.addEventListener('close', done, { once: true });
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close('cancel'); }); // clique no fundo
   dlg.showModal();
   return dlg;
 }
+/** Fecha JÁ (o evento "close" do <dialog> chega depois, numa tarefa): devolve o foco, tira os avisos de dentro e remove o nó na hora,
+ *  para a tela não ficar com o diálogo pendurado entre o clique e o evento. */
+export function closeDialog(dlg, value = '') {
+  if (dlg.open) dlg.close(value);
+  releaseToasts(dlg);
+  dlg.remove();
+}
 
-/** confirmDialog({ title, message, confirmLabel, cancelLabel, danger }) → Promise<boolean> */
-export function confirmDialog({ title, message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', danger = false }) {
+const dlgId = () => `dlg-${Math.random().toString(36).slice(2, 8)}`;
+/** Cabeçalho comum: [ícone] [sobretítulo · título · mensagem · extra]. O sobretítulo é <div> (como .mdl-ey), não <p>. */
+function dlgBody(id, { title, message, eyebrow, iconName, warn, extra }) {
+  return h('div', { class: 'dlg__in' },
+    h('div', { class: `dlg__ic${warn ? ' dlg__ic--warn' : ''}`, 'aria-hidden': 'true' }, icon(iconName)),
+    h('div', null,
+      eyebrow ? h('div', { class: 'ey' }, eyebrow) : null,
+      h('h2', { id: `${id}-t` }, title),
+      message ? h('p', { id: `${id}-d` }, message) : null,
+      extra || null));
+}
+/** Botão "Cancelar" com a dica de tecla do editor (kbd fora do nome acessível). */
+function cancelButton(label, onClick, attrs = {}) {
+  const b = button({ label, attrs: { 'data-act': 'cancel', ...attrs }, onClick });
+  b.append(h('kbd', { 'aria-hidden': 'true' }, 'Esc'));
+  return b;
+}
+
+/** confirmDialog({ title, message, confirmLabel, cancelLabel, danger, eyebrow, icon }) → Promise<boolean>
+ *  Como no editor, a confirmação é o botão laranja (.mb.pri); o risco aparece no ícone (caixa laranja) e o foco começa em "Cancelar". */
+export function confirmDialog({ title, message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', danger = false, eyebrow, icon: iconName }) {
   return new Promise((resolve) => {
-    const id = `dlg-${Math.random().toString(36).slice(2, 8)}`;
-    const cancel = button({ label: cancelLabel, attrs: { autofocus: true, 'data-act': 'cancel' }, onClick: () => dlg.close('cancel') });
-    const ok = button({ label: confirmLabel, variant: danger ? 'danger' : 'primary', attrs: { 'data-act': 'confirm' }, onClick: () => dlg.close('ok') });
-    const dlg = h('dialog', { class: 'dlg', 'aria-labelledby': `${id}-t`, 'aria-describedby': `${id}-d` },
-      h('div', { class: 'dlg__in' },
-        h('h2', { id: `${id}-t` }, title),
-        h('p', { id: `${id}-d` }, message),
-        h('div', { class: 'row' }, cancel, ok)));
-    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    const id = dlgId();
+    const cancel = cancelButton(cancelLabel, () => { resolve(false); closeDialog(dlg, 'cancel'); }, { autofocus: true });
+    const ok = button({ label: confirmLabel, variant: 'primary', attrs: { 'data-act': 'confirm' }, onClick: () => { resolve(true); closeDialog(dlg, 'ok'); } });
+    const dlg = h('dialog', { class: `dlg${danger ? ' dlg--danger' : ''}`, 'aria-labelledby': `${id}-t`, 'aria-describedby': `${id}-d` },
+      dlgBody(id, { title, message, eyebrow: eyebrow || (danger ? 'Atenção' : 'Confirmar'), iconName: iconName || (danger ? 'alert' : 'help'), warn: danger }),
+      h('div', { class: 'dlg__a' }, cancel, ok));
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true }); // Esc ou clique no fundo
     mountDialog(dlg);
   });
 }
 
 /** Escolha entre opções (select) com confirmação; resolve com o valor escolhido ou null. */
-export function chooseDialog({ title, message, options, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', selectLabel = 'Opções' }) {
+export function chooseDialog({ title, message, options, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', selectLabel = 'Opções', eyebrow = 'Escolher', icon: iconName = 'user' }) {
   return new Promise((resolve) => {
-    const id = `dlg-${Math.random().toString(36).slice(2, 8)}`;
-    const sel = h('select', { class: 'input', id: `${id}-s`, 'aria-label': selectLabel }, ...options.map((o) => h('option', { value: o.value }, o.label)));
-    const cancel = button({ label: cancelLabel, attrs: { 'data-act': 'cancel' }, onClick: () => dlg.close('cancel') });
-    const ok = button({ label: confirmLabel, variant: 'primary', attrs: { 'data-act': 'confirm' }, onClick: () => dlg.close('ok') });
-    const dlg = h('dialog', { class: 'dlg', 'aria-labelledby': `${id}-t`, 'aria-describedby': `${id}-d` },
-      h('div', { class: 'dlg__in' },
-        h('h2', { id: `${id}-t` }, title),
-        message ? h('p', { id: `${id}-d` }, message) : null,
-        h('label', { class: 'field', for: `${id}-s` }, h('span', { class: 'field__label' }, selectLabel), sel),
-        h('div', { class: 'row' }, cancel, ok)));
-    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok' ? sel.value : null), { once: true });
+    const id = dlgId();
+    const sel = h('select', { class: 'select', id: `${id}-s` }, ...options.map((o) => h('option', { value: o.value }, o.label)));
+    const cancel = cancelButton(cancelLabel, () => { resolve(null); closeDialog(dlg, 'cancel'); });
+    const ok = button({ label: confirmLabel, variant: 'primary', attrs: { 'data-act': 'confirm' }, onClick: () => { resolve(sel.value); closeDialog(dlg, 'ok'); } });
+    const dlg = h('dialog', { class: 'dlg', 'aria-labelledby': `${id}-t`, 'aria-describedby': message ? `${id}-d` : null },
+      dlgBody(id, { title, message, eyebrow, iconName, extra: h('div', { class: 'field' }, h('label', { class: 'field__label', for: `${id}-s` }, selectLabel), sel) }),
+      h('div', { class: 'dlg__a' }, cancel, ok));
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok' ? sel.value : null), { once: true }); // Esc ou clique no fundo
     mountDialog(dlg);
     sel.focus();
   });
 }
 
 /** Mostra um texto copiável (quando a área de transferência não está disponível). */
-export function textDialog({ title, message, value, closeLabel = 'Fechar' }) {
+export function textDialog({ title, message, value, closeLabel = 'Fechar', eyebrow = 'Copiar', icon: iconName = 'link' }) {
   return new Promise((resolve) => {
-    const id = `dlg-${Math.random().toString(36).slice(2, 8)}`;
+    const id = dlgId();
     const input = h('input', { class: 'input', type: 'text', readonly: true, value, id: `${id}-i`, 'aria-label': title });
     const dlg = h('dialog', { class: 'dlg', 'aria-labelledby': `${id}-t` },
-      h('div', { class: 'dlg__in' },
-        h('h2', { id: `${id}-t` }, title), message ? h('p', null, message) : null, input,
-        h('div', { class: 'row' }, button({ label: closeLabel, variant: 'primary', onClick: () => dlg.close('ok') }))));
+      dlgBody(id, { title, message, eyebrow, iconName, extra: input }),
+      h('div', { class: 'dlg__a' }, button({ label: closeLabel, variant: 'primary', onClick: () => { resolve(); closeDialog(dlg, 'ok'); } })));
     dlg.addEventListener('close', () => resolve(), { once: true });
     mountDialog(dlg);
     input.select();
   });
+}
+
+/** Baixa um Blob com o nome dado (link temporário; a URL é liberada depois). */
+export function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name, class: 'sr-only', tabindex: '-1', 'aria-hidden': 'true' });
+  toastHost().append(a); a.click(); a.remove();   // dentro do diálogo aberto, se houver (o resto da página está inerte)
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 /** Copia texto; devolve true/false. */
@@ -209,8 +241,10 @@ export async function copyText(text) {
   } catch { return false; }
 }
 
-/* ───────── menu (popover) ───────── */
-/** menuButton({ label, items: () => [{ label, icon, danger, onSelect, sep }] , down }) → <div> com o botão e o menu (montado ao abrir). */
+/* ───────── menu (popover, = .xmenu do editor) ───────── */
+/** menuButton({ label, items: () => [{ label, icon, danger, onSelect, href, target, ariaLabel } | { sep } | { header }], down }) → <div> com o botão
+ *  e o menu (montado ao abrir). Item com `href` vira link (<a role=menuitem>; target=_blank ganha rel=noopener e o ícone de "nova aba").
+ *  O menu abre para cima; se não couber abaixo da barra superior, abre para baixo. */
 export function menuButton({ label, items, down = false, cls = 'btn btn--ghost btn--sm btn--icon', iconName = 'more' }) {
   const wrap = h('div', { class: 'more' });
   const btn = h('button', { type: 'button', class: cls, 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': label, title: label }, icon(iconName));
@@ -229,11 +263,24 @@ export function menuButton({ label, items, down = false, cls = 'btn btn--ghost b
     for (const it of items()) {
       if (!it) continue;
       if (it.sep) { menu.append(h('div', { class: 'menu__sep', role: 'separator' })); continue; }
-      const mi = h('button', { type: 'button', role: 'menuitem', tabindex: '-1', class: `menu__item${it.danger ? ' menu__item--danger' : ''}`, dataset: { action: it.action || '' } }, it.icon ? icon(it.icon) : null, it.label);
-      mi.addEventListener('click', () => { close(true); it.onSelect(); }); // foco volta ao botão do menu (quem abrir um diálogo devolve o foco para ele)
+      if (it.header) { menu.append(h('div', { class: 'menu__hd', role: 'presentation' }, it.header)); continue; }
+      const cls2 = `menu__item${it.danger ? ' menu__item--danger' : ''}`;
+      const blank = it.target === '_blank';
+      const kids = [it.icon ? icon(it.icon) : h('span'), h('span', null, it.label), blank ? icon('external') : null];
+      const mi = it.href
+        ? h('a', { role: 'menuitem', tabindex: '-1', class: cls2, href: it.href, target: it.target || null, rel: blank ? 'noopener' : null, 'aria-label': it.ariaLabel || null, dataset: { action: it.action || '' } }, ...kids)
+        : h('button', { type: 'button', role: 'menuitem', tabindex: '-1', class: cls2, 'aria-label': it.ariaLabel || null, dataset: { action: it.action || '' } }, ...kids);
+      // link: a navegação acontece DEPOIS do clique (um <a> fora do documento não navega), então o menu fecha no próximo ciclo
+      if (it.href) mi.addEventListener('click', () => { setTimeout(() => close(!blank), 0); it.onSelect?.(); });
+      else mi.addEventListener('click', () => { close(true); it.onSelect(); }); // foco volta ao botão do menu (quem abrir um diálogo devolve o foco para ele)
       menu.append(mi);
     }
     wrap.append(menu); btn.setAttribute('aria-expanded', 'true');
+    if (!down) { // não cabe para cima (barra superior fixa por cima)? abre para baixo
+      const bar = document.querySelector('.topbar');
+      const limit = (bar ? bar.getBoundingClientRect().bottom : 0) + 8;
+      if (menu.getBoundingClientRect().top < limit) menu.classList.add('menu--down');
+    }
     const els = [...menu.querySelectorAll('[role=menuitem]')];
     (focusLast ? els[els.length - 1] : els[0])?.focus();
     document.addEventListener('pointerdown', outside, true);
@@ -252,6 +299,7 @@ export function menuButton({ label, items, down = false, cls = 'btn btn--ghost b
     else if (e.key === 'ArrowUp') { e.preventDefault(); els[(i - 1 + els.length) % els.length]?.focus(); }
     else if (e.key === 'Home') { e.preventDefault(); els[0]?.focus(); }
     else if (e.key === 'End') { e.preventDefault(); els[els.length - 1]?.focus(); }
+    else if (e.key === ' ' && document.activeElement?.tagName === 'A' && i >= 0) { e.preventDefault(); document.activeElement.click(); } // Espaço também aciona os itens-link
     else if (e.key === 'Tab') close(false);
   });
   wrap.append(btn);
@@ -295,12 +343,29 @@ export function loadingBlock(text = 'Carregando…') {
   return h('div', { class: 'loading', role: 'status' }, icon('spinner', 'spin'), text);
 }
 
-export function stateBlock({ iconName = 'info', title, text, actions = [] }) {
-  const s = h('div', { class: 'state' }, icon(iconName, 'ic--xl'), h('h2', null, title));
+export function stateBlock({ iconName = 'info', title, text, actions = [], art = false }) {
+  const s = h('div', { class: 'state' }, art ? pileArt() : icon(iconName, 'ic--xl'), h('h2', null, title));
   if (text) s.append(h('p', null, text));
   if (actions.length) s.append(h('div', { class: 'row' }, ...actions));
   return s;
 }
+
+/** Ilustração do estado vazio de "Minhas obras" (pilha de pranchas com o "+" laranja — .cv-hill da capa), montada por DOM. */
+export function pileArt() {
+  const el = (tag, attrs) => { const n = document.createElementNS(SVG_NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v)); return n; };
+  const svg = el('svg', { class: 'state__art', viewBox: '0 0 168 104', 'aria-hidden': 'true', focusable: 'false' });
+  svg.append(
+    el('rect', { class: 'a', x: 44, y: 6, width: 108, height: 61, rx: 3 }), el('rect', { class: 'a', x: 32, y: 16, width: 108, height: 61, rx: 3 }),
+    el('rect', { class: 'b', x: 20, y: 26, width: 108, height: 61, rx: 3 }), el('rect', { class: 'o', x: 32, y: 40, width: 3, height: 12 }),
+    el('path', { class: 't', d: 'M41 42h46M41 50h28M41 64h64M41 72h48' }), el('circle', { class: 'o', cx: 128, cy: 87, r: 12 }), el('path', { class: 'w', d: 'M128 81v12M122 87h12' }));
+  return svg;
+}
+
+/** Sobretítulo da capa (traço laranja + texto em JetBrains Mono, caixa alta por CSS). */
+export function eyebrow(text) { return h('p', { class: 'eyebrow' }, h('i'), h('span', null, text)); }
+
+/** "Bom dia" / "Boa tarde" / "Boa noite" — a mesma regra da capa do editor (cover.js). */
+export function greeting(date = new Date()) { const hr = date.getHours(); return hr >= 5 && hr < 12 ? 'Bom dia' : hr >= 12 && hr < 18 ? 'Boa tarde' : 'Boa noite'; }
 
 /** Campo de formulário com rótulo, dica e erro ligados por aria. */
 export function field({ id, label, type = 'text', hint, required = false, autocomplete, value, maxlength, inputmode, placeholder, name, min, max, textarea = false, rows }) {
@@ -356,18 +421,18 @@ export function updateQuery(params) {
   history.replaceState(null, '', u.pathname + u.search + u.hash);
 }
 
-/* ───────── barra superior comum ───────── */
+/* ───────── barra superior comum (= #top do editor: marca "Canteiro." + "Acervo de Apresentações" e menu em texto) ───────── */
 export function mountTopbar(root, user, { active, onLogout } = {}) {
   const nav = h('nav', { class: 'topnav', 'aria-label': 'Navegação principal' });
-  const links = [{ id: 'acervo', href: '/acervo', label: 'Acervo', icon: 'slides' }, { id: 'importar', href: '/importar', label: 'Importar', icon: 'upload' }];
-  if (user.role === 'admin') links.push({ id: 'admin', href: '/admin', label: 'Administração', icon: 'shield' });
-  for (const l of links) nav.append(h('a', { href: l.href, 'aria-current': l.id === active ? 'page' : null }, icon(l.icon), l.label));
-  const out = button({ label: 'Sair', icon: 'logout', variant: 'ghost', size: 'sm', onClick: (e) => onLogout?.(e.currentTarget), attrs: { id: 'btn-sair' } });
+  const links = [{ id: 'acervo', href: '/acervo', label: 'Acervo' }, { id: 'importar', href: '/importar', label: 'Importar' }];
+  if (user.role === 'admin') links.push({ id: 'admin', href: '/admin', label: 'Administração' });
+  for (const l of links) nav.append(h('a', { href: l.href, 'aria-current': l.id === active ? 'page' : null }, l.label));
+  const out = button({ label: 'Sair', icon: 'logout', size: 'sm', onClick: (e) => onLogout?.(e.currentTarget), attrs: { id: 'btn-sair' } });
   const header = h('header', { class: 'topbar' },
     h('div', { class: 'topbar__in' },
       h('a', { class: 'brand', href: '/acervo', 'aria-label': 'Canteiro — Alvarez & Marsal, ir para o acervo' },
-        h('img', { class: 'brand__wm', src: '/assets/brand/wordmark-white.png', alt: '', width: 131, height: 21 }),
-        h('span', { class: 'brand__sub' }, 'Canteiro', h('i'))),
+        h('img', { class: 'brand__wm', src: '/assets/brand/wordmark-white.png', alt: '', width: 100, height: 16 }),
+        h('span', { class: 'brand__sub' }, h('em', null, 'Canteiro', h('i')), h('span', { class: 'brand__sub2' }, 'Acervo de Apresentações'))),
       nav,
       h('div', { class: 'userbox' },
         h('div', { class: 'userbox__who' }, avatar(user.displayName || user.email, { seed: user.id }),

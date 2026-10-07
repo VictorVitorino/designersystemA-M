@@ -1,24 +1,37 @@
-/* tokens.css — identidade A&M do Canteiro online (fonte única das cores, tipografia, espaços).
-   Contraste conferido (AA): --ink/--surface 14:1 · --mut/--surface 6,0:1 · --white/--navy 14,6:1 · --navy/--orange 6,1:1 · --orange-ink/--surface 5,2:1. */
+/* tokens.css — identidade A&M do Canteiro online. Fonte da verdade: o editor ORIGINAL (studio/editor.html :root e studio/cover.css #cover).
+   Mesmos valores e papéis: navy #002A46 / #001E32, aço #7EA1C3 / #43698F / #4A6FA5 / #A3B8D6, laranja #F78C16 (hover #E07A0A), gelo #EBEEF1 /
+   #E3EAF2, linha #DCE3EC, tinta #0B2545, mudo #566579, fundo #E6EBF1, raios 8/12/16 px e a curva cubic-bezier(.22,.61,.36,1).
+   Contraste conferido (AA): --ink/branco 15,4:1 · --mut/branco 5,9:1 · --mut/--bg 4,96:1 · branco/--navy 14,8:1 · --navy/--orange 6,1:1 ·
+   --navy/--orange-600 4,9:1 · --steel-600/branco 5,7:1 · --steel/--navy-900 6,3:1 · --steel-300/--navy-900 8,4:1 · #DCE5F0/--navy-900 13,4:1 ·
+   --steel/ponto mais claro da prancha (#13364F) 4,66:1 · --field-line/branco 3,4:1 (borda de campo, WCAG 1.4.11). */
 :root {
-  /* marca */
+  /* marca (= editor) */
   --navy: #002a46;
-  --navy-900: #001e32;
-  --navy-700: #0b3a5c;
+  --navy-900: #001e32;      /* --navy2 do editor / --nd da capa */
+  --navy-800: #00223a;      /* meio do degradê da prancha (.cv-bg) */
+  --navy-700: #0b3a63;      /* .rb.accent:hover */
   --steel: #7ea1c3;
-  --steel-600: #43698f;
+  --steel-600: #43698f;     /* --steel2 do editor */
+  --steel-500: #4a6fa5;     /* --s1 da capa */
+  --steel-300: #a3b8d6;     /* --s4 da capa */
   --orange: #f78c16;
-  --orange-600: #e07a08;
-  --orange-ink: #a24f00;   /* laranja legível como TEXTO sobre branco (AA) */
-  --orange-wash: #fff3e2;
+  --orange-600: #e07a0a;    /* .tb.pri:hover / .mb.pri:hover / --orh da capa */
+  --orange-ink: #a24f00;    /* laranja legível como TEXTO sobre branco (AA) */
+  --orange-wash: #fff8f0;   /* .xp-card marcado */
+  --orange-tint: #fef1e2;   /* .xp-ic */
 
-  /* cinzas frios */
+  /* cinzas frios (= editor) */
   --ink: #0b2545;
   --mut: #566579;
   --line: #dce3ec;
-  --line-strong: #b9c5d3;
+  --line-strong: #b8c6d8;   /* .mb:hover */
   --ice: #ebeef1;
-  --bg: #f3f6f9;
+  --ice-2: #e3eaf2;         /* --ice da capa */
+  --hover: #eef2f7;         /* .menu button:hover, .rb:hover, .mdl-ic */
+  --hover-2: #f6f8fb;       /* .mb:hover */
+  --field: #f8fafc;         /* .pf input */
+  --field-line: #7a8da3;    /* borda de campo com 3,4:1 sobre branco; o editor usa --line (#DCE3EC), que não chega a 3:1 */
+  --bg: #e6ebf1;
   --surface: #ffffff;
   --white: #ffffff;
 
@@ -32,21 +45,26 @@
   --info: #1f5f99;
   --info-wash: #e8f1fa;
 
-  /* tipografia */
-  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --font-display: 'Roboto Condensed', 'Inter', system-ui, sans-serif;
-  --fs-xs: 0.75rem;
-  --fs-sm: 0.8125rem;
-  --fs-md: 0.9375rem;
-  --fs-lg: 1.0625rem;
-  --fs-xl: 1.375rem;
-  --fs-2xl: 1.875rem;
+  /* tipografia: as MESMAS famílias e pilhas de reserva do editor (Inter,Arial / 'Roboto Condensed','Arial Narrow' / 'JetBrains Mono',Consolas) */
+  --font-ui: Inter, Arial, sans-serif;
+  --font-display: 'Roboto Condensed', 'Arial Narrow', sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+  --fs-2xs: 10.5px;         /* sobretítulos em mono (.mdl-ey, .cv-pcount) */
+  --fs-xs: 12px;
+  --fs-sm: 12.5px;          /* botões da barra (.tb), textos de apoio */
+  --fs-md: 13.5px;          /* texto (.mdl p, .cv-search) */
+  --fs-lg: 16px;            /* título de cartão (.cv-hname) */
+  --fs-xl: 18px;            /* título de diálogo (.mdl h3) */
+  --fs-2xl: 30px;           /* título de painel (.cv-pht h2) */
+  --ls-eyebrow: 0.16em;
 
   /* forma e espaço */
   --r-ctl: 8px;
+  --r-field: 9px;           /* .cv-search / .cv-seg */
   --r-card: 14px;
   --r-pop: 12px;
   --r-dlg: 16px;
+  --r-tag: 5px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -54,25 +72,24 @@
   --sp-5: 24px;
   --sp-6: 32px;
   --sp-7: 48px;
-  --gutter: 16px;
-  --maxw: 1360px;
+  --gutter: clamp(16px, 3.4vw, 56px);   /* --g da capa */
+  --maxw: 1680px;
 
-  /* profundidade */
-  --sh-1: 0 1px 2px rgba(0, 42, 70, 0.08), 0 1px 1px rgba(0, 42, 70, 0.04);
-  --sh-2: 0 6px 18px rgba(0, 42, 70, 0.12), 0 2px 4px rgba(0, 42, 70, 0.06);
-  --sh-3: 0 18px 48px rgba(0, 30, 50, 0.28);
+  /* profundidade (= editor) */
+  --sh-1: 0 1px 2px rgba(0, 30, 50, 0.06);
+  --sh-menu: 0 18px 50px rgba(0, 30, 50, 0.22), 0 2px 6px rgba(0, 30, 50, 0.08);   /* .xmenu */
+  --sh-pop: 0 16px 40px rgba(0, 30, 50, 0.18);                                     /* .menu */
+  --sh-dlg: 0 30px 80px rgba(0, 20, 35, 0.35);                                     /* .mdl */
+  --sh-wide: 0 30px 80px -20px rgba(0, 20, 35, 0.55), 0 2px 8px rgba(0, 30, 50, 0.12); /* .xp-box */
+  --sh-lift: 0 24px 46px -24px rgba(0, 0, 0, 0.8);                                 /* .cv-hcard:hover */
+  --sh-note: 0 24px 60px -14px rgba(0, 0, 0, 0.6);                                 /* .cv-note */
+  --sh-banner: 0 16px 40px rgba(0, 30, 50, 0.3);                                   /* #banner */
+  --backdrop: rgba(0, 20, 35, 0.52);                                               /* #modal */
 
   /* foco: anel duplo (visível em fundos claros e escuros) */
   --focus-in: #ffffff;
   --focus-out: #002a46;
 
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --topbar-h: 56px;
-}
-
-@media (min-width: 720px) {
-  :root { --gutter: 24px; }
-}
-@media (min-width: 1200px) {
-  :root { --gutter: 32px; }
+  --topbar-h: 54px;
 }

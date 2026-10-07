@@ -100,6 +100,7 @@ function passwordForm({ email, kind }) {
   });
 
   replace(card,
+    h('div', { class: 'ey' }, kind === 'recovery' ? 'Nova senha' : 'Primeiro acesso'),
     h('h1', { id: 'estado-titulo' }, kind === 'recovery' ? 'Crie uma nova senha' : 'Defina sua senha'),
     h('p', { class: 'lead' }, kind === 'recovery' ? 'Escolha uma senha nova para voltar ao Canteiro.' : 'Seu e-mail foi confirmado. Escolha uma senha para entrar no Canteiro.'),
     email ? h('p', { class: 'hint break', id: 'conta-email' }, 'Conta: ', h('strong', null, email)) : null,

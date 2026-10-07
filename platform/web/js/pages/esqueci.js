@@ -31,6 +31,7 @@ function form() {
     }, 'Enviando…');
   });
   replace(card,
+    h('div', { class: 'ey' }, 'Recuperar o acesso'),
     h('h1', null, 'Esqueci a senha'),
     h('p', { class: 'lead' }, 'Informe o e-mail do seu convite. Se ele estiver cadastrado, enviaremos um link para criar uma nova senha.'),
     f,

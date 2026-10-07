@@ -10,13 +10,29 @@ Tudo roda sob a **CSP estrita** das páginas comuns (`default-src 'self'; script
 | `/entrar` | `web/entrar/index.html` + `js/pages/entrar.js` | e-mail + senha; erros do contrato em pt-BR; `?next=` seguro |
 | `/auth/confirmar?token_hash=…&type=invite\|recovery` | `web/auth/confirmar/` + `confirmar.js` | confirma o link do e-mail e define a senha |
 | `/esqueci-senha` | `web/esqueci-senha/` + `esqueci.js` | pede o e-mail de redefinição (mesma resposta sempre) |
-| `/acervo` | `web/acervo/` + `acervo.js` | tela principal: grade de cartões, busca, abas, gaveta de detalhes e comentários |
+| `/acervo` | `web/acervo/` + `acervo.js` | tela principal: grade de cartões, busca, abas, gaveta de detalhes e comentários; “Nova a partir de projeto pronto”; no menu do cartão (dono/admin) “Respostas e participações…”, “Histórico de versões” e “Baixar como HTML / PDF / PowerPoint” |
 | `/admin` | `web/admin/` + `admin.js` | usuários, convites, auditoria, configurações, resumo (só admin) |
 | `/importar` | `web/importar/` + `importar.js` | importa o acervo local (JSON do “Minhas obras” e HTMLs salvos) |
 | `/404.html`, `/` | `web/404.html`, `web/index.html` | página de erro; `/` leva a `/acervo` (`<meta refresh>`) |
-| `/editor/:id`, `/visualizar/:id` | — (B2) | só são **linkadas** daqui; `?historico=1` abre o histórico de versões |
+| `/editor/:id`, `/visualizar/:id` | — (B2) | só são **linkadas** daqui: `?historico=1` abre o histórico de versões; `?exportar=html\|pdf\|pptx` (em nova aba) abre o editor já exportando; `?modelo=0..5` monta o projeto pronto da capa (`studio/cover.js`, mesma ordem) na apresentação recém-criada |
 
-Código compartilhado (`web/js/`): `api.js` (cliente de API), `session.js` (sessão + barra superior), `ui.js` (blocos de interface), `format.js` (pt-BR, `safeNext`, CSV seguro). Estilo: `web/css/tokens.css` (cores A&M, tipografia, espaços) e `web/css/app.css` (componentes). Ícones próprios em `web/assets/icons.svg` (sprite) e `favicon.svg`; logos vêm do build em `/assets/brand/`.
+Código compartilhado (`web/js/`): `api.js` (cliente de API), `session.js` (sessão + barra superior), `ui.js` (blocos de interface), `format.js` (pt-BR, `safeNext`, CSV seguro, `pad2`, `slug`). Estilo: `web/css/tokens.css` (cores A&M, tipografia, espaços) e `web/css/app.css` (componentes). Ícones próprios em `web/assets/icons.svg` (sprite) e `favicon.svg`; logos vêm do build em `/assets/brand/`; miniaturas dos 6 projetos prontos em `web/assets/modelos/modelo-1..6.png` (1º slide de cada um, 640 × 360).
+
+## Família visual = editor original
+
+As páginas copiam os componentes do editor (`studio/editor.html`, `studio/cover.css`, `studio/ed-40-export.css`) com os mesmos valores — o teste 9b lê os estilos **computados** no editor original (`original/Canteiro-AM (3).html`) e na plataforma e compara.
+
+- **Dois temas, como no original.** *Claro* (= área de trabalho do editor; usado no `/admin`): fundo `#E6EBF1`, barra `#top` navy. *Prancha* (= capa `#cover`; `body.theme-prancha` no acervo, importar, entrar, esqueci-senha, confirmar, 404 e `/`): navy `#001E32` com o degradê e a grade 96/24 px de `.cv-bg`. Os papéis de cor (`--text`, `--panel`, `--ctl-*`, `--fld-*`…) mudam por tema em `app.css`; superfícies brancas dentro da prancha (diálogos, menus, cartão de login) voltam aos papéis claros.
+- **Componentes**: botão = `.mb`/`.tb` (`.btn--primary` = `.mb.pri`, laranja `#F78C16` com texto navy, hover `#E07A0A`); diálogo = `.mdl` (faixa 3 px laranja/navy, ícone 44 px, sobretítulo em JetBrains Mono, fundo `rgba(0,20,35,.52)` com desfoque); diálogo largo = `.xp-box`; menu = `.xmenu`; aviso = `#toast` (claro) / `.cv-note` (prancha); cartão = `.cv-hcard` (hover: sobe 3 px, borda laranja); selo = `.cv-htag`; busca = `.cv-search`; abas = `.cv-seg`; sobretítulos = `.cv-eyebrow`/`.mdl-ey`; “Projetos prontos” = vista `#cvTpl` da capa (diálogo `.dlg--prancha`, teclas 1–6, setas, Esc).
+- **Fontes**: as mesmas famílias e pesos do editor, com o MESMO endereço do Google Fonts (Inter 400–700, JetBrains Mono 400–600, Roboto 300–700, Roboto Condensed 400/700); pilhas de reserva iguais às do editor.
+- **Desvios deliberados (contraste AA)**: borda de campo `#7A8DA3` no tema claro (o `#DCE3EC` do editor não chega a 3:1 — WCAG 1.4.11); borda dos campos na prancha com alfa .5 (a capa usa .26); metadados dos cartões e dos projetos prontos em `#A3B8D6` (o `#7EA1C3` de `.cv-hmeta` cai para ~3,6:1 sobre o cartão no ponto claro do degradê). O risco das confirmações destrutivas aparece no ícone (caixa laranja), como no editor, que não tem botão vermelho; itens de menu destrutivos ficam em vermelho.
+
+## Recursos do acervo para dono e administrador
+
+- **Respostas e participações…** (menu do cartão e gaveta): diálogo largo com o que foi coletado no servidor, **por elemento** e na ordem dos slides (o título e o slide de cada formulário, votação ou quadro vêm do conteúdo da apresentação; elemento que já saiu do conteúdo aparece como “fora do conteúdo atual”). Formulário = tabela (Quando, Pessoa, uma coluna por pergunta; as 50 mais recentes); votação = soma dos pontos de todas as pessoas por opção; quadro = notas por coluna, com quem as tem (as notas iniciais do slide ficam marcadas). Por elemento: **Baixar CSV** (`GET /api/presentations/:id/interactions.csv?kind=…&elementId=…`, a rota do servidor: BOM, `;`, apóstrofo antes de `= + - @`) e **Apagar respostas deste elemento** (confirmação nomeando o elemento → `DELETE /api/presentations/:id/interactions?elementId=…&kind=…`, com CSRF; o aviso diz quantos registros saíram). Lista: `GET /api/presentations/:id/interactions` (itens `{id, kind, elementId, payload, author:{id,displayName}, createdAt, updatedAt}`).
+- **Nova a partir de projeto pronto**: os 6 projetos da capa do editor (nomes e descrições de `studio/cover.js`, mesma ordem — o teste confere contra o arquivo), cada um com a miniatura do 1º slide. Escolher = `POST /api/presentations {source:'new', title:<nome do projeto>}` e abrir `/editor/<novo-id>?modelo=<0..5>`.
+- **Baixar como HTML / PDF / PowerPoint**: itens-link do menu que abrem `/editor/<id>?exportar=html|pdf|pptx` em nova aba (`rel=noopener`); **Histórico de versões** aponta para `/editor/<id>?historico=1`. Quem não pode editar não vê esses itens.
+
 
 ## Regras de código (a CSP exige — e o teste confere)
 
@@ -35,18 +51,19 @@ Código compartilhado (`web/js/`): `api.js` (cliente de API), `session.js` (sess
 
 ## Acessibilidade e responsividade
 
-Rótulos reais em todos os campos (`label for`), erros ligados por `aria-describedby`/`aria-invalid` e foco no primeiro inválido, regiões `aria-live` (status da lista, importação, avisos), diálogos nativos `<dialog>` (foco preso, Esc fecha, foco volta a quem abriu), menus e abas no padrão WAI-ARIA (setas, Home/End), “Ir para o conteúdo”, anel de foco duplo visível em fundo claro e escuro, contraste AA conferido por varredura, `prefers-reduced-motion` respeitado, alvos de 44 px no celular, sem rolagem horizontal de 390 a 1920 px (tabelas viram cartões abaixo de 760 px).
+Rótulos reais em todos os campos (`label for`), erros ligados por `aria-describedby`/`aria-invalid` e foco no primeiro inválido, regiões `aria-live` (status da lista, importação, avisos), diálogos nativos `<dialog>` (foco preso, Esc fecha, foco volta a quem abriu), menus e abas no padrão WAI-ARIA (setas, Home/End), “Ir para o conteúdo”, anel de foco duplo visível em fundo claro (anel laranja da capa na prancha), contraste AA conferido por varredura das cores computadas **e medido em pixels** sobre a prancha (texto transparente + captura: o fundo real, com degradê, cartões translúcidos e hover), `prefers-reduced-motion` respeitado, alvos de 44 px no celular, sem rolagem horizontal de 390 a 1920 px (tabelas viram cartões abaixo de 760 px).
 
 ## Como rodar e testar
 
 ```bash
 export PATH=/opt/node22/bin:$PATH
 node platform/tests/web/mock-api.js            # servidor de teste em http://127.0.0.1:4201 (páginas + API em memória)
-node platform/tests/web/web.test.js            # bateria completa (Playwright/Chromium), ~70 s; ONLY=acervo,admin para rodar partes
+node platform/tests/web/web.test.js            # bateria completa (Playwright/Chromium), alguns minutos; ONLY=acervo,admin para rodar partes; PORT=… troca a porta
+node platform/tests/web/miniaturas-modelos.mjs # regenera web/assets/modelos/*.png a partir do editor original (fontes de fonts2/)
 WEB_CLOUD_CORE=stub node platform/tests/web/web.test.js   # força o stub do cloud-core (padrão: o módulo real, se existir)
 ```
 
-`tests/web/mock-api.js` implementa o contrato em memória (cookies, CSRF + Origin, erros no formato do contrato, cursores, limites de taxa, RLS simulada) e serve `web/` com a CSP acima. Ganchos `/__test/*` (reset, expirar acesso, falha de refresh, log de requisições) só existem no mock. `tests/web/cloud-core-stub.js` replica a API do `cloud-core` para o caso de o módulo real não existir. Capturas em `platform/tests/screens/` (ignoradas pelo git).
+`tests/web/mock-api.js` implementa o contrato em memória (cookies, CSRF + Origin, erros no formato do contrato, cursores, limites de taxa, RLS simulada) e serve `web/` com a CSP acima. Interações: `GET/POST …/interactions`, `GET …/interactions.csv` (só dono/admin; mesmo formato do servidor) e `DELETE …/interactions?elementId=…[&kind=…]` (dono/admin apagam tudo do elemento; os demais, só as próprias → `200 {deleted:n}`); a apresentação “Plano estratégico 2027 (Bia)” traz formulário, votação e quadro com respostas de várias pessoas, incluindo textos hostis. Ganchos `/__test/*` (reset, expirar acesso, falha de refresh, log de requisições) só existem no mock. `tests/web/cloud-core-stub.js` replica a API do `cloud-core` para o caso de o módulo real não existir. Capturas em `platform/tests/screens/` (ignoradas pelo git).
 
 ## Suposições e pontos a combinar
 

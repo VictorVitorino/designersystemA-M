@@ -5,18 +5,20 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 process.env.NODE_PATH = process.env.NODE_PATH || '/opt/node22/lib/node_modules';
 const require = createRequire(import.meta.url);
 require('module').Module._initPaths();
 const { chromium } = require('playwright');
-const { startMock, CSP, PASSWORD, IDS, TOKENS, XSS_TITLE, makePng } = await import('./mock-api.js');
+const { startMock, CSP, PASSWORD, IDS, TOKENS, XSS_TITLE, XSS_ANSWER, XSS_NOTE, VOTE_OPTS, makePng } = await import('./mock-api.js');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.resolve(HERE, '../../web');
 const SCREENS = path.resolve(HERE, '../screens');
 const FONTS = process.env.AM_FONTS_DIR || path.resolve(HERE, '../../../fonts2');
+const ORIGINAL = path.resolve(HERE, '../../../original/Canteiro-AM (3).html');   // editor ORIGINAL montado: a fonte da verdade visual
+const COVER_JS = path.resolve(HERE, '../../../studio/cover.js');
 fs.mkdirSync(SCREENS, { recursive: true });
 
 /* ───────── relatório ───────── */
@@ -561,10 +563,13 @@ async function acervoTests() {
   const optTexts = await page.$$eval('dialog.dlg select option', (os) => os.map((o) => o.textContent));
   check('transferir: o diálogo lista só pessoas ativas, sem o dono atual (Caio)', optTexts.length >= 2 && !optTexts.some((t) => /Caio/.test(t)) && optTexts.some((t) => /Bia/.test(t)), optTexts);
   await page.selectOption('dialog.dlg select', { label: optTexts.find((t) => /Bia/.test(t)) });
+  await mpost('/__test/clear-requests');
   await page.click('dialog.dlg [data-act=confirm]');
-  await page.waitForFunction(() => [...document.querySelectorAll('li.card')].some((c) => /Banco Aurora/.test(c.textContent) && /Bia/.test(c.querySelector('.card__owner')?.textContent || '')), null, { timeout: 8000 }).catch(() => null);
-  const moved = (await mstate()).presentations.find((p) => p.title === 'Proposta Caio — Banco Aurora');
-  check('transferir: a API recebeu POST …/transfer e a dona do cartão passou a ser a Bia', moved && moved.ownerId === (await mstate()).users.find((u) => /Bia/.test(u.displayName))?.id && /Bia/.test(await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('.card__owner').innerText()), moved);
+  // espera o cartão DESTA apresentação (título exato: a "Cópia de Proposta Caio — Banco Aurora" da Bia também casa com /Banco Aurora/) mostrar a nova dona
+  await page.waitForFunction(() => [...document.querySelectorAll('li.card')].some((c) => c.querySelector('.card__title')?.textContent === 'Proposta Caio — Banco Aurora' && /Bia/.test(c.querySelector('.card__owner')?.textContent || '')), null, { timeout: 15000, polling: 200 }).catch(() => null);
+  const stT = await mstate(); const moved = stT.presentations.find((p) => p.title === 'Proposta Caio — Banco Aurora');
+  const ownerTxt = await page.evaluate(() => [...document.querySelectorAll('li.card')].filter((c) => c.querySelector('.card__title')?.textContent === 'Proposta Caio — Banco Aurora').map((c) => c.querySelector('.card__owner .nm')?.textContent || '?'));
+  check('transferir: a API recebeu POST …/transfer e a dona do cartão passou a ser a Bia', moved && moved.ownerId === stT.users.find((u) => /Bia/.test(u.displayName))?.id && ownerTxt.length === 1 && /Bia/.test(ownerTxt[0]), { moved, ownerTxt, toasts: await toastText(page), reqs: stT.requests.map((r) => `${r.method} ${r.path.slice(0, 60)} +${r.at - (stT.requests[0]?.at || 0)}ms`) });
   await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
   check('admin: depois da transferência o menu continua coerente (Excluir presente)', (await page.getByRole('menuitem', { name: 'Excluir' }).count()) === 1);
   await page.keyboard.press('Escape');
@@ -574,6 +579,157 @@ async function acervoTests() {
   await victim.locator('button[aria-haspopup=menu]').click(); await page.getByRole('menuitem', { name: 'Apagar de vez' }).click();
   await page.click('dialog.dlg [data-act=confirm]'); await page.waitForFunction(() => document.querySelectorAll('li.card:not(.card--skel)').length === 1);
   check('admin: "Apagar de vez" pede confirmação e remove de verdade', !(await mstate()).presentations.some((p) => p.title === 'Rascunho excluído do Caio'));
+  await collectCsp(page); await ctx.close();
+}
+
+/* ═════════════════════════════ 6f. Respostas e participações (dono/admin) ═════════════════════════════ */
+const PLANO = '22222222-0000-4000-8000-000000000001';
+const CAIO_PRES = '22222222-0000-4000-8000-000000000002';
+const ADMIN_PRES = '22222222-0000-4000-8000-000000000004';
+async function respostasTests() {
+  head('6f. Acervo — respostas e participações (dono/admin; BE-ED-02)');
+  mock.reset();
+  let { ctx, page } = await asUser('bia@am.test', { tag: 'respostas-bia' });
+  await gotoAcervo(page);
+  const plano = cardByTitle(page, 'Plano estratégico 2027 (Bia)');
+  const mbtn = plano.locator('button[aria-haspopup=menu]');
+  await mbtn.click();
+  check('dono vê "Respostas e participações…" no menu do cartão', (await page.getByRole('menuitem', { name: 'Respostas e participações…' }).count()) === 1);
+  await page.keyboard.press('Escape');
+  await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
+  check('membro NÃO vê "Respostas e participações…" na apresentação de outra pessoa', (await page.getByRole('menuitem', { name: 'Respostas e participações…' }).count()) === 0);
+  await page.keyboard.press('Escape');
+  await mpost('/__test/clear-requests');
+  await mbtn.click(); await page.getByRole('menuitem', { name: 'Respostas e participações…' }).click();
+  await page.waitForSelector('#respostas[open] .resp');
+  const reqs = (await mstate()).requests.map((r) => `${r.method} ${r.path}`);
+  check('o diálogo busca GET /api/presentations/:id/interactions (o conteúdo vem só para rotular cada elemento)', reqs.includes(`GET /api/presentations/${PLANO}/interactions`) && reqs.includes(`GET /api/presentations/${PLANO}`), reqs);
+  check('diálogo modal rotulado pelo título da apresentação, com sobretítulo "Respostas e participações"', (await page.getByRole('dialog', { name: 'Plano estratégico 2027 (Bia)' }).count()) === 1 && /Respostas e participações/i.test(await page.locator('#respostas .dlg__h .ey').innerText()));
+  const groups = await page.$$eval('#respostas .resp', (l) => l.map((sec) => ({ kind: sec.dataset.kind, el: sec.dataset.element, ey: sec.querySelector('.ey').textContent, name: sec.querySelector('h3').textContent, count: sec.querySelector('.resp__count').textContent })));
+  check('lista POR ELEMENTO, na ordem dos slides: formulário (slide 2), votação (slide 3), quadro de post-its (slide 4), com o título de cada um', JSON.stringify(groups.map((g) => [g.kind, g.el, g.name])) === JSON.stringify([['form_response', 'frm1', 'Pesquisa de satisfação'], ['vote_state', 'vot1', 'Priorização'], ['board_state', 'brd1', 'Retrospectiva']]) && /Formulário · slide 2/.test(groups[0].ey) && /slide 3/.test(groups[1].ey) && /slide 4/.test(groups[2].ey), groups);
+  check('resumo: 3 elementos interativos · 8 registros de 4 pessoas', /3 elementos interativos · 8 registros de 4 pessoas/.test(await page.innerText('#resp-resumo')));
+  const form = page.locator('#respostas .resp[data-kind=form_response]');
+  const heads = await form.locator('thead th').allInnerTexts();
+  const cells = await form.locator('tbody tr').evaluateAll((rows) => rows.map((r) => [...r.cells].map((c) => c.textContent)));
+  check('formulário: 3 respostas de 3 pessoas; colunas = Quando, Pessoa e as perguntas; mais recentes primeiro', /3 respostas · 3 pessoas/.test(groups[0].count) && heads.length === 4 && /Nota geral/i.test(heads[2]) && /melhorar/i.test(heads[3]) && cells.length === 3 && cells[0][1] === 'Ana Admin' && cells[2][1] === 'Caio Lima' && cells[2][3] === 'Mais exemplos práticos do setor.', { heads, cells });
+  check('respostas, nomes e notas hostis aparecem como TEXTO (nada interpretado, nenhum script executa)', cells.some((r) => r[3] === XSS_ANSWER) && (await page.locator('#respostas img, #respostas script').count()) === 0 && (await page.evaluate(() => window.__xss)) === undefined);
+  const votes = await page.$$eval('#respostas .votes li', (l) => l.map((li) => [li.querySelector('.votes__l').textContent, Number(li.dataset.total), li.querySelector('.votes__v').textContent, li.querySelector('progress').value]));
+  check('votação: soma os pontos de TODAS as pessoas por opção (6 · 50%, 3 · 25%, 3 · 25%) — 4 votos de 3 pessoas', JSON.stringify(votes) === JSON.stringify([[VOTE_OPTS[0], 6, '6 · 50%', 6], [VOTE_OPTS[1], 3, '3 · 25%', 3], [VOTE_OPTS[2], 3, '3 · 25%', 3]]) && /4 votos · 3 pessoas/.test(groups[1].count), votes);
+  const board = await page.$$eval('#respostas .board__col', (cols) => cols.map((c) => ({ col: c.querySelector('h4 span').textContent, notes: [...c.querySelectorAll('.postit p')].map((n) => n.textContent), seed: c.querySelectorAll('.postit.is-seed').length, who: [...c.querySelectorAll('.postit small')].map((n) => n.textContent) })));
+  check('quadro: notas por coluna com os nomes do slide; a nota inicial do slide fica marcada; notas iguais aparecem uma vez; autor de cada nota', board.length === 3 && board[0].col === 'Começar' && board[0].seed === 1 && board[0].notes.length === 1 && board[1].notes[0] === 'Relatórios em PDF por e-mail' && /Caio Lima/.test(board[1].who[0]) && board[2].notes[0] === XSS_NOTE && /2 notas · 2 pessoas/.test(groups[2].count), board);
+  // CSV pela rota do servidor
+  await mpost('/__test/clear-requests');
+  const [dl] = await Promise.all([page.waitForEvent('download'), form.locator('[data-act=csv]').click()]);
+  const csv = fs.readFileSync(await dl.path(), 'utf8');
+  const csvReq = (await mstate()).requests.find((r) => r.path.includes('/interactions.csv'));
+  check('"Baixar CSV" usa GET …/interactions.csv?kind=form_response&elementId=frm1 e baixa o arquivo (BOM, perguntas e respostas)', csvReq?.path === `/api/presentations/${PLANO}/interactions.csv?kind=form_response&elementId=frm1` && csv.charCodeAt(0) === 0xfeff && /Nota geral/.test(csv) && /Mais exemplos práticos do setor\./.test(csv) && dl.suggestedFilename() === 'respostas-plano-estrategico-2027-bia-pesquisa-de-satisfacao.csv', { path: csvReq?.path, name: dl.suggestedFilename() });
+  check('CSV neutraliza fórmula vinda de quem respondeu (=SOMA… vira \'=SOMA…)', csv.includes("'=SOMA(1;2)"));
+  // apagar (com confirmação)
+  const vote = page.locator('#respostas .resp[data-kind=vote_state]');
+  await vote.locator('[data-act=apagar]').click();
+  await page.waitForSelector('dialog.dlg:not(#respostas)[open] [data-act=confirm]');
+  check('"Apagar respostas deste elemento" pede confirmação nomeando o elemento (foco em Cancelar)', (await page.getByRole('dialog', { name: 'Apagar as respostas deste elemento?' }).count()) === 1 && /“Priorização”/.test(await page.locator('dialog.dlg:not(#respostas) p').innerText()) && (await page.evaluate(() => document.activeElement.dataset.act)) === 'cancel');
+  await page.keyboard.press('Escape'); await page.waitForSelector('dialog.dlg:not(#respostas)', { state: 'detached' });
+  check('cancelar não apaga nada e o diálogo de respostas continua aberto', (await mstate()).interactions.filter((x) => x.elementId === 'vot1').length === 3 && (await page.locator('#respostas[open]').count()) === 1);
+  await mpost('/__test/clear-requests');
+  await vote.locator('[data-act=apagar]').click(); await page.click('dialog.dlg:not(#respostas) [data-act=confirm]');
+  await page.waitForFunction(() => /Ainda sem respostas/.test(document.querySelector('#respostas .resp[data-kind=vote_state] .resp__count')?.textContent || ''), null, { timeout: 8000 });
+  const st = await mstate();
+  const del = st.requests.find((r) => r.method === 'DELETE' && r.path.includes('/interactions'));
+  check('confirmar faz DELETE …/interactions?elementId=vot1&kind=vote_state com CSRF; só esse elemento fica sem respostas', del?.path === `/api/presentations/${PLANO}/interactions?elementId=vot1&kind=vote_state` && !!del.csrf && del.csrf === del.cookieCsrf && st.interactions.filter((x) => x.elementId === 'vot1').length === 0 && st.interactions.filter((x) => x.elementId === 'frm1').length === 3 && st.interactions.filter((x) => x.elementId === 'brd1').length === 2, del);
+  check('o aviso diz quantos registros foram apagados e aparece por cima do diálogo', /3 registros apagados de “Priorização”/.test(await toastText(page)) && (await page.locator('#respostas .toast').count()) >= 1);
+  await page.keyboard.press('Escape'); await page.waitForSelector('#respostas', { state: 'detached' });
+  check('Esc fecha o diálogo e o foco volta ao botão "⋯" do cartão', await mbtn.evaluate((b) => b === document.activeElement));
+  // contrato: membro só apaga as próprias; não exporta CSV da apresentação alheia
+  const forced = await page.evaluate(async (id) => { const { api } = await import('/js/api.js'); const r = await api.del(`/api/presentations/${id}/interactions`, { query: { elementId: 'frm9' } }); let csv = null; try { await api.get(`/api/presentations/${id}/interactions.csv`, { blob: true }); } catch (e) { csv = e.status; } return { deleted: r.deleted, csv }; }, CAIO_PRES);
+  check('API (contrato no mock): membro que força DELETE na apresentação alheia apaga SÓ as próprias respostas; CSV alheio é 403', forced.deleted === 1 && forced.csv === 403 && (await mstate()).interactions.filter((x) => x.elementId === 'frm9').map((x) => x.userId).join() === IDS.admin, forced);
+  await collectCsp(page); await ctx.close();
+  // admin: qualquer apresentação; estado vazio (estado zerado: a Bia acabou de apagar a própria resposta em frm9)
+  mock.reset();
+  ({ ctx, page } = await asUser('ana.admin@am.test', { tag: 'respostas-admin' }));
+  await gotoAcervo(page);
+  await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
+  await page.getByRole('menuitem', { name: 'Respostas e participações…' }).click(); await page.waitForSelector('#respostas[open] .resp');
+  const g9 = await page.$$eval('#respostas .resp', (l) => l.map((sec) => [sec.dataset.element, sec.querySelector('.ey').textContent, sec.querySelectorAll('tbody tr').length]));
+  check('admin vê "Respostas e participações…" em apresentação de outra pessoa e TODAS as respostas (elemento fora do conteúdo atual identificado)', g9.length === 1 && g9[0][0] === 'frm9' && /fora do conteúdo atual/.test(g9[0][1]) && g9[0][2] === 2, g9);
+  await page.keyboard.press('Escape'); await page.waitForSelector('#respostas', { state: 'detached' });
+  await cardByTitle(page, 'Apresentação do Admin — Visão geral').locator('button[aria-haspopup=menu]').click();
+  await page.getByRole('menuitem', { name: 'Respostas e participações…' }).click(); await page.waitForSelector('#respostas[open] #resp-vazio');
+  check('sem formulário, votação nem quadro: estado vazio explica o que aparece ali', /Nenhuma resposta ainda/.test(await page.innerText('#resp-vazio')));
+  await page.keyboard.press('Escape');
+  await collectCsp(page); await ctx.close();
+}
+
+/* ═════════════════════════════ 6g. Nova a partir de projeto pronto ═════════════════════════════ */
+async function modelosTests() {
+  head('6g. Acervo — nova a partir de projeto pronto (BE-ED-04)');
+  mock.reset();
+  const { ctx, page } = await asUser('bia@am.test', { tag: 'modelos' });
+  await gotoAcervo(page);
+  check('botão "Nova a partir de projeto pronto" ao lado de "Nova apresentação" (abre diálogo)', (await page.locator('#btn-modelos[aria-haspopup=dialog]').count()) === 1 && (await page.getByRole('button', { name: 'Nova apresentação', exact: true }).count()) === 1);
+  await page.click('#btn-modelos'); await page.waitForSelector('#modelos[open] .tpl');
+  await page.waitForFunction(() => [...document.querySelectorAll('#modelos .tpl__pv')].every((i) => i.complete && i.naturalWidth > 0));
+  const cards = await page.$$eval('#modelos .tpl', (l) => l.map((b) => ({ i: Number(b.dataset.modelo), name: b.querySelector('.tpl__name').textContent, desc: b.querySelector('.tpl__desc').textContent, meta: b.querySelector('.tpl__meta').textContent, key: b.getAttribute('aria-keyshortcuts'), img: b.querySelector('img').naturalWidth })));
+  const src = fs.readFileSync(COVER_JS, 'utf8');
+  const tpl = [...src.matchAll(/\{ name: '([^']+)', desc: '([^']+)'/g)].map((m) => [m[1], m[2]]);
+  check('os 6 projetos prontos da capa do editor, com os MESMOS nomes e descrições de studio/cover.js e na mesma ordem (índice 0–5)', tpl.length === 6 && cards.length === 6 && cards.every((c, i) => c.i === i && c.name === tpl[i][0] && c.desc === tpl[i][1]), { tpl, cards: cards.map((c) => c.name) });
+  check('cada cartão traz a miniatura do 1º slide (carregada), o nº de slides e a tecla 1–6', cards.every((c, i) => c.img === 640 && /^0\d slides\d$/.test(c.meta) && c.key === String(i + 1)), cards.map((c) => c.meta));
+  check('é a vista "Projetos prontos" da capa: prancha navy, "Voltar Esc", "06 projetos", foco no 1º projeto', /Voltar/i.test(await page.locator('#modelos [data-act=cancel]').innerText()) && /06 projetos/i.test(await page.locator('#modelos .tpl__n').innerText()) && (await page.evaluate(() => document.activeElement.dataset.modelo)) === '0' && (await page.evaluate(() => getComputedStyle(document.querySelector('#modelos')).backgroundColor)) === 'rgb(0, 30, 50)');
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
+  check('setas navegam entre os projetos (como na capa)', (await page.evaluate(() => document.activeElement.dataset.modelo)) === '2');
+  await page.keyboard.press('Escape'); await page.waitForSelector('#modelos', { state: 'detached' });
+  check('Esc fecha e devolve o foco ao botão', (await page.evaluate(() => document.activeElement.id)) === 'btn-modelos');
+  await mpost('/__test/clear-requests');
+  await page.click('#btn-modelos'); await page.waitForSelector('#modelos[open] .tpl');
+  await Promise.all([page.waitForURL(/\/editor\/[0-9a-f-]{36}\?modelo=2$/), page.keyboard.press('3')]);
+  let st = await mstate(); let made = st.created.find((c) => page.url().includes(c.id));
+  const post = st.requests.find((r) => r.method === 'POST' && r.path === '/api/presentations');
+  check('tecla 3: POST /api/presentations {source:"new", title:"Status report executivo"} (com CSRF) e abre /editor/<novo-id>?modelo=2', made && made.source === 'new' && made.title === 'Status report executivo' && !!post?.csrf && post.csrf === post.cookieCsrf, { made, url: page.url() });
+  await gotoAcervo(page);
+  await page.click('#btn-modelos'); await page.waitForSelector('#modelos[open] .tpl');
+  await Promise.all([page.waitForURL(/\?modelo=5$/), page.click('#modelos .tpl[data-modelo="5"]')]);
+  st = await mstate(); made = st.created.find((c) => page.url().includes(c.id));
+  check('clique no 6º (Apresentação institucional A&M) cria com esse nome e abre ?modelo=5', made?.title === 'Apresentação institucional A&M' && new URL(page.url()).search === '?modelo=5', made);
+  await gotoAcervo(page, '?aba=minhas');
+  await page.route('**/api/presentations', (r) => (r.request().method() === 'POST' ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'internal', message: 'Erro interno do servidor.' } }) }) : r.continue()));
+  await page.click('#btn-modelos'); await page.waitForSelector('#modelos[open] .tpl'); await page.click('#modelos .tpl[data-modelo="0"]');
+  await page.waitForSelector('#modelos .toast--error');
+  check('falha ao criar: aviso de erro DENTRO do diálogo (visível e acessível) e os projetos voltam a responder', (await page.locator('#modelos.is-busy').count()) === 0 && /Erro interno/.test(await toastText(page)) && /0\d slides/i.test(await page.locator('#modelos .tpl[data-modelo="0"] .tpl__meta').innerText()));
+  await page.unroute('**/api/presentations');
+  await page.keyboard.press('Escape');
+  await collectCsp(page); await ctx.close();
+}
+
+/* ═════════════════════════════ 6h. Baixar como HTML/PDF/PowerPoint e histórico ═════════════════════════════ */
+async function baixarTests() {
+  head('6h. Acervo — baixar como HTML/PDF/PowerPoint e histórico de versões (F5, BE-ED-08)');
+  mock.reset();
+  let { ctx, page } = await asUser('bia@am.test', { tag: 'baixar' });
+  await gotoAcervo(page);
+  const own = cardByTitle(page, 'Plano estratégico 2027 (Bia)');
+  await own.locator('button[aria-haspopup=menu]').click();
+  const links = await page.$$eval('.menu a[role=menuitem]', (l) => l.map((a) => ({ t: a.textContent, href: a.getAttribute('href'), target: a.target, rel: a.rel, name: a.getAttribute('aria-label') })));
+  const exp = links.filter((l) => /^Baixar como/.test(l.t));
+  check('dono: "Baixar como HTML / PDF / PowerPoint" abrem /editor/<id>?exportar=html|pdf|pptx em NOVA aba (rel=noopener)', JSON.stringify(exp.map((l) => [l.t, l.href])) === JSON.stringify([['Baixar como HTML', `/editor/${PLANO}?exportar=html`], ['Baixar como PDF', `/editor/${PLANO}?exportar=pdf`], ['Baixar como PowerPoint', `/editor/${PLANO}?exportar=pptx`]]) && exp.every((l) => l.target === '_blank' && /noopener/.test(l.rel) && /nova aba/.test(l.name)), exp);
+  check('dono: "Histórico de versões" no menu aponta para /editor/<id>?historico=1', links.some((l) => l.t === 'Histórico de versões' && l.href === `/editor/${PLANO}?historico=1`), links);
+  const [popup] = await Promise.all([page.waitForEvent('popup'), page.getByRole('menuitem', { name: 'Baixar como PDF' }).click()]);
+  await popup.waitForLoadState('domcontentloaded');
+  check('clicar abre a nova aba no editor já pedindo a exportação (?exportar=pdf) e o menu fecha', new URL(popup.url()).pathname === `/editor/${PLANO}` && new URL(popup.url()).search === '?exportar=pdf' && (await page.locator('.menu').count()) === 0, popup.url());
+  await popup.close();
+  await own.locator('button[aria-haspopup=menu]').focus(); await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: 'Baixar como HTML' }).focus();
+  const [pop2] = await Promise.all([page.waitForEvent('popup'), page.keyboard.press('Enter')]);
+  check('pelo teclado (Enter no item) também abre ?exportar=html', new URL(pop2.url()).search === '?exportar=html');
+  await pop2.close();
+  await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
+  check('quem não pode editar NÃO vê "Baixar como" nem "Histórico de versões"', (await page.locator('.menu a[role=menuitem]').count()) === 0 && (await page.locator('.menu__hd').count()) === 0);
+  await page.keyboard.press('Escape');
+  await collectCsp(page); await ctx.close();
+  ({ ctx, page } = await asUser('ana.admin@am.test', { tag: 'baixar-admin' }));
+  await gotoAcervo(page);
+  await cardByTitle(page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
+  check('admin: "Baixar como…" também nas apresentações dos outros', (await page.getByRole('menuitem', { name: /^Baixar como/ }).count()) === 3);
+  await page.keyboard.press('Escape');
   await collectCsp(page); await ctx.close();
 }
 
@@ -863,6 +1019,67 @@ async function a11yStructure(page) {
   });
 }
 
+/** Contraste medido em PIXELS (o fundo real: degradês da prancha, cartões translúcidos, hover). Deixa o texto transparente, captura a tela
+ *  e, para cada trecho de texto visível (recortado pelos ancestrais com overflow ≠ visible), compara a cor do texto com o fundo pixel a pixel
+ *  (2º percentil, para um pixel isolado não decidir). Com um diálogo modal aberto, mede só o diálogo (o resto está inerte e coberto).
+ *  Depois devolve a cor ao texto. Só para testes: mexe em element.style pelo CSSOM, o que a CSP não bloqueia. */
+async function pixelContrast(page) {
+  const runs = await page.evaluate(() => {
+    const parse = (c) => { const m = c.match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1]; };
+    const root = [...document.querySelectorAll('dialog[open]')].pop() || document.body;
+    const out = [];
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) {
+      const t = w.currentNode; if (!t.textContent.trim()) continue; const el = t.parentElement; if (!el) continue;
+      if (el.closest('[hidden], .sr-only, noscript, script, style, option, select')) continue;
+      const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+      if (el.closest('[disabled], [aria-disabled=true]')) continue;
+      let op = 1; for (let n = el; n && n.nodeType === 1; n = n.parentElement) op *= Number(getComputedStyle(n).opacity) || 1;
+      if (op < 0.05) continue;
+      const fg = parse(cs.color); fg[3] *= op;
+      let clip = [0, 0, innerWidth, innerHeight];
+      for (let n = el; n && n.nodeType === 1; n = n.parentElement) { const c2 = getComputedStyle(n); if (c2.overflowX !== 'visible' || c2.overflowY !== 'visible') { const b = n.getBoundingClientRect(); clip = [Math.max(clip[0], b.left), Math.max(clip[1], b.top), Math.min(clip[2], b.right), Math.min(clip[3], b.bottom)]; } }
+      const r = document.createRange(); r.selectNodeContents(t);
+      const rects = [...r.getClientRects()].map((q) => [Math.max(q.left, clip[0]), Math.max(q.top, clip[1]), Math.min(q.right, clip[2]), Math.min(q.bottom, clip[3])]).filter(([l, tp, rt, b]) => rt - l > 2 && b - tp > 4);
+      if (!rects.length) continue;
+      const size = parseFloat(cs.fontSize); const bold = Number(cs.fontWeight) >= 700;
+      out.push({ text: t.textContent.trim().slice(0, 40), sel: typeof el.className === 'string' && el.className ? el.className.split(' ')[0] : el.tagName.toLowerCase(), fg, large: size >= 24 || (size >= 18.66 && bold), rects });
+    }
+    window.__pxFocus = document.activeElement; document.activeElement?.blur?.();
+    for (const e of document.querySelectorAll('body *')) for (const [k, v] of [['color', 'transparent'], ['-webkit-text-fill-color', 'transparent'], ['text-shadow', 'none'], ['text-decoration-color', 'transparent']]) e.style.setProperty(k, v, 'important');
+    return out;
+  });
+  await sleep(60);
+  const png = await page.screenshot();
+  return page.evaluate(async ({ b64, runs }) => {
+    for (const e of document.querySelectorAll('body *')) for (const k of ['color', '-webkit-text-fill-color', 'text-shadow', 'text-decoration-color']) e.style.removeProperty(k);
+    for (const e of document.querySelectorAll('[style=""]')) e.removeAttribute('style');
+    window.__pxFocus?.focus?.({ preventScroll: true });
+    const img = new Image(); img.src = `data:image/png;base64,${b64}`; await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    const D = g.getImageData(0, 0, c.width, c.height).data;
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    const L = (r, gg, b) => 0.2126 * lin(r) + 0.7152 * lin(gg) + 0.0722 * lin(b);
+    const bad = []; let n = 0; let margin = Infinity;
+    for (const run of runs) {
+      const ratios = [];
+      for (const [l, t, r, b] of run.rects) {
+        for (let y = Math.ceil(t + 1); y < Math.floor(b - 1); y += 2) for (let x = Math.ceil(l + 1); x < Math.floor(r - 1); x += 2) {
+          if (x < 0 || y < 0 || x >= c.width || y >= c.height) continue;
+          const i = (y * c.width + x) * 4; const a = run.fg[3];
+          const Lb = L(D[i], D[i + 1], D[i + 2]); const Lf = L(run.fg[0] * a + D[i] * (1 - a), run.fg[1] * a + D[i + 1] * (1 - a), run.fg[2] * a + D[i + 2] * (1 - a));
+          ratios.push((Math.max(Lf, Lb) + 0.05) / (Math.min(Lf, Lb) + 0.05));
+        }
+      }
+      if (!ratios.length) continue;
+      ratios.sort((p, q) => p - q); const worst = ratios[Math.floor(ratios.length * 0.02)]; const need = run.large ? 3 : 4.5;
+      n++; margin = Math.min(margin, worst / need);
+      if (worst < need) bad.push({ text: run.text, sel: run.sel, ratio: +worst.toFixed(2) });
+    }
+    return { n, bad, margin: Number.isFinite(margin) ? +margin.toFixed(2) : 0 };
+  }, { b64: png.toString('base64'), runs });
+}
+
 async function a11yAndResponsive() {
   head('9. Acessibilidade, teclado, movimento reduzido e responsivo');
   mock.reset();
@@ -929,12 +1146,209 @@ async function a11yAndResponsive() {
   await u2.page.keyboard.press('Escape'); await u2.page.waitForSelector('dialog', { state: 'detached' });
   check('Esc fecha o diálogo e devolve o foco ao botão que o abriu', await btn.evaluate((b) => b === document.activeElement || b.contains(document.activeElement)));
   await collectCsp(u2.page); await u2.ctx.close();
-  // contraste dos pares de cor do tema (gradientes do painel lateral)
+  // contraste medido em PIXELS sobre a prancha (o degradê e os cartões translúcidos da capa não entram no cálculo por cores acima)
+  for (const vp of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const tag = `${vp.width}px`;
+    const anon = await newCtx({ viewport: vp }); const ap = await newPage(anon, `px-anon-${tag}`);
+    const tok = `tok-px-${vp.width}-0123456789abcdef`; await mpost(`/__test/link-token?t=${tok}&type=invite&u=eva`);   // convite novo (o link vale uma vez)
+    for (const [p, sel] of [['/entrar', '#form-login'], ['/esqueci-senha', '#form-esqueci'], ['/rota-que-nao-existe', 'h1'], [`/auth/confirmar?token_hash=${tok}&type=invite`, '#form-senha']]) {
+      await ap.goto(`${ORIGIN}${p}`); await ap.waitForSelector(sel); await sleep(700);
+      const r = await pixelContrast(ap);
+      check(`${p.split('?')[0]} @${tag}: contraste AA medido em pixels em ${r.n} textos (menor folga ${r.margin}×)`, r.n > 3 && r.bad.length === 0, r.bad.slice(0, 5));
+    }
+    await collectCsp(ap); await anon.close();
+    const b = await asUser('bia@am.test', { viewport: vp, tag: `px-bia-${tag}` });
+    await gotoAcervo(b.page); await sleep(1300);
+    let r = await pixelContrast(b.page);
+    check(`/acervo @${tag}: contraste AA medido em pixels em ${r.n} textos (menor folga ${r.margin}×)`, r.n > 10 && r.bad.length === 0, r.bad.slice(0, 5));
+    // cartões com hover (fundo mais claro), inclusive os que ficam no ponto claro do degradê
+    const cards = b.page.locator(CARD); const nCards = Math.min(await cards.count(), vp.width > 800 ? 8 : 2); const badHover = []; let mHover = Infinity;
+    for (let i = 0; i < nCards; i++) { await cards.nth(i).locator('.card__meta').hover(); await sleep(450); r = await pixelContrast(b.page); mHover = Math.min(mHover, r.margin); badHover.push(...r.bad.map((x) => ({ card: i, ...x }))); }
+    await b.page.mouse.move(2, vp.height - 2);
+    check(`/acervo @${tag}: contraste AA medido em pixels com o cursor sobre cada um dos ${nCards} primeiros cartões (menor folga ${mHover}×)`, nCards > 0 && badHover.length === 0, badHover.slice(0, 5));
+    await b.page.click('#btn-modelos'); await b.page.waitForSelector('#modelos[open] .tpl'); await sleep(1100);
+    r = await pixelContrast(b.page);
+    check(`"Projetos prontos" @${tag}: contraste AA medido em pixels em ${r.n} textos (menor folga ${r.margin}×)`, r.n > 10 && r.bad.length === 0, r.bad.slice(0, 5));
+    await b.page.locator('#modelos .tpl').nth(vp.width > 800 ? 3 : 1).hover(); await sleep(450);
+    r = await pixelContrast(b.page);
+    check(`"Projetos prontos" @${tag} com o cursor sobre um projeto: contraste AA medido em pixels`, r.bad.length === 0, r.bad.slice(0, 5));
+    await b.page.keyboard.press('Escape'); await b.page.waitForSelector('#modelos', { state: 'detached' });
+    await cardByTitle(b.page, 'Plano estratégico 2027 (Bia)').locator('button[aria-haspopup=menu]').click();
+    await b.page.getByRole('menuitem', { name: 'Respostas e participações…' }).click(); await b.page.waitForSelector('#respostas .resp'); await sleep(500);
+    r = await pixelContrast(b.page);
+    check(`"Respostas e participações" @${tag}: contraste AA medido em pixels em ${r.n} textos (menor folga ${r.margin}×)`, r.n > 10 && r.bad.length === 0, r.bad.slice(0, 5));
+    await b.page.keyboard.press('Escape'); await b.page.waitForSelector('#respostas', { state: 'detached' });
+    for (const [p, sel] of [['/acervo?aba=lixeira', CARD], ['/importar', '#zona']]) {
+      await b.page.goto(`${ORIGIN}${p}`); await b.page.waitForSelector(sel); await sleep(1000);
+      r = await pixelContrast(b.page);
+      check(`${p} @${tag}: contraste AA medido em pixels em ${r.n} textos (menor folga ${r.margin}×)`, r.n > 5 && r.bad.length === 0, r.bad.slice(0, 5));
+    }
+    await collectCsp(b.page); await b.ctx.close();
+  }
+  const o = await asUser('otto.admin@am.test', { viewport: { width: 1440, height: 900 }, tag: 'px-vazio' });
+  await gotoAcervo(o.page, '?aba=minhas'); await sleep(900);
+  const rv = await pixelContrast(o.page);
+  check(`/acervo vazio (pilha de pranchas) @1440px: contraste AA medido em pixels em ${rv.n} textos (menor folga ${rv.margin}×)`, rv.n > 5 && rv.bad.length === 0, rv.bad.slice(0, 5));
+  await collectCsp(o.page); await o.ctx.close();
+  // contraste dos pares de cor dos dois temas (claro = editor; prancha = capa, inclusive o ponto mais claro do degradê, #13364F)
   const lum = (hex) => { const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((x) => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
   const cr = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-  const pairs = [['#ffffff', '#002a46', 4.5], ['#c4d4e5', '#0d4a73', 4.5], ['#dbe6f1', '#0d4a73', 4.5], ['#c4d4e5', '#001e32', 4.5], ['#002a46', '#f78c16', 4.5], ['#a24f00', '#ffffff', 4.5], ['#566579', '#f3f6f9', 4.5], ['#b3261e', '#ffffff', 4.5], ['#14633a', '#e6f4ec', 4.5], ['#7a4a00', '#fff4dc', 4.5], ['#174b7a', '#e8f1fa', 4.5], ['#66758a', '#ffffff', 4.5]];
+  const pairs = [['#ffffff', '#002a46', 4.5], ['#dce5f0', '#001e32', 4.5], ['#a3b8d6', '#13364f', 4.5], ['#7ea1c3', '#13364f', 4.5], ['#ffffff', '#13364f', 4.5], ['#002a46', '#f78c16', 4.5], ['#002a46', '#e07a0a', 4.5],
+    ['#a24f00', '#ffffff', 4.5], ['#566579', '#ffffff', 4.5], ['#566579', '#e6ebf1', 4.5], ['#43698f', '#ffffff', 4.5], ['#0b2545', '#ffe89a', 4.5], ['#3e4c5e', '#c9e1f7', 4.5], ['#b3261e', '#ffffff', 4.5], ['#14633a', '#e6f4ec', 4.5], ['#7a4a00', '#fff4dc', 4.5], ['#174b7a', '#e8f1fa', 4.5], ['#66758a', '#ffffff', 4.5], ['#7a8da3', '#ffffff', 3]];
   const lowP = pairs.filter(([f, b, m]) => cr(f, b) < m).map(([f, b]) => `${f}/${b}=${cr(f, b).toFixed(2)}`);
-  check('pares de cor do tema (inclui textos sobre o painel em gradiente) passam em AA', lowP.length === 0, lowP);
+  check('pares de cor dos dois temas passam em AA (texto 4,5:1; borda de campo #7A8DA3 sobre branco 3:1, WCAG 1.4.11)', lowP.length === 0, lowP);
+}
+
+/* ═════════════════════════════ 9b. Família visual = editor original (medidas computadas) ═════════════════════════════ */
+const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k]]));
+const same = (a, b, keys) => keys.every((k) => a[k] === b[k]);
+const fam0 = (f) => String(f).split(',')[0].replace(/["']/g, '').trim();
+const PROPS = ['background-color', 'color', 'border-top-color', 'border-top-left-radius', 'height', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-transform', 'box-shadow', 'background-image', 'transform', 'border-left-color', 'border-left-width', 'width', 'padding-top', 'backdrop-filter'];
+/** Estilos computados (as mesmas propriedades) de um seletor ou elemento, num pseudo-elemento opcional. Roda na página. */
+const STYLE_FN = `window.__cs = (el, pseudo) => { const c = getComputedStyle(typeof el === 'string' ? document.querySelector(el) : el, pseudo || null); return Object.fromEntries(${JSON.stringify(PROPS)}.map((p) => [p, c.getPropertyValue(p)])); };`;
+
+/** Lê, no editor ORIGINAL (original/Canteiro-AM (3).html) com as mesmas fontes, os estilos dos componentes que a plataforma copia. */
+async function editorStyles() {
+  const ctx = await newCtx({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();   // fora de newPage(): o console do editor não conta como erro das páginas da plataforma
+  await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: fs.readFileSync(path.join(FONTS, 'gf.css'), 'utf8') }));
+  await page.route('https://fonts.gstatic.com/**', (r) => { const f = path.join(FONTS, path.basename(new URL(r.request().url()).pathname)); return fs.existsSync(f) ? r.fulfill({ status: 200, contentType: 'font/woff2', body: fs.readFileSync(f) }) : r.abort(); });
+  await page.goto(pathToFileURL(ORIGINAL).href);
+  await page.waitForFunction(() => window.AMCover && window.AMStudio, null, { timeout: 30000 });
+  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(STYLE_FN);
+  // "Minhas obras" aberta, com um cartão de obra com a marcação do cover.js (selo, miniatura sem imagem, metadados, título)
+  await page.evaluate(() => window.AMCover.open('hist'));
+  await page.waitForSelector('#cvHist.on');
+  await page.evaluate(() => {
+    const g = document.getElementById('cvHistGrid'); g.hidden = false;
+    const a = document.createElement('article'); a.className = 'cv-hcard'; a.id = 'tCard';
+    a.innerHTML = '<button type="button" class="cv-hopen"><span class="cv-pv cv-pv-bad"></span><span class="cv-htag">Aberta no editor</span></button><div class="cv-hb"><span class="cv-hmeta"><span>06 slides</span><span>agora</span></span><span class="cv-hname">Obra de teste</span></div><div class="cv-hact"><button type="button" class="cv-hgo">Abrir</button></div>';
+    g.prepend(a);
+    for (const [cls, tag] of [['mb pri', 'button'], ['mb', 'button']]) { const b = document.createElement(tag); b.className = cls; b.textContent = 'Botão'; b.style.cssText = 'position:fixed;left:30px;top:' + (cls === 'mb' ? 140 : 90) + 'px;z-index:2147483000'; b.id = cls === 'mb' ? 'tSec' : 'tPri'; document.body.append(b); }
+    const m = document.createElement('div'); m.className = 'xmenu'; m.id = 'tMenu'; m.innerHTML = '<div class="xi">Item</div>'; m.style.cssText = 'left:300px;top:300px'; document.body.append(m);
+  });
+  await sleep(700); await page.mouse.move(700, 880);
+  const E = await page.evaluate(() => ({
+    body: __cs(document.body), cover: __cs('#cover'), cvBg: __cs('#cover .cv-bg'), cvGrid: __cs('#cover .cv-bg', '::before'),
+    card: __cs('#tCard'), tag: __cs('#tCard .cv-htag'), pvBad: __cs('#tCard .cv-pv-bad'), name: __cs('#tCard .cv-hname'), meta: __cs('#tCard .cv-hmeta'),
+    eyebrow: __cs('#cover .cv-eyebrow'), search: __cs('#cover .cv-search'), segOn: __cs('#cover .cv-seg button[aria-pressed=true]'), note: __cs('#cvNote'),
+    pri: __cs('#tPri'), sec: __cs('#tSec'), toast: __cs('#toast'), top: __cs('#top'), mbar: __cs('#mbar button'), brand: __cs('#top .brand .sub em'),
+    menu: __cs('#tMenu'), menuItem: __cs('#tMenu .xi'),
+    fontsHref: [...document.querySelectorAll('link[rel=stylesheet][href*="fonts.googleapis.com"]')].map((l) => l.getAttribute('href')),
+    gridMask: getComputedStyle(document.querySelector('#cover .cv-bg'), '::before').getPropertyValue('mask-image'),
+    gridSize: getComputedStyle(document.querySelector('#cover .cv-bg'), '::before').getPropertyValue('background-size'),
+  }));
+  await page.hover('#tCard'); await sleep(600);
+  E.cardHover = await page.evaluate(() => __cs('#tCard'));
+  await page.hover('#tPri'); await sleep(400);
+  E.priHover = await page.evaluate(() => __cs('#tPri'));
+  // modal (.mdl), montado como o confirmBox do editor
+  await page.evaluate(() => { window.AMCover.close(); });
+  await sleep(900);
+  await page.evaluate(() => {
+    const md = document.getElementById('modal');
+    md.innerHTML = '<div class="mdl"><div class="mdl-b"><div class="mdl-ic"></div><div><div class="mdl-ey">Confirmar</div><h3>Título</h3><p>Texto</p></div></div><div class="mdl-a"></div></div>';
+    md.classList.add('open');
+  });
+  await sleep(500);
+  Object.assign(E, await page.evaluate(() => ({ backdrop: __cs('#modal'), mdl: __cs('#modal .mdl'), mdlStripe: __cs('#modal .mdl', '::before'), mdlIc: __cs('#modal .mdl-ic'), mdlEy: __cs('#modal .mdl-ey'), mdlH: __cs('#modal .mdl h3'), mdlP: __cs('#modal .mdl p') })));
+  await ctx.close();
+  return E;
+}
+
+async function familiaVisual() {
+  head('9b. Família visual = editor original (estilos COMPUTADOS no editor × na plataforma)');
+  mock.reset();
+  const E = await editorStyles();
+  const u = await asUser('bia@am.test', { viewport: { width: 1440, height: 900 }, tag: 'familia' });
+  const page = u.page;
+  await gotoAcervo(page); await sleep(1400); await page.mouse.move(700, 895);
+  await page.evaluate(STYLE_FN);
+  const P = await page.evaluate(() => ({
+    body: __cs(document.body), before: __cs(document.body, '::before'), after: __cs(document.body, '::after'),
+    pri: __cs('#btn-nova'), card: __cs('li.card[data-owner=me]'), tag: __cs('li.card .card__badges .badge--own'),
+    pvBad: __cs([...document.querySelectorAll('li.card .card__thumb')].find((t) => t.querySelector('.ph'))),
+    name: __cs('li.card .card__title'), meta: __cs('li.card .card__meta'), eyebrow: __cs('.page__head .eyebrow'),
+    search: __cs('#busca'), segOn: __cs('.tab[aria-selected=true]'),
+    gridMask: getComputedStyle(document.body, '::after').getPropertyValue('mask-image'), gridSize: getComputedStyle(document.body, '::after').getPropertyValue('background-size'),
+    fonts: { jb: document.fonts.check('500 11.5px "JetBrains Mono"'), rc: document.fonts.check('700 16px "Roboto Condensed"'), inter: document.fonts.check('600 13px Inter') },
+    fontFamilies: { eyebrow: getComputedStyle(document.querySelector('.page__head .eyebrow')).fontFamily, h1: getComputedStyle(document.querySelector('h1')).fontFamily },
+  }));
+  const keysBtn = ['background-color', 'color', 'border-top-color', 'border-top-left-radius', 'height', 'font-family', 'font-size', 'font-weight'];
+  check('botão primário = .mb.pri do editor: laranja #F78C16, texto navy #002A46, borda laranja, raio 8 px, 38 px, Inter 13 px/600', same(P.pri, E.pri, keysBtn) && P.pri['background-color'] === 'rgb(247, 140, 22)' && P.pri.color === 'rgb(0, 42, 70)', { plataforma: pick(P.pri, keysBtn), editor: pick(E.pri, keysBtn) });
+  await page.hover('#btn-nova'); await sleep(350);
+  const priHover = await page.evaluate(() => __cs('#btn-nova'));
+  check('hover do primário = o do editor (#E07A0A, texto navy)', priHover['background-color'] === E.priHover['background-color'] && priHover['background-color'] === 'rgb(224, 122, 10)' && priHover.color === E.priHover.color, { p: priHover['background-color'], e: E.priHover['background-color'] });
+  check('fonte da página = a do editor (Inter, Arial, sans-serif) e as 3 famílias carregadas (Inter, Roboto Condensed, JetBrains Mono)', P.body['font-family'] === E.body['font-family'] && P.fonts.jb && P.fonts.rc && P.fonts.inter, { p: P.body['font-family'], e: E.body['font-family'], fonts: P.fonts });
+  const href = E.fontsHref[0];
+  const pagesHtml = ['entrar/index.html', 'esqueci-senha/index.html', 'auth/confirmar/index.html', 'acervo/index.html', 'admin/index.html', 'importar/index.html', '404.html'];
+  const hrefs = pagesHtml.map((f) => (/href="(https:\/\/fonts\.googleapis\.com\/css2[^"]+)"/.exec(fs.readFileSync(path.join(WEB, f), 'utf8')) || [])[1]?.replace(/&amp;/g, '&'));
+  check('as 7 páginas carregam EXATAMENTE as famílias e pesos do editor (Inter 400–700, JetBrains Mono 400–600, Roboto 300–700, Roboto Condensed 400/700)', !!href && /JetBrains\+Mono:wght@400;500;600/.test(href) && hrefs.every((x) => x === href), { editor: href, hrefs });
+  check('sobretítulos em JetBrains Mono (= .cv-eyebrow: 11,5 px, caixa alta, espaçamento .16em, aço #7EA1C3) e títulos em Roboto Condensed', fam0(P.fontFamilies.eyebrow) === 'JetBrains Mono' && fam0(P.fontFamilies.h1) === 'Roboto Condensed' && same(P.eyebrow, E.eyebrow, ['font-size', 'font-weight', 'letter-spacing', 'text-transform', 'color']), { p: pick(P.eyebrow, ['font-family', 'font-size', 'letter-spacing', 'color']), e: pick(E.eyebrow, ['font-family', 'font-size', 'letter-spacing', 'color']) });
+  check('prancha = fundo da capa: navy #001E32, o mesmo degradê de .cv-bg e a mesma grade 96/24 px com máscara', P.body['background-color'] === E.cover['background-color'] && P.before['background-image'].includes(E.cvBg['background-image']) && P.after['background-image'] === E.cvGrid['background-image'] && P.gridSize === E.gridSize && P.gridMask === E.gridMask, { bg: [P.body['background-color'], E.cover['background-color']], size: [P.gridSize, E.gridSize] });
+  const keysCard = ['border-top-left-radius', 'border-top-color', 'background-color'];
+  check('cartão = .cv-hcard de "Minhas obras" (raio 14 px, linha rgba(163,184,214,.16), fundo rgba(255,255,255,.035))', same(P.card, E.card, keysCard), { p: pick(P.card, keysCard), e: pick(E.card, keysCard) });
+  await page.locator('li.card[data-owner=me]').first().locator('.card__meta').hover(); await sleep(600);
+  const cardHover = await page.evaluate(() => __cs('li.card[data-owner=me]'));
+  const keysHover = ['transform', 'border-top-color', 'background-color', 'box-shadow'];
+  check('hover do cartão = o da capa: sobe 3 px, borda laranja .55, fundo .06 e a mesma sombra', same(cardHover, E.cardHover, keysHover), { p: pick(cardHover, keysHover), e: pick(E.cardHover, keysHover) });
+  const keysTag = ['background-color', 'color', 'font-size', 'font-weight', 'letter-spacing', 'text-transform', 'border-top-left-radius', 'box-shadow'];
+  check('selo "Sua" = .cv-htag (laranja, navy, JetBrains Mono 9,5 px/700, caixa alta, raio 5 px, sombra)', same(P.tag, E.tag, keysTag) && fam0(P.tag['font-family']) === fam0(E.tag['font-family']), { p: pick(P.tag, keysTag), e: pick(E.tag, keysTag) });
+  check('miniatura vazia = .cv-pv-bad (listras #E3EAF2/#EBEEF1)', P.pvBad['background-image'] === E.pvBad['background-image'], { p: P.pvBad['background-image'], e: E.pvBad['background-image'] });
+  check('título do cartão = .cv-hname (Roboto Condensed 16 px/700, branco) e metadados = .cv-hmeta (JetBrains Mono 10 px, caixa alta, mesmo espaçamento)', same(P.name, E.name, ['font-size', 'font-weight', 'line-height', 'color']) && fam0(P.name['font-family']) === fam0(E.name['font-family']) && same(P.meta, E.meta, ['font-size', 'letter-spacing', 'text-transform']) && fam0(P.meta['font-family']) === fam0(E.meta['font-family']), { name: [pick(P.name, ['font-size', 'line-height']), pick(E.name, ['font-size', 'line-height'])], meta: [pick(P.meta, ['font-size', 'letter-spacing']), pick(E.meta, ['font-size', 'letter-spacing'])] });
+  check('desvio deliberado (AA): metadados no aço claro #A3B8D6 (--s4 da capa) em vez do #7EA1C3 de .cv-hmeta, que fica abaixo de 4,5:1 sobre o cartão no ponto claro do degradê', E.meta.color === 'rgb(126, 161, 195)' && P.meta.color === 'rgb(163, 184, 214)', { p: P.meta.color, e: E.meta.color });
+  check('busca = .cv-search (38 px, raio 9 px, fundo rgba(0,20,36,.45))', same(P.search, E.search, ['height', 'border-top-left-radius', 'background-color']), { p: pick(P.search, ['height', 'border-top-left-radius', 'background-color']), e: pick(E.search, ['height', 'border-top-left-radius', 'background-color']) });
+  check('aba selecionada = botão pressionado de .cv-seg (fundo aço .2, texto branco, traço laranja embaixo)', same(P.segOn, E.segOn, ['background-color', 'color', 'box-shadow', 'border-top-left-radius', 'font-size', 'font-weight']), { p: pick(P.segOn, ['background-color', 'box-shadow']), e: pick(E.segOn, ['background-color', 'box-shadow']) });
+  // diálogo (.mdl)
+  await page.evaluate(async () => { const { confirmDialog } = await import('/js/ui.js'); window.__d = confirmDialog({ title: 'Título', message: 'Texto' }); });
+  await page.waitForSelector('dialog.dlg[open]'); await sleep(500);
+  const D = await page.evaluate(() => ({ dlg: __cs('dialog.dlg'), stripe: __cs('dialog.dlg', '::before'), backdrop: __cs('dialog.dlg', '::backdrop'), ic: __cs('dialog.dlg .dlg__ic'), ey: __cs('dialog.dlg .ey'), h: __cs('dialog.dlg h2'), p: __cs('dialog.dlg p'), sec: __cs('dialog.dlg [data-act=cancel]') }));
+  check('diálogo = .mdl: 460 px, raio 16 px, a mesma sombra e a faixa de 3 px laranja/navy', same(D.dlg, E.mdl, ['width', 'border-top-left-radius', 'box-shadow', 'background-color']) && D.stripe.height === '3px' && D.stripe['background-image'] === E.mdlStripe['background-image'], { p: pick(D.dlg, ['width', 'box-shadow']), e: pick(E.mdl, ['width', 'box-shadow']), stripe: [D.stripe['background-image'], E.mdlStripe['background-image']] });
+  check('fundo do diálogo = o do #modal (rgba(0,20,35,.52) com desfoque de 3 px)', D.backdrop['background-color'] === E.backdrop['background-color'] && D.backdrop['backdrop-filter'] === E.backdrop['backdrop-filter'], { p: [D.backdrop['background-color'], D.backdrop['backdrop-filter']], e: [E.backdrop['background-color'], E.backdrop['backdrop-filter']] });
+  check('ícone 44 px (= .mdl-ic), sobretítulo em mono (= .mdl-ey), título (= .mdl h3) e texto (= .mdl p)', same(D.ic, E.mdlIc, ['width', 'height', 'border-top-left-radius', 'background-color']) && same(D.ey, E.mdlEy, ['font-size', 'font-weight', 'letter-spacing', 'text-transform', 'color']) && fam0(D.ey['font-family']) === 'JetBrains Mono' && same(D.h, E.mdlH, ['font-family', 'font-size', 'font-weight', 'color']) && same(D.p, E.mdlP, ['font-size', 'line-height', 'color']), { ey: [pick(D.ey, ['font-size', 'letter-spacing']), pick(E.mdlEy, ['font-size', 'letter-spacing'])] });
+  check('botão secundário = .mb (branco, navy, linha #DCE3EC, raio 8 px, 38 px)', same(D.sec, E.sec, keysBtn), { p: pick(D.sec, keysBtn), e: pick(E.sec, keysBtn) });
+  await page.keyboard.press('Escape'); await page.waitForSelector('dialog', { state: 'detached' });
+  // aviso na prancha (= .cv-note) e menu (= .xmenu)
+  await page.evaluate(async () => { const { toast } = await import('/js/ui.js'); toast('Teste', { kind: 'info', timeout: 0 }); });
+  await sleep(450);
+  const T = await page.evaluate(() => __cs('.toast'));
+  const keysNote = ['background-color', 'color', 'border-left-color', 'border-left-width', 'border-top-left-radius', 'font-size', 'font-weight', 'box-shadow'];
+  check('aviso na prancha = .cv-note da capa (branco, navy, filete laranja de 3 px, raio 12 px, 13 px/600, mesma sombra)', same(T, E.note, keysNote), { p: pick(T, keysNote), e: pick(E.note, keysNote) });
+  await page.locator('li.card').first().locator('button[aria-haspopup=menu]').click();
+  const M = await page.evaluate(() => ({ menu: __cs('.menu'), item: __cs('.menu .menu__item') }));
+  check('menu = .xmenu do editor (raio 12 px, linha #DCE3EC, mesma sombra, 6 px de respiro; itens de 32 px)', same(M.menu, E.menu, ['border-top-left-radius', 'border-top-color', 'box-shadow', 'padding-top', 'background-color']) && M.item.height === E.menuItem.height, { p: pick(M.menu, ['box-shadow', 'padding-top']), e: pick(E.menu, ['box-shadow', 'padding-top']), item: [M.item.height, E.menuItem.height] });
+  await page.keyboard.press('Escape');
+  // ⋯ na mesma linha das ações (VIS-07), a 1280 e a 1440 px
+  for (const w of [1280, 1440]) {
+    await page.setViewportSize({ width: w, height: 900 }); await sleep(300);
+    const rows = await page.$$eval('li.card:not(.card--skel)', (l) => l.map((li) => { const a = li.querySelector('.card__actions'); const first = a.querySelector('.btn'); const more = a.querySelector('.more > button'); return Math.abs(first.getBoundingClientRect().top - more.getBoundingClientRect().top); }));
+    check(`a ${w} px o botão "⋯" fica na MESMA linha das ações em todos os ${rows.length} cartões`, rows.length > 0 && rows.every((d) => d < 1), rows.filter((d) => d >= 1).length);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // avatares só na paleta A&M (VIS-11)
+  const AM = new Set(['rgb(219, 231, 243)', 'rgb(253, 230, 199)', 'rgb(227, 234, 242)', 'rgb(163, 184, 214)', 'rgb(126, 161, 195)', 'rgb(67, 105, 143)', 'rgb(0, 42, 70)', 'rgb(247, 140, 22)']);
+  const avs = await page.$$eval('.avatar', (l) => [...new Set(l.map((a) => getComputedStyle(a).backgroundColor))]);
+  check('avatares só com tons da paleta A&M (navy, aços, gelo, laranja)', avs.length > 1 && avs.every((c) => AM.has(c)), avs);
+  await collectCsp(page); await u.ctx.close();
+  // tema claro (= editor): barra superior, menu de navegação e aviso navy
+  const a = await asUser('ana.admin@am.test', { viewport: { width: 1440, height: 900 }, tag: 'familia-admin' });
+  await a.page.goto(`${ORIGIN}/admin#usuarios`); await a.page.waitForSelector('#u-tabela');
+  await a.page.evaluate(STYLE_FN);
+  await a.page.evaluate(async () => { const { toast } = await import('/js/ui.js'); toast('Teste', { kind: 'info', timeout: 0 }); });
+  await sleep(450);
+  const A = await a.page.evaluate(() => ({ top: __cs('.topbar'), topIn: __cs('.topbar__in'), nav: __cs('.topnav a:not([aria-current])'), brand: __cs('.brand__sub em'), toast: __cs('.toast'), body: __cs(document.body) }));
+  check('barra superior = #top do editor (navy, 54 px) com a marca "Canteiro." em Roboto Condensed 14,5 px', A.top['background-color'] === E.top['background-color'] && A.topIn.height === E.top.height && same(A.brand, E.brand, ['font-size', 'font-weight', 'color']) && fam0(A.brand['font-family']) === fam0(E.brand['font-family']), { p: [A.top['background-color'], A.topIn.height], e: [E.top['background-color'], E.top.height] });
+  check('links da barra = botões do #mbar (12,5 px/500, branco .8, 30 px, raio 7 px)', same(A.nav, E.mbar, ['font-size', 'font-weight', 'color', 'height', 'border-top-left-radius']), { p: pick(A.nav, ['font-size', 'color', 'height']), e: pick(E.mbar, ['font-size', 'color', 'height']) });
+  check('tema claro: fundo #E6EBF1 do editor e aviso = #toast (navy, branco, raio 10 px, 13 px/600)', A.body['background-color'] === 'rgb(230, 235, 241)' && same(A.toast, E.toast, ['background-color', 'color', 'border-top-left-radius', 'font-size', 'font-weight']), { p: pick(A.toast, ['background-color', 'border-top-left-radius']), e: pick(E.toast, ['background-color', 'border-top-left-radius']) });
+  // rótulo do seletor (VIS-12)
+  await a.page.goto(`${ORIGIN}/acervo`); await a.page.waitForSelector(CARD); await sleep(900);
+  await cardByTitle(a.page, 'Proposta Caio — Banco Aurora').locator('button[aria-haspopup=menu]').click();
+  await a.page.getByRole('menuitem', { name: 'Transferir propriedade…' }).click(); await a.page.waitForSelector('dialog.dlg select');
+  const lab = await a.page.evaluate(() => { const l = document.querySelector('dialog.dlg .field__label'); const s = document.querySelector('dialog.dlg select'); return { fw: getComputedStyle(l).fontWeight, fs: getComputedStyle(l).fontSize, forOk: l.htmlFor === s.id, cls: s.className }; });
+  check('rótulo do seletor estilizado como os demais (.field__label 600/12 px, ligado ao <select class="select">)', lab.fw === '600' && lab.fs === '12px' && lab.forOk && lab.cls === 'select', lab);
+  await a.page.keyboard.press('Escape');
+  await collectCsp(a.page); await a.ctx.close();
 }
 
 /* ═════════════════════════════ 10. Capturas de tela ═════════════════════════════ */
@@ -964,6 +1378,13 @@ async function screenshots() {
     await cardOf(u.page, 'Proposta Caio').locator('button[aria-haspopup=menu]').click(); await sleep(150);
     await u.page.screenshot({ path: path.join(SCREENS, `acervo-menu-${tag}.png`) });
     await u.page.keyboard.press('Escape');
+    await u.page.click('#btn-modelos'); await u.page.waitForSelector('#modelos[open] .tpl'); await sleep(900);
+    await u.page.screenshot({ path: path.join(SCREENS, `acervo-projetos-prontos-${tag}.png`) });
+    await u.page.keyboard.press('Escape'); await u.page.waitForSelector('#modelos', { state: 'detached' });
+    await cardOf(u.page, 'Plano estratégico 2027').locator('button[aria-haspopup=menu]').click(); await u.page.getByRole('menuitem', { name: 'Respostas e participações…' }).click();
+    await u.page.waitForSelector('#respostas .resp'); await sleep(450);
+    await u.page.screenshot({ path: path.join(SCREENS, `acervo-respostas-${tag}.png`) });
+    await u.page.keyboard.press('Escape'); await u.page.waitForSelector('#respostas', { state: 'detached' });
     await u.page.goto(`${ORIGIN}/importar`); await u.page.waitForSelector('#zona'); await sleep(300);
     await u.page.screenshot({ path: path.join(SCREENS, `importar-${tag}.png`), fullPage: true });
     await collectCsp(u.page); await u.ctx.close();
@@ -976,11 +1397,11 @@ async function screenshots() {
     await collectCsp(a.page); await a.ctx.close();
   }
   const files = fs.readdirSync(SCREENS).filter((f) => f.endsWith('.png'));
-  check(`capturas geradas (${files.length}) para entrar, acervo, admin e importar em 1280×720 e 390×844`, ['entrar', 'acervo', 'admin-usuarios', 'importar'].every((n) => sizes.every(([w, h]) => files.includes(`${n}-${w}x${h}.png`))), files.length);
+  check(`capturas geradas (${files.length}) para entrar, acervo (com projetos prontos e respostas), admin e importar em 1280×720 e 390×844`, ['entrar', 'acervo', 'acervo-projetos-prontos', 'acervo-respostas', 'admin-usuarios', 'importar'].every((n) => sizes.every(([w, h]) => files.includes(`${n}-${w}x${h}.png`))), files.length);
 }
 
 /* ═════════════════════════════ execução ═════════════════════════════ */
-const sections = [sourceHygiene, apiClient, loginTests, sessionTests, confirmTests, forgotTests, acervoTests, adminTests, importTests, a11yAndResponsive, screenshots];
+const sections = [sourceHygiene, apiClient, loginTests, sessionTests, confirmTests, forgotTests, acervoTests, respostasTests, modelosTests, baixarTests, adminTests, importTests, a11yAndResponsive, familiaVisual, screenshots];
 const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
 for (const fn of sections) {
   if (only && !only.some((o) => fn.name.toLowerCase().includes(o.toLowerCase()))) continue;

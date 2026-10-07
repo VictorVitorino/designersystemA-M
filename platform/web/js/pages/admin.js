@@ -4,7 +4,7 @@ import { api, ApiError, fieldErrors } from '../api.js';
 import { requireUser } from '../session.js';
 import {
   h, icon, button, avatar, tabs, confirmDialog, toast, toastError, announce, debounce, withBusy, replace, $, field,
-  stateBlock, loadingBlock, alertBox,
+  stateBlock, loadingBlock, alertBox, eyebrow,
 } from '../ui.js';
 import { timeAgo, formatDateTime, formatDate, formatNumber, formatBytes, plural, roleLabel, statusLabel } from '../format.js';
 
@@ -27,7 +27,7 @@ const TABS = [
 const tabList = h('div', { class: 'tabs', 'aria-label': 'Seções da administração' });
 const panel = h('div', { id: 'painel', role: 'tabpanel', tabindex: '-1' });
 replace(main,
-  h('div', { class: 'page__head' }, h('div', null, h('h1', { id: 'titulo' }, 'Administração'),
+  h('div', { class: 'page__head' }, h('div', null, eyebrow('Painel do administrador'), h('h1', { id: 'titulo' }, 'Administração'),
     h('p', { class: 'lead' }, 'Gerencie pessoas, convites, regras e acompanhe o que acontece no Canteiro. Cadastro aberto não existe: só entra quem for convidado.'))),
   tabList, panel);
 

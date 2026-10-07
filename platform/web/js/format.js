@@ -13,6 +13,18 @@ export function plural(n, one, many) {
   return `${NF.format(v)} ${v === 1 ? one : many}`;
 }
 
+/** Dois dígitos, como os contadores da capa do editor ("07 slides", "06 projetos"); acima de 99 fica o número inteiro. */
+export function pad2(n) {
+  const v = Math.max(0, Math.trunc(Number(n) || 0));
+  return v < 10 ? `0${v}` : NF.format(v);
+}
+
+/** Trecho seguro para nome de arquivo: sem acentos, minúsculo, só [a-z0-9-], até 40 caracteres. */
+export function slug(text, fallback = 'arquivo') {
+  const s = String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  return s || fallback;
+}
+
 /** Bytes legíveis: 1,5 MB. */
 export function formatBytes(bytes) {
   const n = Number(bytes);
