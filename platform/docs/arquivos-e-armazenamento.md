@@ -41,7 +41,9 @@ sha256Hex(bytesOrString) → hex64  // string = UTF-8; Buffer/Uint8Array/ArrayBu
 
 ```js
 lintDeck(content, { maxBytes = 12 MiB } = {}) → { bytes, assetRefs:Set<hex64>, slideCount, title }
-// ou lança HttpError 422 rejected_content com details = { reasons:[…], findings:[{reason, path}] }
+// ou lança HttpError 422 rejected_content com details = { reasons:[…], findings:[{reason, path}] (≤ 10), issues:[{slide, elementId, reason}] (≤ 20) }
+lintJson(value)   // mesma varredura para JSON que não é deck (preferências da pessoa); 422 com details.reasons
+// issues: slide 1-based (null fora de slides[i]); elementId = id de slides[i].els[j] só se for [A-Za-z0-9_-]{1,64}; nunca o texto recusado
 ```
 
 ### O que é verificado
@@ -55,9 +57,9 @@ lintDeck(content, { maxBytes = 12 MiB } = {}) → { bytes, assetRefs:Set<hex64>,
 | string > 2 MiB (em bytes UTF-8; vale para chaves também) | `string_grande_demais` |
 | NaN / Infinity | `numero_invalido` |
 | chave `__proto__` (poluição de protótipo) | `chave_proibida` |
-| tags `script iframe object embed link meta base form` + `svg math style frame frameset applet template noscript xmp plaintext isindex` (aceita `</…`, namespace `x:script`, maiúsculas) | `tag_perigosa` |
+| tags `script iframe object embed link meta base form` + `svg math style frame frameset applet template noscript xmp plaintext isindex` (aceita `</…`, namespace `x:script`, maiúsculas). Nas formas **decodificadas** (texto que a pessoa digitou e o editor guardou escapado), a citação sem atributos de uma tag passiva (todas menos `script style svg math`) é aceita — ver *Falsos positivos* | `tag_perigosa` |
 | atributo `on…=` (qualquer), inclusive fuga de atributo (`" onmouseover=`, `' autofocus onfocus=`) | `atributo_evento` |
-| `srcdoc` | `atributo_perigoso` |
+| `srcdoc`; nas formas decodificadas, também `action`/`formaction`/`form` (envio de formulário para outro lugar) | `atributo_perigoso` |
 | `javascript:`/`vbscript:`/`livescript:`/`file:` em `href src action formaction xlink:href background poster data ping srcset…`, em chaves JSON de URL (`href`, `src`, `url`, `link`, `sheet`, `webhook`…) e como valor solto `javascript:código` | `url_perigosa` |
 | `data:text/html`, `data:text/javascript`, `data:application/xhtml+xml`, `data:text/xml` | `data_html` |
 | `data:image/svg+xml` (qualquer tamanho) e `<svg` | `svg_embutido` |
@@ -75,9 +77,11 @@ Isto é um filtro de **recusa**, não um sanitizador. É defesa em profundidade:
 
 ### Falsos positivos: o que NÃO pode ser recusado
 
-Texto comum passa: a palavra "script", "onclick/onerror" em prosa, setas (`→ ⇒ <- ->`), emoji (inclusive ZWJ), aspas, `a < b`, `x<y`, `AT&T`, `Q&A`, "Data: 12/05/2026", "Asset: Real Estate", "JavaScript: guia", "regular expression (regex)", caminhos `C:\Users\…`, URLs com `&`/`%20`, HTML do editor (`<span style>`, `<b>`, `<font>`, `<br>`, listas). O corpus está em `tests/fixtures/xss-corpus.js` (`LEGIT` ≥ 30 itens; `ATTACKS` ≥ 90). **Falso positivo aceito, documentado:**
+Texto comum passa: a palavra "script", "onclick/onerror" em prosa, setas (`→ ⇒ <- ->`), emoji (inclusive ZWJ), aspas, `a < b`, `x<y`, `AT&T`, `Q&A`, "Data: 12/05/2026", "Asset: Real Estate", "JavaScript: guia", "regular expression (regex)", caminhos `C:\Users\…`, URLs com `&`/`%20`, HTML do editor (`<span style>`, `<b>`, `<font>`, `<br>`, listas). O corpus está em `tests/fixtures/xss-corpus.js` (`LEGIT` ≥ 30 itens; `ATTACKS` ≥ 90).
 
-- texto digitado literalmente como `<script>` (o editor o grava como `&lt;script&gt;`, que decodificamos de propósito: o requisito é pegar `&lt;script`);
+**Texto que cita tags (BE-ED-09).** O que a pessoa digita numa caixa de texto o editor guarda escapado, como o navegador serializa: "use a tag `<form>`" vira `use a tag &lt;form&gt;`. Na forma crua isso é texto inerte; as formas decodificadas só existem contra um consumidor que decodificasse duas vezes. Por isso, **nas formas decodificadas**, a citação de uma tag passiva **sem atributos** passa (`<form>`, `</form>`, `<link>`, `<meta>`, `<base>`, `<iframe>`, `<object>`, `<embed>`, `<frame>`, `<frameset>`, `<applet>`, `<template>`, `<noscript>`, `<xmp>`, `<plaintext>`, `<isindex>`) — mesmo decodificadas elas não executam, não carregam nada e não enviam dados. Continuam recusados: `<script>`, `<style>`, `<svg>`, `<math>` (executam/estilizam o que vem depois ou abrem outro namespace) em qualquer forma; qualquer tag da lista **com** atributo (`&lt;form action=…&gt;`, `&lt;link href=…&gt;`, `&lt;iframe src=…&gt;`); e, nas formas decodificadas, `action`/`formaction`/`form` em qualquer tag. A tag **literal** (forma crua) continua recusada, e o corpus de ataques segue todo recusado. Exemplos que passam: "use a tag &lt;b&gt; para negrito", "if (a &lt; b &amp;&amp; c &gt; d)", "use a tag &lt;form&gt; para formulários", "coloque &lt;link&gt; no &lt;head&gt;". **Falso positivo aceito, documentado** (agora com o slide e o elemento apontados em `details.issues`, para a pessoa reescrever):
+
+- texto digitado citando `<script>`, `<style>`, `<svg>` ou `<math>` (o editor o grava como `&lt;script&gt;`, que decodificamos de propósito: o requisito é pegar `&lt;script`), ou uma tag da lista citada com atributos;
 - `asset:` colado em algo que não seja espaço (`Asset:Passivo`) é tratado como referência malformada — escreva `Asset: Passivo`;
 - `onXXX=` logo depois de uma aspa, na mesma frase, é lido como fuga de atributo.
 
@@ -210,6 +214,13 @@ Propriedades de segurança do driver:
   `--immutable` faz o rclone **falhar** se um objeto já copiado diferir da origem (sinal de adulteração ou corrupção). Teste de restauração: `list` + `verify` de uma amostra (1–2 %) no bucket restaurado, mensal.
 - **Verificação periódica ("scrub")**: percorrer `list` e `verify` em lotes (ex.: 1 % por dia ⇒ ciclo completo em ~100 dias). Qualquer `ok:false` é incidente.
 - **Importar o acervo local existente**: para cada arquivo, `sha256Hex` → `validateUpload` (descarte e relate o que for recusado) → `storage.put` → `INSERT app.assets` com `uploaded_by` = admin da importação. É idempotente: reexecutar não duplica nada.
+- **Cota por pessoa (F9)** — `STORAGE_QUOTA_USER_MB` (MB por pessoa; **0 = desligada**, o padrão). Impede que uma conta (ou uma sessão comprometida) encha o armazenamento. Regras:
+  - **espaço ocupado** = soma de `size_bytes` dos arquivos `ready`/`pending` registrados pela pessoa (`app.assets.uploaded_by`); o que veio de outra pessoa por deduplicação **não** conta para quem só reenviou;
+  - vale ao registrar arquivo **novo**: `PUT /api/assets/:sha` (bytes que ainda não existiam), `POST /api/assets/uploads` (tamanho declarado) e `POST …/finalize` (tamanho **real**, antes de promover o objeto: quem declara pouco e envia muito é barrado sem nada chegar à chave canônica); reenviar o que já existe nunca é barrado;
+  - conferida com trava consultiva por pessoa na mesma transação do registro — envios simultâneos não passam juntos do limite;
+  - estourou → **413 `quota_exceeded`**, mensagem em pt-BR e `details: {quotaBytes, usedBytes, fileBytes}`; auditado como `asset.reject` (sem bytes);
+  - o espaço volta quando a coleta de lixo marca o arquivo (sem referência há > 14 dias, `tools/gc-assets.js`); o admin vê o espaço de cada pessoa em `GET /api/admin/users` (`storageBytes`) e o total em `GET /api/admin/stats`.
+  Dimensionamento: para 50 pessoas e 1 TB, ~20 GB por pessoa (`STORAGE_QUOTA_USER_MB=20480`) deixa folga para quem importa muito; comece desligada e ligue quando o total passar de ~60 % do plano.
 
 ---
 
@@ -252,3 +263,4 @@ node --test --test-concurrency=1 "tests/unit/{canonical,deck-lint,asset-validate
 - Animação (WebP/GIF) só tem os quadros contados; apenas o 1º é decodificado.
 - `lintDeck` é síncrono (≈ 1 s no pior caso de 12 MB).
 - Arquivos `.tmp-*` do driver local deixados por queda do processo não são limpos automaticamente.
+- Do achado F9 (escala de 500 GB–1 TB), só a **cota por pessoa** está feita (§7). Ficam abertos, fora do escopo da rodada da API: poda do espelho de backup (`tools/lib/mirror.js` só conta `extraInDestination`, nunca apaga do destino o que o GC removeu), comparação por prefixo no espelho (hoje a listagem inteira do destino vai para a memória) e a estimativa de tempo/egress da 1ª cópia de ~1 TB.

@@ -67,13 +67,13 @@ credenciais de banco) — que **nunca** chegam ao navegador.
 - **CSRF** em toda escrita: `X-CSRF-Token == cookie` (tempo constante) **e** `Origin == APP_ORIGIN` (ou `Sec-Fetch-Site: same-origin`) **e** `Content-Type` permitido. `<form>`/`fetch` cross-site → 403 `csrf`, sem efeito (`offensive.test.js §2`, `offensive-browser §3` com servidor atacante em `127.0.0.1:<porta>`).
 - **CORS**: nenhum cabeçalho `Access-Control-Allow-*` é emitido (defesa em profundidade: o middleware os remove mesmo se surgirem).
 - **Sessão**: JWT verificado com algoritmo escolhido por nós; `alg:none`, confusão HS×ES, `iss`/`aud` errados, expirado, `role=service_role`, anônimo → 401 (`§1`). Suspensão vale em ≤ 15 s (cache) e no login (ban no GoTrue).
-- **Limites de taxa** no Postgres (`app.hit_rate`): login 8/10 min por e-mail+IP e 30/10 min por IP (antes do GoTrue); esqueci a senha 5/15 min por IP e por e-mail; `verify` 10/15 min por link e 100/15 min por IP; `refresh` 30/min por token e 600/min por IP; convites 300/h por admin; rotas autenticadas por usuário (escrita 120/min, upload 60/min, comentários 30/min, leitura 600/min) e por IP × `RATE_IP_MULTIPLIER` (25), em cadeia numa só consulta (uma requisição barrada no balde do usuário não consome o do IP). 429 com `Retry-After` (`§7`, `offensive-browser §10`). Valores completos em `API.md` §2.
-- **Validação**: zod `.strict()` em toda entrada; corpo limitado; UTF-8 obrigatório; o deck passa pelo `deck-lint` (recusa HTML ativo, URLs perigosas, `__proto__`, imagens não externalizadas) antes de tocar o banco.
+- **Limites de taxa** no Postgres (`app.hit_rate`): login 8/10 min por e-mail+IP e 30/10 min por IP (antes do GoTrue); esqueci a senha 5/15 min por IP e por e-mail; `verify` 10/15 min por link e 100/15 min por IP; `refresh` 30/min por token e 600/min por IP; convites 300/h por admin; rotas autenticadas por usuário (escrita 120/min, upload 300/min, comentários 30/min, preferências 60/min, leitura 600/min) e por IP × `RATE_IP_MULTIPLIER` (25), em cadeia numa só consulta (uma requisição barrada no balde do usuário não consome o do IP). 429 com `Retry-After` (`§7`, `offensive-browser §10`). Valores completos em `API.md` §2.
+- **Validação**: zod `.strict()` em toda entrada; corpo limitado; UTF-8 obrigatório; o deck passa pelo `deck-lint` (recusa HTML ativo, URLs perigosas, `__proto__`, imagens não externalizadas) antes de tocar o banco. A recusa diz **onde** (`details.issues`: slide e id do elemento) sem nunca ecoar o conteúdo (§7).
 - **Erros**: nunca vazam stack/SQL; mensagens em pt-BR; `X-Request-Id` do cliente só com formato seguro (sem injeção de cabeçalho — `§4`).
 
 ### 2.4 Banco (RLS)
 - RLS ligada em todas as tabelas; papel `app_api` sem privilégio direto, só assume `app_user` por transação e não vira `app_system`/`app_owner` (provado: `set local role app_system` como `app_user` → negado).
-- Acervo comum (todos os ativos veem o não-deletado); só dono/admin alteram; lixeira alheia invisível; histórico só do dono/admin; interações só as próprias (dono/admin veem tudo). Gatilhos barram troca de papel/propriedade/autor e tornam a auditoria *append-only* (`§3`, `§8`).
+- Acervo comum (todos os ativos veem o não-deletado); só dono/admin alteram; lixeira alheia invisível; histórico só do dono/admin; interações só as próprias (dono/admin veem e apagam tudo do elemento); preferências (`app.user_prefs`) só da própria pessoa — nem o admin lê. Gatilhos barram troca de papel/propriedade/autor (e do `client_id` de uma interação) e tornam a auditoria *append-only* (`§3`, `§8`).
 
 ### 2.5 Armazenamento
 - Bucket **privado**; chave derivada só do SHA-256 validado (sem path traversal por construção). Tipo conferido por *magic bytes* (SVG/HTML recusados; PPTX com macro, ZIP bomb, polyglot → 422/415). `GET` com `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Content-Disposition: attachment` para PDF/PPTX (inline só imagem). Driver local nunca segue symlink; S3 assina checksum SHA-256 na escrita direta (`§6`, `offensive-browser §8`).
@@ -178,3 +178,42 @@ alinhar o texto do contrato ao comportamento do código.
 10. **Reduzir o “JWT expiry”** no Supabase para encurtar a janela do token stateless após logout/suspensão (§3.3).
 11. **AF-5**: ~~restringir a leitura de arquivos a referências da cópia de trabalho~~ **feito** (migração 0005).
 12. **Processo de 4 olhos / alertas** para ações de admin sensíveis (transferência, purga, promoção), aproveitando a auditoria já existente.
+
+---
+
+## 7. Controles acrescentados em 2026-10-07 (rodada do editor em nuvem)
+
+Provas executáveis: `tests/security/rotas-novas.test.js` (ataques), `tests/api/{prefs,interactions,quota,presentations}.test.js`, `tests/unit/{deck-lint,rates}.test.js`.
+
+- **Preferências da pessoa** (`GET/PUT /api/me/prefs`, kits de marca e preferências do editor): tabela `app.user_prefs` com RLS — leitura e escrita só
+  com `user_id = app.current_user_id()` **e conta ativa** (suspenso/convidado: nada); nem o admin lê as dos outros; `user_id` não é alterável (grant só em
+  `prefs`/`updated_at`), não há DELETE para o app. A rota não recebe id de ninguém. Corpo: objeto ≤ 64 KB, profundidade ≤ 10, chaves
+  `__proto__`/`constructor`/`prototype` recusadas em qualquer nível (400, sem poluição de protótipo), strings pela mesma varredura de HTML ativo do
+  conteúdo (422 sem eco) — defesa em profundidade: uma sessão roubada não planta script nas preferências que o editor da vítima vai ler. CSRF e 60
+  gravações/min por pessoa.
+- **Apagar interações** (`DELETE …/interactions?elementId=&kind=`): a consulta não filtra por pessoa de propósito — quem decide é o RLS (`inter_delete`):
+  dono/admin apagam tudo do elemento, os demais só os próprios (provado também direto no banco). Quem não vê a apresentação recebe 404 (lixeira alheia
+  e inexistente iguais). Auditoria `interactions.delete` só com identificador do elemento e contagens (`deleted`, `others`) — nunca respostas (dados
+  pessoais, LGPD).
+- **Idempotência por `clientId`**: (apresentação, pessoa, `clientId`) é único no banco (índice parcial) e o `client_id` é imutável (gatilho). A busca do
+  item existente é sempre restrita à própria pessoa: o mesmo `clientId` de outra pessoa cria um item novo — nunca devolve o item (ou o id) alheio.
+  Conferido depois da trava por elemento: reenvios simultâneos não duplicam e não esbarram no teto de 500.
+- **Tetos de interação por tipo**: estado de quadro/votação ≤ 256 KB de JSON e respostas/reações/visualizações ≤ 64 KB na API; corpo limitado a
+  264 KB antes de ler; o CHECK do banco é rede de segurança (2 MB para estados — o binário do jsonb de listas de números pequenos chega a ~6× o
+  texto —, 64 KB para os demais).
+- **Lint × texto digitado (BE-ED-09)**: o editor guarda o que a pessoa digita escapado (`&lt;form&gt;`), inerte no navegador; as formas decodificadas
+  existem só contra quem decodificasse duas vezes. Nelas passa a ser aceita apenas a **citação de tag passiva sem atributos** (`<form>`, `<link>`,
+  `<meta>`, `<base>`, `<iframe>`, `<object>`, `<embed>`, `<template>`, `<noscript>`…: mesmo decodificadas não executam, não carregam nada e não
+  enviam dados). Continuam recusados em qualquer forma `<script>`, `<style>`, `<svg>`, `<math>`, tags da lista **com** atributo, eventos, `srcdoc`,
+  URLs/CSS perigosos e, nas formas decodificadas, `action`/`formaction`/`form` (um `<form>` citado não vira formulário que envia para fora). A forma
+  crua não mudou (tag literal = HTML de verdade = recusada) e o corpus `tests/fixtures/xss-corpus.js` continua **todo** recusado, inclusive as
+  codificações de `<script>`. Resíduo aceito: citar `<script>`/`<style>`/`<svg>`/`<math>` ou um atributo de evento entre aspas (`"onclick="`) numa
+  caixa de texto continua recusado — agora com o slide e o elemento apontados, para a pessoa reescrever ("tag script").
+- **`details.issues` sem eco**: `{slide, elementId, reason}`, no máximo 20; o id do elemento só volta se for identificador simples
+  (`[A-Za-z0-9_-]{1,64}`) — um id hostil vira `null`; `reason` é sempre um código fixo.
+- **Uploads**: 300/min por pessoa (importação de PPTX/PDF com muitas imagens); o teto por IP continua sendo × `RATE_IP_MULTIPLIER` e o 301º envio
+  (barrado no balde da pessoa) não consome o do IP. **Cota opcional por pessoa** (`STORAGE_QUOTA_USER_MB`): impede que uma conta (ou sessão
+  comprometida) encha o armazenamento; conferida com trava por pessoa na transação do registro, pelo tamanho declarado no upload direto e pelo
+  tamanho REAL antes de promover o objeto (quem declara pouco e envia muito é barrado sem nada chegar à chave canônica); deduplicação nunca é
+  barrada.
+
