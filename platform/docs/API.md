@@ -10,7 +10,7 @@ Pilha: Node 22 (ESM, JavaScript puro com JSDoc), **Hono** (roda igual em Node e 
 1. **Acervo comum**: toda apresentação salva por qualquer usuário fica visível (somente leitura) para **todos os usuários ativos**.
 2. **Só o dono altera** a própria apresentação. Quem quer usar a de outra pessoa **cria uma cópia** (`POST /api/presentations/:id/duplicate`) e altera a cópia (dono = quem copiou).
 3. **Admin** gerencia usuários/convites/configurações, vê a auditoria e pode moderar (editar, excluir, restaurar, transferir) qualquer apresentação. Demais usuários são **membros** (criam, editam as suas, copiam, comentam).
-4. **Cadastro aberto não existe.** Só entra quem foi convidado por um admin, com e-mail verificado e senha.
+4. **Cadastro aberto não existe.** Só entra quem foi convidado por um admin, com e-mail verificado e senha — ou pelo login corporativo (SSO), quando ligado, que vincula a identidade nova à conta **já convidada** do mesmo e-mail e nunca cria conta.
 5. Excluir = **lixeira** (reversível). Apagar de vez = só admin.
 6. O banco decide permissões (RLS). O código da API **nunca** confia em papel enviado pelo cliente; ele só informa *quem* é o usuário (uuid) ao banco.
 
@@ -47,7 +47,9 @@ Chamadas GoTrue usadas (todas via `fetch`, `apikey: <anon|service>`):
 | Renovar | `POST /auth/v1/token?grant_type=refresh_token` `{refresh_token}` |
 | Esqueci a senha | `POST /auth/v1/recover` `{email}` — link `…/auth/confirmar?token_hash={{ .TokenHash }}&type=recovery` |
 | Sair | `POST /auth/v1/logout?scope=global|local` (Bearer) |
-| Bloquear/apagar | `PUT /auth/v1/admin/users/{id}` `{ban_duration}` / `DELETE …` (service) |
+| Bloquear/apagar | `PUT /auth/v1/admin/users/{id}` `{ban_duration}` / `DELETE …` (service) — ao suspender, **todas** as contas do GoTrue com o e-mail (a de senha e a do SSO) |
+| SSO: URL do IdP | `POST /auth/v1/sso` `{domain, redirect_to:'{APP_ORIGIN}/api/auth/sso/callback', skip_http_redirect:true, code_challenge, code_challenge_method:'s256'}` → `{url}` |
+| SSO: trocar o código | `POST /auth/v1/token?grant_type=pkce` `{auth_code, code_verifier}` → sessão (o mesmo formato do login) |
 | Chaves | `GET /auth/v1/.well-known/jwks.json` |
 
 Em testes o GoTrue é substituído por `tools/fake-gotrue.js` (mesmo contrato HTTP; **bloqueado quando `APP_ENV=production`**).
@@ -63,7 +65,8 @@ Senha: mínimo 12 caracteres, não pode conter o e-mail, não pode estar na list
 | `POST /api/auth/password` | `{password}` | 200 sessão; ativa o convite (`resolve_identity(..., touch=true)`) e registra auditoria `auth.password_set`. |
 | `POST /api/auth/forgot` | `{email}` | **sempre 202** (não revela se existe). Limitado por taxa. |
 | `POST /api/auth/refresh` | — | 200 sessão (cookies novos), 401 `session_expired`, ou **429 `rate_limited`** com `Retry-After` (limite compartilhado; a sessão continua válida — o cliente espera e repete em vez de considerar a sessão expirada). |
-| `GET /api/auth/sso/start`, `/callback` | — | **501 `not_configured`** até existir IdP. Veja `docs/SEGURANCA.md` §SSO (vínculo por e-mail verificado preserva contas e dados). |
+| `GET /api/auth/sso?email=<e-mail>` ou `?domain=<domínio>` (e `&next=<caminho interno>`) | — | Login corporativo (SAML do Supabase Auth com **PKCE**). Só com `SSO_ENABLED=true`; desligado → **501 `not_configured`** (inclusive no nome antigo `/api/auth/sso/start`, que continua valendo). O domínio (do e-mail ou o informado) precisa estar em `SSO_DOMAINS`. Gera o par PKCE, pede ao GoTrue a URL do IdP e responde **302** para ela, gravando o cookie HttpOnly `am_sso` (verifier + destino, assinado, 10 min). É uma **navegação** do navegador: erros voltam com **302 `/entrar?motivo=<código>`** (e `&next=` quando houver) — `sso_email` (e-mail/domínio inválido), `sso_dominio` (domínio fora de `SSO_DOMAINS`), `sso_indisponivel` (provedor não cadastrado no Supabase ou GoTrue fora do ar), `sso_limite` (100 inícios/10 min por IP). |
+| `GET /api/auth/sso/callback?code=…` | — | Retorno do IdP (via GoTrue). Troca o código por sessão **com o verifier do cookie do mesmo navegador** (código de outra pessoa não serve; uso único), confere que a sessão é de SSO, que o e-mail afirmado pelo IdP é de um domínio de `SSO_DOMAINS` e está verificado, e chama `resolve_identity('sso:<id-do-provedor>', sub, e-mail, true, allow_link=true, touch=true)`: **vincula a identidade nova à conta EXISTENTE do mesmo e-mail** (convidado ou ativo; o convidado tem o convite aceito) e **nunca cria conta**. Sucesso → cookies de sessão + CSRF novo e **302 para `next`** (caminho interno; padrão `/acervo`). Recusas → `/entrar?motivo=` `not_invited`, `suspended`, `sso_expirou` (sem o cookie do início, cookie adulterado/vencido, código inválido/usado), `sso_falhou` (o IdP recusou ou não afirmou e-mail verificado), `sso_dominio`, `sso_indisponivel`, `sso_limite`; a sessão que o GoTrue chegou a emitir é revogada. Auditoria: `auth.login` com `{via:'sso', provider}`, `auth.login_failed` (só HMAC do e-mail), `auth.sso_start`, `auth.sso_refused` (só o motivo). |
 | `PATCH /api/me` | `{displayName}` | 200 usuário. |
 | `GET /api/me/prefs` | — | 200 `{prefs:{…}}` — `{}` se a pessoa nunca gravou. Preferências da **própria** pessoa (kits de marca salvos, preferências do editor), para valerem em qualquer computador. |
 | `PUT /api/me/prefs` | `{prefs:{…}}` | 200 `{prefs}` (substitui o objeto inteiro). `prefs`: objeto JSON **≤ 64 KB** serializado (UTF-8), **profundidade ≤ 10** (o próprio `prefs` conta 1), **sem chaves** `__proto__`/`constructor`/`prototype` em nenhum nível; chaves que o editor usa: `brandKits` (lista) e `editor` (objeto) — outras chaves são aceitas. 400 forma/chave/profundidade, 413 tamanho, 422 `rejected_content` se alguma string tiver HTML ativo (mesma varredura do conteúdo dos decks; `details.reasons`, sem eco). CSRF obrigatório; 60 gravações/min por pessoa. Só a própria pessoa lê e grava (RLS em `app.user_prefs`: nem o admin lê as dos outros); suspenso/convidado → 403. |
@@ -142,7 +145,7 @@ Coleta de lixo: `tools/gc-assets.js` (padrão simulação) remove objetos sem re
 | `GET /api/admin/settings` / `PUT /api/admin/settings/:key` | `{value}` | chaves conhecidas apenas |
 | `GET /api/admin/stats` | — | usuários, apresentações, arquivos (nº e bytes) |
 
-Auditoria (`app.audit`): `auth.login`, `auth.login_failed`, `auth.logout`, `auth.password_set`, `auth.forgot`, `invite.create|resend|revoke`, `user.update`, `presentation.create|update|rename|duplicate|delete|restore|purge|transfer|share|version_restore|conflict_overwrite`, `comment.create|delete`, `interactions.export|delete`, `asset.upload|reject`, `import.acervo`, `security.csrf_blocked|rate_limited|rejected_content`. **Nunca** grava senha, token, corpo de requisição nem conteúdo de slides; `meta` leva só ids, contagens e tamanhos. IP completo é guardado (retenção de 180 dias, `tools/maintenance.js`).
+Auditoria (`app.audit`): `auth.login`, `auth.login_failed`, `auth.logout`, `auth.password_set`, `auth.forgot`, `auth.sso_start`, `auth.sso_refused`, `invite.create|resend|revoke`, `user.update`, `presentation.create|update|rename|duplicate|delete|restore|purge|transfer|share|version_restore|conflict_overwrite`, `comment.create|delete`, `interactions.export|delete`, `asset.upload|reject`, `import.acervo`, `security.csrf_blocked|rate_limited|rejected_content`. **Nunca** grava senha, token, corpo de requisição nem conteúdo de slides; `meta` leva só ids, contagens e tamanhos. IP completo é guardado (retenção de 180 dias, `tools/maintenance.js`).
 
 ## 8. Saúde
 
@@ -165,6 +168,8 @@ Auditoria (`app.audit`): `auth.login`, `auth.login_failed`, `auth.logout`, `auth
 | `MAX_JSON_BYTES` | teto do corpo de salvar/criar apresentação, em **bytes** (64 KiB–64 MiB). Padrão: 13 MiB (13631488) em servidor Node e 4 MiB (4194304) quando `VERCEL` está definida — a Vercel a define sozinha; valores acima de ~4,5 MB não adiantam lá, a plataforma corta antes. Ver §4 |
 | `CSRF_SECRET` | segredo ≥ 32 bytes (HMAC de tokens auxiliares) |
 | `INVITE_ALLOWED_DOMAINS` | lista opcional (ex.: `alvarezandmarsal.com`) |
+| `SSO_ENABLED` | `true` liga o login corporativo (`/api/auth/sso`, `/api/auth/sso/callback`); padrão desligado (501). Exige `SSO_DOMAINS` e o Supabase configurado; passo a passo em `infra/supabase/sso-saml.md` |
+| `SSO_DOMAINS` | domínios de e-mail que entram pelo SSO, separados por vírgula (ex.: `alvarezandmarsal.com`). Vale no início **e** no retorno: o e-mail afirmado pelo IdP também precisa ser de um deles |
 | `LOG_LEVEL`, `SENTRY_DSN`, `RELEASE` | observabilidade (nível de log, Sentry opcional, identificador da versão publicada) |
 | `RATE_IP_MULTIPLIER` | limite por IP nas rotas autenticadas = limite por usuário × fator (inteiro 5–1000; padrão 25) |
 | `TRUST_PROXY` | `1` (padrão) atrás da Vercel/Cloudflare: IP do cliente vem de `x-forwarded-for`/`x-real-ip`; `0` em execução direta |

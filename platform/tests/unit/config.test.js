@@ -66,3 +66,15 @@ test('MAX_JSON_BYTES ajusta o limite (com e sem Vercel); valores inválidos recu
   assert.equal(loadConfig({ APP_ENV: 'test', VERCEL: '1', MAX_JSON_BYTES: '3145728' }).streamLimitBytes, 4 * 1048576, 'o limite de transmissão continua o da plataforma');
   for (const bad of ['0', '1000', '1.5', 'muito', String(65 * 1048576)]) assert.throws(() => loadConfig({ APP_ENV: 'test', MAX_JSON_BYTES: bad }), /MAX_JSON_BYTES/, bad);
 });
+
+/* F10: SSO só com SSO_ENABLED=true e SSO_DOMAINS (lista de domínios válidos). */
+test('SSO: desligado por padrão; ligado exige SSO_DOMAINS válidos (normalizados em minúsculas) e o Supabase configurado', () => {
+  assert.deepEqual(loadConfig({ APP_ENV: 'test' }).sso, { enabled: false, domains: [] });
+  assert.deepEqual(loadConfig({ APP_ENV: 'test', SSO_DOMAINS: 'am.test' }).sso, { enabled: false, domains: [] }, 'lista sem SSO_ENABLED não liga nada');
+  const sup = { SUPABASE_URL: 'https://abc.supabase.co', SUPABASE_ANON_KEY: 'anon-key-0123456789' };
+  assert.deepEqual(loadConfig({ APP_ENV: 'test', SSO_ENABLED: 'true', SSO_DOMAINS: ' AlvarezAndMarsal.com , am.com.br ', ...sup }).sso, { enabled: true, domains: ['alvarezandmarsal.com', 'am.com.br'] });
+  assert.equal(loadConfig({ ...PROD, SSO_ENABLED: '1', SSO_DOMAINS: 'alvarezandmarsal.com' }).sso.enabled, true, 'vale em produção');
+  assert.throws(() => loadConfig({ APP_ENV: 'test', SSO_ENABLED: 'true', ...sup }), /SSO_DOMAINS/);
+  for (const bad of ['am', 'am..test', '-am.test', 'am.test/x', '*.am.test', 'am.test,http://x.com']) assert.throws(() => loadConfig({ APP_ENV: 'test', SSO_ENABLED: 'true', SSO_DOMAINS: bad, ...sup }), /SSO_DOMAINS/, bad);
+  assert.throws(() => loadConfig({ APP_ENV: 'test', SSO_ENABLED: 'true', SSO_DOMAINS: 'am.test' }), /SUPABASE_URL/);
+});

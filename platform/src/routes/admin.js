@@ -64,9 +64,10 @@ export function adminRoutes(deps) {
     try { await gotrue.invite({ email, displayName }); }
     catch (e) { if (e && e.code === 'already_exists') await gotrue.recover(email); else throw e; }
   }
-  /** Bloqueia/desbloqueia no GoTrue pelo e-mail. true = sincronizado (ou nada a fazer); false = falhou. */
+  /** Bloqueia/desbloqueia no GoTrue pelo e-mail — TODAS as contas do GoTrue com esse e-mail (a de senha e a do SSO, que o Supabase cria à parte).
+      true = sincronizado (ou nada a fazer); false = falhou. */
   async function syncBan(email, banned) {
-    try { const id = await gotrue.findUserIdByEmail(email); if (id) await gotrue.ban(id, banned); return true; }
+    try { for (const id of await gotrue.findUserIdsByEmail(email)) await gotrue.ban(id, banned); return true; }
     catch (e) { log.warn('gotrue_ban_failed', { code: e && e.code, banned }); return false; }
   }
 

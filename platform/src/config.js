@@ -1,6 +1,7 @@
 /* Configuração a partir do ambiente (docs/API.md §9). Valida tudo na partida; em produção é rígido e falha cedo.
    Segredos ficam só no servidor: nada daqui vai para o navegador. */
 import { z } from 'zod';
+import { SSO_DOMAIN_RE } from './auth/sso.js';
 
 const MIB = 1024 * 1024;
 const bool = (d) => z.preprocess((v) => (v === undefined || v === '' ? d : ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase())), z.boolean());
@@ -28,6 +29,8 @@ const Env = z.object({
   MAX_JSON_BYTES: z.coerce.number().int().min(64 * 1024).max(64 * 1024 * 1024).optional(),   // corpo JSON de salvar/criar apresentação, em BYTES (padrão abaixo)
   CSRF_SECRET: z.string().min(32).optional(),
   INVITE_ALLOWED_DOMAINS: z.string().optional(),
+  SSO_ENABLED: bool(false),                // login corporativo (SAML do Supabase Auth, PKCE): GET /api/auth/sso e /api/auth/sso/callback
+  SSO_DOMAINS: z.string().optional(),      // domínios de e-mail que entram pelo SSO (lista separada por vírgula); obrigatório com SSO_ENABLED
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
   SENTRY_DSN: z.string().optional(),
   TRUST_PROXY: bool(true),                 // atrás da Vercel/Cloudflare: usa x-forwarded-for / x-real-ip
@@ -56,6 +59,13 @@ export function loadConfig(env = process.env) {
     if (env.DATABASE_ADMIN_URL || env.DATABASE_OPS_URL) problems.push('DATABASE_ADMIN_URL/DATABASE_OPS_URL não devem existir no ambiente da API (são só de ferramentas/CI)');
     if (e.DATABASE_SSL === 'disable') problems.push('DATABASE_SSL=disable não é aceito em staging/produção');
   }
+  const ssoDomains = (e.SSO_DOMAINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (e.SSO_ENABLED) {
+    if (!ssoDomains.length) problems.push('SSO_ENABLED exige SSO_DOMAINS (os domínios de e-mail que entram pelo login corporativo)');
+    const bad = ssoDomains.filter((d) => !SSO_DOMAIN_RE.test(d));
+    if (bad.length) problems.push(`SSO_DOMAINS tem domínio inválido: ${bad.join(', ').slice(0, 120)}`);
+    if (!e.SUPABASE_URL || !e.SUPABASE_ANON_KEY) problems.push('SSO_ENABLED exige SUPABASE_URL e SUPABASE_ANON_KEY');
+  }
   if (problems.length) throw new Error('Configuração insegura/incompleta: ' + problems.join('; '));
   return Object.freeze({
     appEnv: e.APP_ENV, isProd: prod, isSecure: secure, origin: origin.origin, host: origin.host, port: e.PORT,
@@ -64,6 +74,7 @@ export function loadConfig(env = process.env) {
     supabase: { url: e.SUPABASE_URL?.replace(/\/$/, ''), anonKey: e.SUPABASE_ANON_KEY, serviceKey: e.SUPABASE_SERVICE_ROLE_KEY, jwksUrl: e.SUPABASE_JWKS_URL, jwtSecret: e.SUPABASE_JWT_SECRET },
     storage: { driver: e.STORAGE_DRIVER, localDir: e.STORAGE_LOCAL_DIR, quotaUserBytes: e.STORAGE_QUOTA_USER_MB * 1024 * 1024, s3: { endpoint: e.S3_ENDPOINT, region: e.S3_REGION, bucket: e.S3_BUCKET, accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY, forcePathStyle: e.S3_FORCE_PATH_STYLE } },
     csrfSecret: e.CSRF_SECRET, inviteDomains: (e.INVITE_ALLOWED_DOMAINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    sso: Object.freeze({ enabled: e.SSO_ENABLED, domains: Object.freeze(e.SSO_ENABLED ? ssoDomains : []) }),
     logLevel: e.LOG_LEVEL, sentryDsn: e.SENTRY_DSN, trustProxy: e.TRUST_PROXY, publicDir: e.PUBLIC_DIR, release: e.RELEASE, rateIpMultiplier: e.RATE_IP_MULTIPLIER,
     onVercel, maxJsonBytes: e.MAX_JSON_BYTES ?? (onVercel ? 4 * MIB : 13 * MIB), maxApiUploadBytes: 4 * MIB, streamLimitBytes: onVercel ? 4 * MIB : 8 * MIB,
   });

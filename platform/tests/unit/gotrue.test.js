@@ -106,3 +106,39 @@ test('sem configuração do Supabase: not_configured (501), sem chamar a rede', 
   const g2 = createGoTrue({ appEnv: 'test', logLevel: 'silent', supabase: { url: 'https://x.co', anonKey: 'ANON-KEY-123456' } }, { fetchImpl: async () => reply(200, {}) });
   await rejects(g2.invite({ email: 'a@b.co', displayName: 'A' }), 'not_configured');   // sem service key
 });
+
+/* SSO (F10): POST /sso com PKCE e troca do código (grant_type=pkce); busca de TODAS as contas de um e-mail (senha + SAML) para bloquear. */
+test('ssoUrl: corpo com domínio, redirect_to, skip_http_redirect e desafio S256 (nunca o verifier); devolve a URL do IdP', async () => {
+  const { g, calls } = mk(() => reply(200, { url: 'https://idp.example/saml?SAMLRequest=x' }));
+  const url = await g.ssoUrl({ domain: 'am.test', redirectTo: 'https://canteiro.x/api/auth/sso/callback', codeChallenge: 'C'.repeat(43) });
+  assert.equal(url, 'https://idp.example/saml?SAMLRequest=x');
+  assert.equal(calls[0].url, 'https://proj.supabase.co/auth/v1/sso'); assert.equal(calls[0].init.method, 'POST'); assert.equal(calls[0].init.headers.apikey, 'ANON-KEY-123456');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { domain: 'am.test', redirect_to: 'https://canteiro.x/api/auth/sso/callback', skip_http_redirect: true, code_challenge: 'C'.repeat(43), code_challenge_method: 's256' });
+  assert.equal(calls[0].init.redirect, 'error', 'nunca segue redirecionamento');
+});
+test('ssoUrl: provedor inexistente/desligado → not_configured; 429 → rate_limited; 5xx/rede → unavailable; URL que não é http(s) → unavailable; http só fora de staging/produção', async () => {
+  await rejects(mk(() => reply(404, { error_code: 'sso_provider_not_found' })).g.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'not_configured');
+  await rejects(mk(() => reply(400, { error_code: 'validation_failed' })).g.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'not_configured');
+  await rejects(mk(() => reply(429, {})).g.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'rate_limited');
+  await rejects(mk(() => reply(503, {})).g.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'unavailable');
+  for (const u of ['javascript:alert(1)', 'data:text/html,x', 'ftp://idp.example', 'nao-e-url', '']) await rejects(mk(() => reply(200, { url: u })).g.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'unavailable');
+  assert.equal(await mk(() => reply(200, { url: 'http://127.0.0.1:9/idp' })).g.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'http://127.0.0.1:9/idp', 'http aceito em teste/local');
+  const secure = createGoTrue({ ...config, isSecure: true }, { fetchImpl: async () => reply(200, { url: 'http://idp.example/' }) });
+  await rejects(secure.ssoUrl({ domain: 'x.test', redirectTo: 'r', codeChallenge: 'c' }), 'unavailable');
+});
+test('exchangeCode: grant_type=pkce com auth_code e code_verifier; código/verifier inválido ou vencido → link_invalid (410); banido → suspended; 5xx → unavailable', async () => {
+  const ok = mk(() => reply(200, SESSION)); const r = await ok.g.exchangeCode({ authCode: 'code-1', codeVerifier: 'V'.repeat(43) });
+  assert.equal(r.accessToken, 'AT'); assert.equal(ok.calls[0].url, 'https://proj.supabase.co/auth/v1/token?grant_type=pkce'); assert.deepEqual(JSON.parse(ok.calls[0].init.body), { auth_code: 'code-1', code_verifier: 'V'.repeat(43) });
+  for (const [st, body] of [[400, { error_code: 'bad_code_verifier' }], [404, { error_code: 'flow_state_not_found' }], [422, { error_code: 'flow_state_expired' }], [200, { ok: 1 }]]) {
+    const e = await rejects(mk(() => reply(st, body)).g.exchangeCode({ authCode: 'c', codeVerifier: 'v' }), 'link_invalid'); assert.equal(e.status, 410);
+  }
+  await rejects(mk(() => reply(403, { error_code: 'user_banned' })).g.exchangeCode({ authCode: 'c', codeVerifier: 'v' }), 'suspended');
+  await rejects(mk(() => reply(502, {})).g.exchangeCode({ authCode: 'c', codeVerifier: 'v' }), 'unavailable');
+});
+test('findUserIdsByEmail: todas as contas com o e-mail (a de senha e a do SSO), em todas as páginas; findUserIdByEmail continua devolvendo a primeira', async () => {
+  const page1 = Array.from({ length: 200 }, (_, i) => ({ id: 'p' + i, email: i === 5 ? 'Alvo@x.co' : `u${i}@x.co` }));
+  const { g } = mk((url) => reply(200, { users: url.includes('page=1&') ? page1 : [{ id: 'sso-alvo', email: 'alvo@x.co' }, { id: 'outro', email: 'o@x.co' }] }));
+  assert.deepEqual(await g.findUserIdsByEmail('ALVO@x.co'), ['p5', 'sso-alvo']);
+  assert.equal(await g.findUserIdByEmail('alvo@x.co'), 'p5');
+  assert.deepEqual(await mk(() => reply(200, { users: [] })).g.findUserIdsByEmail('n@x.co'), []);
+});

@@ -50,6 +50,17 @@ export function createGoTrue(config, { fetchImpl } = {}) {
     if (r.status === 429) return E.rateLimited(60);
     return E.unavailable('Serviço de autenticação indisponível. Tente novamente em instantes.');
   };
+  async function idsByEmail(email, first) {
+    const want = String(email).trim().toLowerCase(); const out = [];
+    for (let page = 1; page <= 50; page++) {
+      const r = await call('list_users', 'GET', `/admin/users?page=${page}&per_page=200`, { key: 'service' });
+      if (!ok(r)) throw common('list_users', r);
+      const users = Array.isArray(r.body?.users) ? r.body.users : [];
+      for (const u of users) if (String(u.email || '').toLowerCase() === want) { out.push(u.id); if (first) return out; }
+      if (users.length < 200) break;
+    }
+    return out;
+  }
   const session = (b) => ({ accessToken: b.access_token, refreshToken: b.refresh_token, expiresIn: Number(b.expires_in) || 3600, user: b.user ? { id: b.user.id, email: b.user.email } : null });
   const hasSession = (b) => b && typeof b.access_token === 'string' && typeof b.refresh_token === 'string';
 
@@ -121,17 +132,29 @@ export function createGoTrue(config, { fetchImpl } = {}) {
       throw common('remove', r);
     },
     /** Procura o id do GoTrue pelo e-mail (listagem paginada do admin; suficiente para centenas de usuários). null se não existir. */
-    async findUserIdByEmail(email) {
-      const want = String(email).trim().toLowerCase();
-      for (let page = 1; page <= 50; page++) {
-        const r = await call('list_users', 'GET', `/admin/users?page=${page}&per_page=200`, { key: 'service' });
-        if (!ok(r)) throw common('list_users', r);
-        const users = Array.isArray(r.body?.users) ? r.body.users : [];
-        const hit = users.find((u) => String(u.email || '').toLowerCase() === want);
-        if (hit) return hit.id;
-        if (users.length < 200) return null;
+    async findUserIdByEmail(email) { return (await idsByEmail(email, true))[0] || null; },
+    /** TODOS os ids do GoTrue com o e-mail: com o SSO, a mesma pessoa tem a conta de e-mail/senha E a conta SAML (o Supabase cria outro
+     *  auth.users para o SSO). Suspender/revogar precisa bloquear as duas. */
+    async findUserIdsByEmail(email) { return idsByEmail(email, false); },
+    /** SSO (SAML) com PKCE: pede ao GoTrue a URL do IdP do domínio (POST /sso, sem seguir redirecionamento). Provedor inexistente ou
+     *  desligado no Supabase → not_configured. A URL devolvida precisa ser absoluta e https (http só fora de staging/produção). */
+    async ssoUrl({ domain, redirectTo, codeChallenge }) {
+      const r = await call('sso', 'POST', '/sso', { body: { domain, redirect_to: redirectTo, skip_http_redirect: true, code_challenge: codeChallenge, code_challenge_method: 's256' } });
+      if (ok(r) && typeof r.body?.url === 'string') {
+        let u = null; try { u = new URL(r.body.url); } catch { u = null; }
+        if (u && (u.protocol === 'https:' || (u.protocol === 'http:' && !config.isSecure))) return u.toString();
+        fail('sso', r); throw E.unavailable('Serviço de autenticação indisponível. Tente novamente em instantes.');
       }
-      return null;
+      if (r.status === 404 || r.status === 400 || r.status === 422) { fail('sso', r); throw E.notConfigured('O login corporativo não está disponível para este domínio.'); }
+      throw common('sso', r);
+    },
+    /** Troca o código do retorno do IdP por sessão (grant_type=pkce). Código inválido, vencido, já usado ou verifier errado → link_invalid (410). */
+    async exchangeCode({ authCode, codeVerifier }) {
+      const r = await call('pkce', 'POST', '/token?grant_type=pkce', { body: { auth_code: authCode, code_verifier: codeVerifier } });
+      if (ok(r) && hasSession(r.body)) return session(r.body);
+      if (codeOf(r.body) === 'user_banned') { fail('pkce', r); throw E.suspended(); }
+      if (r.status === 429 || r.status >= 500) throw common('pkce', r);
+      fail('pkce', r); throw E.gone('O login corporativo expirou ou já foi usado. Tente entrar de novo.');
     },
     /** Saúde do provedor para /api/ready (nunca lança). */
     async health() {

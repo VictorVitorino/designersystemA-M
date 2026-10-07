@@ -83,7 +83,7 @@ credenciais de banco) — que **nunca** chegam ao navegador.
 ## 3. O que a plataforma **NÃO** protege (resíduos aceitos / limites)
 
 1. **Dispositivo comprometido**: com o cookie de sessão roubado (malware/acesso físico), o atacante age como o usuário — inclusive **trocar a senha** (ver Achado AF-1) até a mitigação.
-2. **Sem MFA/SSO hoje**: phishing da senha + entrega do e-mail de convite basta para entrar. SSO está previsto (`/api/auth/sso/*` → 501) mas não implementado.
+2. **Sem MFA próprio**: phishing da senha + entrega do e-mail de convite basta para entrar. O **SSO corporativo** (SAML com PKCE) está implementado e **desligado por padrão** (`SSO_ENABLED`); ligado, o MFA passa a ser o do IdP da empresa para quem entra por ele (§7).
 3. **Access token *stateless***: após logout/suspensão, o JWT ainda verifica até expirar (≤ 1 h). O que protege é o banco (≤ 15 s), o cookie `HttpOnly` apagado e o ban no GoTrue; a janela do JWT é resíduo conhecido (reduzir “JWT expiry” no Supabase).
 4. **Acervo é comum por produto**: todo usuário ativo vê todas as apresentações não deletadas. “Confidencialidade entre membros” **não** é um objetivo — é a regra do produto.
 5. **Admin comprometido**: um admin pode ler/mover/apagar tudo e criar contas. A auditoria é *append-only* (nem o admin a edita/apaga pela API), mas um admin malicioso é um ponto único de falha (ver recomendações: 4-olhos, SSO+MFA para admins).
@@ -167,7 +167,7 @@ alinhar o texto do contrato ao comportamento do código.
 
 **P1 — endurecimento**
 3. **MFA/TOTP** para todos e **obrigatório para admins** (hoje não há segundo fator — item §3.2).
-4. **SSO corporativo (SAML/OIDC)** da A&M (desprovisionamento no desligamento resolve o “ex-funcionário”; o esquema já preserva contas/dados por `app.user_identities`).
+4. **SSO corporativo (SAML)** da A&M — **implementado na API** (`/api/auth/sso`, PKCE, vínculo à conta existente; §7); falta ligar com o IdP da A&M (`infra/supabase/sso-saml.md`). Desprovisionamento no desligamento resolve o “ex-funcionário”; o esquema preserva contas/dados por `app.user_identities`.
 5. **AF-3/AF-4**: ~~tratar NUL (400, não 500) e fechar a evasão por U+000C no *lint*~~ **feito**.
 6. **Atualizar `sharp`** — **feito**: `sharp` fixado em **0.35.5** (sem `^`; `npm audit --omit=dev` sem alertas altos nesta versão), testes de upload (`tests/api/assets.test.js`, `tests/unit/asset-validate*.test.js`) reexecutados. O `ci.yml` roda `npm audit --omit=dev` como **relatório** (não bloqueia; o resumo vai para o *step summary* e o JSON para os artefatos); para bloquear em severidade alta, troque o `|| true` por `--audit-level=high`.
 
@@ -216,4 +216,11 @@ Provas executáveis: `tests/security/rotas-novas.test.js` (ataques), `tests/api/
   comprometida) encha o armazenamento; conferida com trava por pessoa na transação do registro, pelo tamanho declarado no upload direto e pelo
   tamanho REAL antes de promover o objeto (quem declara pouco e envia muito é barrado sem nada chegar à chave canônica); deduplicação nunca é
   barrada.
-
+- **SSO corporativo (F10)**: SAML do Supabase Auth com **PKCE (S256)** — o código do IdP só vira sessão com o `code_verifier` guardado no cookie HttpOnly
+  assinado do **mesmo** navegador que começou (10 min, uso único): código de outra pessoa (login CSRF / fixação), replay e cookie forjado/vencido não
+  dão sessão. O verifier nunca vai ao IdP nem à URL. Domínio conferido no início **e** no retorno (o e-mail que o IdP afirmou precisa estar em
+  `SSO_DOMAINS`): um IdP de outro domínio não toma conta existente. Vínculo por e-mail só com `email_verified === true` explícito no token de SSO
+  (o JWT passou a exigir a declaração explícita para provedores externos; e-mail/senha continua como antes). Nunca cria conta (sem convite →
+  `not_invited`, sessão do GoTrue revogada); suspenso não entra nem é reativado. `next` só caminho interno; erros voltam à tela de entrada só com
+  códigos fixos (sem eco da descrição do IdP). 100 inícios/retornos por IP a cada 10 min. Suspender bane no GoTrue **todas** as contas do e-mail
+  (a de senha e a SAML). Provas: `tests/security/sso.test.js`, `tests/api/sso.test.js`, `tests/unit/{sso,jwt,gotrue,config}.test.js`.
