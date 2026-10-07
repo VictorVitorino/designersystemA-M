@@ -1,6 +1,8 @@
 # Evidências — ponta a ponta com a pilha real (`npm run test:e2e`)
 
-**Data:** 2026-10-06 · **Comando:** `cd platform && npm run test:e2e` (= `node tests/e2e/run.js`) · **Resultado:** **99 verificações aprovadas, 2 reprovadas** (as 2 apontam o **mesmo defeito**, descrito em §4), 13 cenários, **0 violações de CSP, 0 erros de console, 0 erros de página**, rede só com `localhost:4401` + `fonts.googleapis.com`/`fonts.gstatic.com` (fontes servidas da pasta local `fonts2/`, sem internet).
+**Execução final:** 2026-10-07 03:35 UTC, build em nuvem `47a556b1…`, migrações 0001–0006 · **Comando:** `cd platform && npm run test:e2e` (= `node tests/e2e/run.js`) · **Resultado:** **101 verificações aprovadas, 0 reprovadas**, 13 cenários, **0 violações de CSP, 0 erros de console, 0 erros de página**, rede só com `localhost:4401` + `fonts.googleapis.com`/`fonts.gstatic.com` (log: `platform/.tmp/quality/e2e.log`).
+
+**1ª execução** (2026-10-06): 99 aprovadas, 2 reprovadas — as 2 apontavam o **mesmo defeito real** (E2E-01, §4), corrigido no mesmo dia; a execução final confirma a correção (cenário 10: 6/6).
 
 ## 1. O que roda
 
@@ -10,13 +12,13 @@
 node tools/dev.js --port 4401 --db canteiro_t_e2e --admin admin@am.test --name Admin --reset
 ```
 
-→ Postgres local (banco **exclusivo** `canteiro_t_e2e`, recriado a cada execução, migrações 0001–0004) + **GoTrue falso** em 127.0.0.1 (e-mails em `/__outbox`) + API + site (`dist/public`, editor em nuvem com a CSP por hash). Espera `GET /api/ready` = `{db,storage,auth,migrations:true}` (2 s nesta máquina), lê do terminal do `dev.js` a URL do GoTrue falso e o **link do convite do admin**, e roda `tests/e2e/scenarios.cjs` (Playwright 1.56 / Chromium real; `helpers.cjs` tem contextos, API com cookies + CSRF, outbox, fluxos de login/senha, PNG gerado em código). Nada usa atalho de teste no servidor: tudo passa pelo navegador ou pela API pública **com `X-CSRF-Token` + `Origin`**, como um cliente real.
+→ Postgres local (banco **exclusivo** `canteiro_t_e2e`, recriado a cada execução, migrações 0001–0006) + **GoTrue falso** em 127.0.0.1 (e-mails em `/__outbox`) + API + site (`dist/public`, editor em nuvem com a CSP por hash). Espera `GET /api/ready` = `{db,storage,auth,migrations:true}` (2 s nesta máquina), lê do terminal do `dev.js` a URL do GoTrue falso e o **link do convite do admin**, e roda `tests/e2e/scenarios.cjs` (Playwright 1.56 / Chromium real; `helpers.cjs` tem contextos, API com cookies + CSRF, outbox, fluxos de login/senha, PNG gerado em código). Nada usa atalho de teste no servidor: tudo passa pelo navegador ou pela API pública **com `X-CSRF-Token` + `Origin`**, como um cliente real.
 
 Variáveis: `E2E_BUILD=1` reconstrói `dist/public` (`--build`); `E2E_ONLY=1,2` roda um subconjunto (só para depurar — os cenários encadeiam estado); `E2E_KEEP=1` deixa a pilha no ar. Resultados em JSON: `platform/.tmp/e2e/results.json`; log do servidor: `.tmp/e2e/dev.log`; capturas: `platform/tests/screens/e2e-*.png` (ignoradas pelo git).
 
 Usuários criados na execução: `admin@am.test` (admin, pelo `--admin`), `ana@am.test` e `bruno@am.test` (membros, convidados pela interface `/admin › Convidar`). Senhas com 12+ caracteres, sem conter o e-mail e fora da lista de senhas comuns.
 
-## 2. Tabela de cenários (execução de 2026-10-06 21:06 UTC — tempos reais)
+## 2. Tabela de cenários (1ª execução, 2026-10-06 21:06 UTC — tempos reais; na execução final o cenário 10 passou a 6/6 e o total a 101/101)
 
 | # | Cenário | Verificações | Tempo | Capturas (`tests/screens/`) |
 |---|---|---|---|---|
@@ -42,7 +44,7 @@ A tarefa pedia "192+ caixas". Medido no Chromium real, **o Acervo de efeitos tem
 
 ## 4. Defeito encontrado (não contornado no teste; **corrigido depois**)
 
-**Estado: CORRIGIDO** no mesmo dia — `src/routes/interactions.js` devolve `author:{id, displayName}` (e `user` como alias) e `ed-50-cloud.js` só restaura no dispositivo itens cujo `author.id` (ou `user.id`) é o da sessão; item sem autor ou sem sessão carregada nunca entra. `tests/api/interactions.test.js` passou a exigir o campo `author`. Resultado da reexecução do E2E após a correção: ver EVIDENCIAS.md §6.
+**Estado: CORRIGIDO** no mesmo dia — `src/routes/interactions.js` devolve `author:{id, displayName}` (e `user` como alias) e `ed-50-cloud.js` só restaura no dispositivo itens cujo `author.id` (ou `user.id`) é o da sessão; item sem autor ou sem sessão carregada nunca entra. `tests/api/interactions.test.js` passou a exigir o campo `author`. Reexecução do E2E após a correção (2026-10-07 03:35): **101/101**, cenário 10 com **6/6** (a dona reabre o editor e não recebe a resposta do Bruno como própria). Ver também EVIDENCIAS.md §6.
 
 **E2E-01 · `GET /api/presentations/:id/interactions` devolve `user` onde o cliente espera `author` → a extensão de nuvem restaura respostas de outras pessoas como se fossem da própria pessoa.** Gravidade **alta** (privacidade/integridade dos dados de formulário).
 

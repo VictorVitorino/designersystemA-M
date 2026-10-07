@@ -422,5 +422,23 @@ O harness escreve só em `platform/.tmp/load/` e neste arquivo; usa a porta 4402
 | A6 (médio) — inchaço do banco pelo autosave | Migração **0005**: autovacuum agressivo em `app.presentations` (e TOAST), `presentation_versions` e `rate_limits`; compressão **lz4** do `content` quando o servidor tem suporte. `maintenance.js stats` passa a mostrar tuplas vivas/mortas e avisa quando mortas > vivas (> 10 000). | `db/migrations/0005_hardening.sql`, `tools/maintenance.js`, `docs/MONITORAMENTO.md` |
 | A7 (info) — pool 100 % alocado | Documentado o dimensionamento por ambiente (contêiner: `DB_POOL_MAX=10` por processo; Vercel: 2–3). | `docs/OPERACAO.md` |
 
-A fase de 50 usuários **não foi reexecutada** depois destas alterações nesta máquina (a prova de paridade ocupava o Chromium); a lógica alterada está coberta pelos testes de API (`tests/api`, `tests/security`) e o `npm run test:load` continua disponível para repetir as fases.
+### 10.1 Reexecução depois das correções (2026-10-07 03:39 UTC, build final `47a556b1…`)
+
+`npm run test:load` com a fase de 50 usuários × 180 s, **limites por IP como estão em produção** (multiplicador 25×), todos os usuários no mesmo IP (127.0.0.1, o pior caso de um escritório atrás de NAT). JSON bruto: `.tmp/load/resultado-2026-10-07T03-39-36.json`; log: `.tmp/quality/carga.log`.
+
+| Medida | Antes (fase 1, 5×) | **Depois (25×, `limitMany`, 0005)** |
+|---|---|---|
+| Requisições (req/s) | 5 294 (29,4) | 5 275 (29,3) |
+| `PUT …/content` p50 / p95 / p99 | 72 / 178 / 235 ms | **83 / 164 / 198 ms** (2 166 autosaves, todos 200) |
+| GET p95 (apresentação / acervo / arquivo) | 91 ms | **87 / 87 / 120 ms** |
+| Autosaves recusados com 429 | 537 (19,9 %) | **0 (0 %)** |
+| 5xx · erros de rede | 0 · 0 | **0 · 0** |
+| Integridade (conteúdo final = último salvo) | 50/50 | **50/50** |
+| Vazamentos (sondas a apresentações/arquivos alheios) | 0 em 111 | **0 em 111** (49 × 404, 34 × 403, 11 × 403 nas versões) |
+| Salvamentos obsoletos | 121 → 409 | **121 → 409**, nenhum aceito |
+| Sonda de renovação: 40 sessões no mesmo IP | — | **40 × 200 em 193 ms** |
+| Postgres · memória da API · CPU | — | 5 conexões (máx. 3 ativas) · 196 → 272 MB · média 61 %, pico 88 % |
+| Deduplicação | — | 3 imagens compartilhadas por 8 donos = 3 linhas e 3 objetos |
+
+Critérios (p95 PUT ≤ 800 ms, GET ≤ 300 ms, 0 × 5xx, sem perda): **todos atendidos**. O achado A1 está resolvido na prática: o mesmo escritório que antes perdia 1 em cada 5 autosaves agora não perde nenhum.
 

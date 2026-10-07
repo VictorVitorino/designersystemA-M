@@ -13,6 +13,9 @@ import { listBackups, manifestKey, dumpKey } from '../../tools/lib/backup-catalo
 import { backupFreshness } from '../../tools/maintenance.js';
 import { connect } from '../../tools/lib/pg.js';
 
+// a migração mais recente vem da pasta de migrações (não fica presa a um número fixo)
+const LATEST_MIGRATION = fs.readdirSync(new URL('../../db/migrations/', import.meta.url)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1).slice(0, 4);
+
 let ctx; const dirs = []; const dbs = [];
 const mkdir = (p) => { const d = tmp(p); dirs.push(d); return d; };
 before(async () => {
@@ -40,7 +43,7 @@ test('backup do banco: cifrado, com manifesto autenticado, contagens e sem dados
   const raw = fs.readFileSync(path.join(ctx.bk, 'db', `${first.name}.dump.enc`)); assert.ok(raw.subarray(0, 5).equals(Buffer.from('CNTBK')));
   assert.equal(raw.indexOf('PGDMP'), -1, 'o dump não pode aparecer em claro'); assert.equal(raw.indexOf('Apresentação de teste'), -1);
   const m = JSON.parse(fs.readFileSync(path.join(ctx.bk, 'db', `${first.name}.manifest.json`), 'utf8'));
-  assert.equal(m.schema.latestMigration, '0003'); assert.equal(m.tables['app.users'].count, 1); assert.equal(m.tables['app.assets'].count, 7);
+  assert.equal(m.schema.latestMigration, LATEST_MIGRATION); assert.equal(m.tables['app.users'].count, 1); assert.equal(m.tables['app.assets'].count, 7);
   assert.equal(m.tables['app.rate_limits'].count, 1); assert.equal(m.tables['app.rate_limits'].dataExcluded, true); assert.match(m.mac, /^hmac-sha256:/);
   assert.ok(m.pg.args.includes('--exclude-table-data=app.rate_limits')); assert.ok(!m.pg.args.includes('--no-owner'));
   assert.ok(!JSON.stringify(m).includes(ctx.key), 'a chave nunca aparece no manifesto');
