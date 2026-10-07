@@ -55,16 +55,42 @@ export async function createFirstAdmin({ email, name }, { ops, gotrue, log = con
   return state;
 }
 
+/**
+ * Traduz as falhas mais comuns da primeira vez em "o que fazer" (o workflow mostra isto no resumo). Nunca inclui segredos.
+ * @param {any} e  erro do banco (postgres.js: e.code = SQLSTATE ou código de rede) ou do Supabase Auth
+ * @param {{statusSupabase?:number}} [o]  último status HTTP do Supabase Auth no convite (0 = não chegou a chamar)
+ */
+export function explicarErro(e, { statusSupabase = 0 } = {}) {
+  const code = String(e?.code || ''); const msg = String(e?.message || '');
+  if (['42P01', '3F000', '22023', '42883'].includes(code) || /relation "app\.|schema "app"|role "app_system" does not exist/i.test(msg))
+    return 'o banco deste ambiente ainda não tem o Canteiro instalado. Publique o ambiente primeiro (staging: workflow "Publicar staging"; produção: crie a versão vX.Y.Z) — a publicação cria as tabelas e os papéis — e rode este assistente de novo.';
+  if (code === '28P01' || /password authentication failed/i.test(msg))
+    return 'a senha do papel de operação (app_ops) não confere com a do banco. Ela é gravada no banco pela publicação: confira o segredo APP_OPS_DB_PASSWORD deste ambiente, rode a publicação de novo e depois este assistente.';
+  if (/tenant or user not found/i.test(msg))
+    return 'o servidor do banco não reconheceu o usuário app_ops do projeto: o papel ainda não existe (publique o ambiente primeiro) ou a variável SUPABASE_PROJECT_REF/SUPABASE_POOLER_HOST está errada.';
+  if (['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'CONNECT_TIMEOUT', 'ECONNRESET'].includes(code))
+    return `não consegui conectar ao banco (${code}): confira SUPABASE_PROJECT_REF e SUPABASE_POOLER_HOST deste ambiente e se o projeto do Supabase está ativo (não pausado).`;
+  if (statusSupabase === 401 || statusSupabase === 403)
+    return 'o Supabase recusou a chave secreta: copie de novo a secret key (sb_secret_…) do projeto DESTE ambiente para o segredo SUPABASE_SERVICE_ROLE_KEY. Nada foi gravado no banco.';
+  if (statusSupabase === 429)
+    return 'o Supabase atingiu o limite de e-mails por hora. Espere 1 hora e rode de novo (nada foi gravado no banco).';
+  if (statusSupabase >= 500)
+    return `o Supabase não conseguiu enviar o e-mail de convite (HTTP ${statusSupabase}). Quase sempre é o envio de e-mail: rode o assistente "Configurar Supabase" deste ambiente e confira no Resend se o domínio está "Verified" (registros de DNS). Nada foi gravado no banco.`;
+  return msg || 'falha inesperada';
+}
+
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const args = parseArgs(argv);
   if (args.help || !args.email || !args.name) { console.log('Uso: node tools/create-first-admin.js --email fulano@empresa.com --name "Fulano de Tal"\nVariáveis: DATABASE_OPS_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY'); return args.help ? 0 : 2; }
   for (const k of ['DATABASE_OPS_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) if (!env[k]) { console.error(`Falta a variável ${k}.`); return 2; }
   const ops = createOpsDb({ url: env.DATABASE_OPS_URL, max: 1 });
+  let statusSupabase = 0;   // guarda só o status HTTP do convite (o corpo da resposta nunca é mostrado)
+  const fetchImpl = async (url, init) => { const r = await fetch(url, init); if (/\/(invite|recover)$/.test(new URL(String(url?.url || url)).pathname)) statusSupabase = r.status; return r; };
   try {
-    const gotrue = createGoTrue({ appEnv: 'local', logLevel: 'warn', supabase: { url: env.SUPABASE_URL, serviceKey: env.SUPABASE_SERVICE_ROLE_KEY, anonKey: env.SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY } });
+    const gotrue = createGoTrue({ appEnv: 'local', logLevel: 'warn', supabase: { url: env.SUPABASE_URL, serviceKey: env.SUPABASE_SERVICE_ROLE_KEY, anonKey: env.SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY } }, { fetchImpl });
     await createFirstAdmin({ email: args.email, name: args.name }, { ops, gotrue });
     return 0;
-  } catch (e) { console.error('Erro: ' + (e && e.message ? e.message : 'falha inesperada')); return 1; }
+  } catch (e) { console.error('Erro: ' + explicarErro(e, { statusSupabase: statusSupabase >= 300 ? statusSupabase : 0 })); return 1; }
   finally { await ops.end(); }
 }
 if (import.meta.url === `file://${process.argv[1]}`) main().then((code) => process.exit(code));

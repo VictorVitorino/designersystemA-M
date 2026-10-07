@@ -1,0 +1,88 @@
+# Assistente: cria o PRIMEIRO administrador (não existe cadastro aberto: alguém precisa convidar o primeiro) com platform/tools/create-first-admin.js.
+# A pessoa recebe o e-mail de convite, clica no link, cria a senha (mínimo 12) e entra como administradora. Seguro repetir:
+# se o convite ainda estiver pendente, reenvia o e-mail (até 5 vezes); se já for administradora ativa, não faz nada.
+# Roda com as credenciais de OPERAÇÃO (papel app_ops) do ambiente escolhido — elas não existem no servidor da API.
+name: Criar primeiro administrador
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: 'E-mail da pessoa (vai receber o convite)'
+        required: true
+        type: string
+      nome:
+        description: 'Nome completo'
+        required: true
+        type: string
+      ambiente:
+        description: 'Onde'
+        required: true
+        type: choice
+        options: [production, staging]
+        default: production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: primeiro-admin-${{ inputs.ambiente }}
+  cancel-in-progress: false
+
+jobs:
+  convidar:
+    name: Convidar o primeiro administrador (${{ inputs.ambiente }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ${{ inputs.ambiente == 'production' && 'production-ops' || 'staging' }}
+    env:
+      AMBIENTE: ${{ inputs.ambiente }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      SUPABASE_POOLER_HOST: ${{ vars.SUPABASE_POOLER_HOST }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção (ferramentas)
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Conferir as chaves e achar o servidor do banco
+        working-directory: platform
+        env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}          # nome antigo (compatibilidade)
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}  # só para achar o servidor do banco
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node tools/chaves.js conferir --precisa ops,servico --resumo "$GITHUB_STEP_SUMMARY" --github-env "$GITHUB_ENV"
+
+      - name: Convidar (e-mail de convite do Supabase)
+        working-directory: platform
+        env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EMAIL: ${{ inputs.email }}
+          NOME: ${{ inputs.nome }}
+        run: |
+          set +e
+          saida="$(node tools/chaves.js exec --precisa ops,servico -- node tools/create-first-admin.js --email "$EMAIL" --name "$NOME" 2>&1)"; codigo=$?
+          echo "$saida"
+          {
+            echo "## Primeiro administrador ($AMBIENTE)"
+            echo
+            if [ "$codigo" -eq 0 ]; then echo "**Pronto.** $saida"; else echo "**Não foi possível convidar:** $saida"; fi
+            echo
+            echo "Próximo passo: a pessoa abre o e-mail \"Você foi convidado para o Canteiro A&M\", clica em **Aceitar o convite**, cria a senha e entra. Depois, convide um **segundo administrador** pelo painel (Admin → Usuários)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$codigo"
