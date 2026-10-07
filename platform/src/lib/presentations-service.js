@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { E, HttpError } from './errors.js';
 import { limitMany } from './request.js';
-import { lintDeck } from './deck-lint.js';
+import { lintDeck, rejectionDetails, locateIssues } from './deck-lint.js';
 import { contentHash } from './canonical.js';
 
 /* ───────────── utilidades de requisição ───────────── */
@@ -24,15 +24,21 @@ export async function rate(c, user, bucket, windowS, max) {
   const deps = c.get('deps'); const mult = (deps && deps.config && deps.config.rateIpMultiplier) || IP_MULTIPLIER;
   await limitMany(c, [[`${bucket}:u`, user.id, windowS, max], [`${bucket}:ip`, c.get('ip') || 'sem-ip', windowS, max * mult]]);
 }
-export const RATES = Object.freeze({ write: [60, 120], upload: [60, 60], comment: [60, 30], read: [60, 600], asset_read: [60, 600] });
+/* upload: 300/min por pessoa (BE-ED-13 — importar um PPTX/PDF com dezenas de imagens envia check + PUT por imagem; os bytes são conferidos e
+   deduplicados, então o freio de abuso é o teto por IP, que continua sendo o valor × RATE_IP_MULTIPLIER). prefs: gravação das preferências. */
+export const RATES = Object.freeze({ write: [60, 120], upload: [60, 300], comment: [60, 30], read: [60, 600], asset_read: [60, 600], prefs: [60, 60] });
 
-/** Lê o corpo no máximo `maxBytes` — para de ler ao estourar (não carrega 1 GB na memória só para depois recusar). */
-export async function readBodyLimited(c, maxBytes) {
+/** "4 MB", "13 MB", "1,5 MB" — limites em MiB escritos como a pessoa lê. */
+export const fmtMb = (bytes) => `${(Math.round((bytes / 1048576) * 10) / 10).toLocaleString('pt-BR')} MB`;
+
+/** Lê o corpo no máximo `maxBytes` (em BYTES) — para de ler ao estourar (não carrega 1 GB na memória só para depois recusar).
+ *  `tooLarge`: mensagem do 413 (a da rota diz o limite e o que fazer). */
+export async function readBodyLimited(c, maxBytes, tooLarge) {
   const declared = c.req.header('content-length');
   if (declared != null && declared !== '') {
     const n = Number(declared);
     if (!Number.isFinite(n) || n < 0) throw E.badRequest('Cabeçalho Content-Length inválido.');
-    if (n > maxBytes) throw E.tooLarge();
+    if (n > maxBytes) throw E.tooLarge(tooLarge);
   }
   const body = c.req.raw.body;
   if (!body) return Buffer.alloc(0);
@@ -41,15 +47,15 @@ export async function readBodyLimited(c, maxBytes) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > maxBytes) { await reader.cancel().catch(() => {}); throw E.tooLarge(); }
+    if (total > maxBytes) { await reader.cancel().catch(() => {}); throw E.tooLarge(tooLarge); }
     chunks.push(value);
   }
   return Buffer.concat(chunks.map((v) => Buffer.from(v.buffer, v.byteOffset, v.byteLength)), total);
 }
 
-/** JSON do corpo, com limite de tamanho e validação zod (o `schema` decide o que é aceito; a mensagem nunca ecoa o valor recebido). */
-export async function readJsonBody(c, schema, maxBytes = 16 * 1024) {
-  const buf = await readBodyLimited(c, maxBytes);
+/** JSON do corpo, com limite de tamanho (em bytes) e validação zod (o `schema` decide o que é aceito; a mensagem nunca ecoa o valor recebido). */
+export async function readJsonBody(c, schema, maxBytes = 16 * 1024, { tooLarge } = {}) {
+  const buf = await readBodyLimited(c, maxBytes, tooLarge);
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { throw E.badRequest('O corpo não é UTF-8 válido.'); }
   let data;
@@ -81,23 +87,34 @@ export function blankDeck(title = 'Nova apresentação') {
   return { v: 1, app: 'AM Studio', id: 'd' + Date.now().toString(36) + rnd(), title, slides: [{ id: 'e' + rnd(), bg: '#FFFFFF', tr: 'fade', layout: 'blank-light', els: [] }] };
 }
 
-/** Valida (lint de segurança), serializa e calcula o hash CANÔNICO no servidor. Lança 422 antes de qualquer acesso ao banco. */
+/** Texto com NUL ou surrogate solto (o jsonb não guarda): usado para APONTAR onde está o problema (slide/elemento), nunca para ecoá-lo. */
+const BAD_CHAR = /\u0000|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Valida (lint de segurança), serializa e calcula o hash CANÔNICO no servidor. Lança 422 antes de qualquer acesso ao banco.
+ *  Toda recusa traz details.issues [{slide (1-based), elementId, reason}] (≤ 20) para o editor levar a pessoa ao ponto exato (BE-ED-09). */
 export function prepareContent(content) {
   const info = lintDeck(content);
   let text, hash;
   try { text = JSON.stringify(content); hash = contentHash(content); }
-  catch { throw E.rejected('Conteúdo recusado por segurança.', { reasons: ['estrutura_invalida'] }); }
-  if (!jsonbSafe(text)) throw E.rejected('O conteúdo tem caracteres que não podem ser guardados.', { reasons: ['caractere_invalido'] });
+  catch { throw E.rejected('Conteúdo recusado por segurança.', rejectionDetails(['estrutura_invalida'])); }
+  if (!jsonbSafe(text)) {
+    throw E.rejected('O conteúdo tem caracteres que não podem ser guardados.', rejectionDetails(['caractere_invalido'], { issues: locateIssues(content, (s) => (BAD_CHAR.test(s) ? 'caractere_invalido' : null)) }));
+  }
   return { content, hash, info, bytes: info.bytes };
 }
 
 /** Todo `asset:sha256:` do conteúdo precisa existir, estar `ready` e ser VISÍVEL ao usuário (policy assets_select: enviou, provou posse ou
- *  está numa apresentação que ele vê). "Não existe" e "é de outra pessoa" dão a MESMA resposta (422): não revela arquivos alheios. */
-export async function assertAssetsUsable(tx, shas) {
+ *  está numa apresentação que ele vê). "Não existe" e "é de outra pessoa" dão a MESMA resposta (422): não revela arquivos alheios.
+ *  Com `content`, details.issues aponta os slides/elementos que usam os arquivos que faltam. */
+export async function assertAssetsUsable(tx, shas, content) {
   if (!shas.length) return;
   const found = new Set((await tx`select sha256 from app.assets where sha256 = any(${shas}::text[]) and status = 'ready'`).map((r) => r.sha256));
   const missing = shas.filter((s) => !found.has(s));
-  if (missing.length) throw E.rejected('O conteúdo usa arquivos que não existem ou que você não pode usar. Reenvie as imagens e salve de novo.', { reasons: ['asset_inexistente'], missing: missing.slice(0, 20), missingCount: missing.length });
+  if (!missing.length) return;
+  const want = new Set(missing);
+  const uses = (s) => { if (s.length < 77) return null; for (const m of s.matchAll(/asset:sha256:([0-9a-f]{64})/g)) if (want.has(m[1])) return 'asset_inexistente'; return null; };
+  throw E.rejected('O conteúdo usa arquivos que não existem ou que você não pode usar. Reenvie as imagens e salve de novo.',
+    rejectionDetails(['asset_inexistente'], { issues: content ? locateIssues(content, uses) : null, extra: { missing: missing.slice(0, 20), missingCount: missing.length } }));
 }
 
 /* ───────────── leitura ───────────── */
@@ -181,7 +198,7 @@ async function touchAssets(tx, shas) {
 async function validateThumb(tx, thumb) {
   if (thumb == null) return;
   const [t] = await tx`select 1 as ok from app.assets where sha256 = ${thumb} and status = 'ready' and kind = 'thumb'`;
-  if (!t) throw E.rejected('A miniatura enviada não existe ou não pode ser usada.', { reasons: ['thumb_invalida'] });
+  if (!t) throw E.rejected('A miniatura enviada não existe ou não pode ser usada.', rejectionDetails(['thumb_invalida']));
 }
 
 /** Trava a linha (SELECT … FOR UPDATE) e devolve o estado leve (sem o JSON). Dois salvamentos simultâneos da MESMA apresentação se enfileiram aqui. */
@@ -231,7 +248,7 @@ export async function saveContent(tx, { userId, aud, id, input, prep }) {
 
   // 3) Integridade referencial dos arquivos (e da miniatura) — antes de gravar qualquer coisa
   const shas = [...prep.info.assetRefs];
-  await assertAssetsUsable(tx, shas);
+  await assertAssetsUsable(tx, shas, prep.content);
   const thumb = input.thumbSha === undefined ? row.thumb_sha : input.thumbSha;
   if (thumb !== row.thumb_sha) await validateThumb(tx, thumb);
 
@@ -260,7 +277,7 @@ export async function saveContent(tx, { userId, aud, id, input, prep }) {
 /** POST /presentations — nova apresentação do usuário (em branco, conteúdo dado ou importado). */
 export async function createPresentation(tx, { userId, aud, prep, source }) {
   const shas = [...prep.info.assetRefs];
-  await assertAssetsUsable(tx, shas);
+  await assertAssetsUsable(tx, shas, prep.content);
   const imported = source === 'import';
   const [p] = await tx`insert into app.presentations(owner_id, title, slide_count, content, content_hash, updated_by, snap_seq, last_snapshot_at)
         values (${userId}::uuid, ${prep.info.title}, ${prep.info.slideCount}, ${tx.json(prep.content)}, ${prep.hash}, ${userId}::uuid, ${imported ? 1 : 0}::int, ${imported ? tx`now()` : null})
@@ -350,7 +367,7 @@ export async function restoreVersion(tx, { userId, aud, id, no, baseRev }) {
   if (!v) throw E.notFound('Versão não encontrada.');
   const prep = prepareContent(v.content);                 // as regras de segurança podem ter ficado mais rígidas desde que a versão foi gravada
   const shas = [...prep.info.assetRefs];
-  await assertAssetsUsable(tx, shas);
+  await assertAssetsUsable(tx, shas, prep.content);
   if (prep.hash === row.content_hash) return { rev: row.rev, savedAt: row.updated_at, hash: prep.hash, unchanged: true };
 
   let seq = row.snap_seq;

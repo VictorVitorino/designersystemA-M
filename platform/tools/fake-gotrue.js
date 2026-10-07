@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /* tools/fake-gotrue.js — GoTrue (Supabase Auth) FALSO, só para teste e desenvolvimento local.
-   Implementa o MESMO contrato HTTP que a API usa (docs/API.md §3): invite, verify, token (password/refresh_token), PUT user, recover, logout,
-   admin (ban/delete/list), health e .well-known/jwks.json (ES256) — ou emite tokens HS256 (modo 'hs256').
+   Implementa o MESMO contrato HTTP que a API usa (docs/API.md §3): invite, verify, token (password/refresh_token/pkce), PUT user, recover, logout,
+   admin (ban/delete/list), sso (SAML com PKCE), health e .well-known/jwks.json (ES256) — ou emite tokens HS256 (modo 'hs256').
+   SSO: provedores por domínio (fake.addSsoProvider('empresa.com')); POST /auth/v1/sso cria o fluxo PKCE e devolve a URL de um IdP FALSO
+   (GET /__sso/idp?flow=…&email=…[&sub=…][&verified=0][&cancel=1]) que faz o papel do IdP + ACS: cria (ou reusa) o usuário SAML — OUTRO usuário,
+   como no Supabase, com app_metadata.provider = 'sso:<id>' — e volta ao redirect_to com ?code=…; POST /auth/v1/token?grant_type=pkce troca o
+   código pela sessão só com o code_verifier certo (S256 ou plain), uma vez. redirect_to fora da origem da aplicação vira a própria origem.
    E-mails de convite/recuperação não são enviados: caem numa "caixa de saída" consultável em GET /__outbox (inclui o token_hash).
    RECUSA INICIAR com APP_ENV=production. Escuta apenas em 127.0.0.1.
 
@@ -27,18 +31,20 @@ export async function startFakeGoTrue(opts = {}) {
   const jwtSecret = opts.jwtSecret || crypto.randomBytes(32).toString('hex');
   const appOrigin = opts.appOrigin || 'http://localhost:3000';
   // state.fail = { invite: 500, recover: 500, login: 500, refresh: 500, verify: 500, logout: 500, admin: 500 } → a operação responde com esse status (testes de falha do provedor)
-  const state = { accessTtl: opts.accessTtl ?? 3600, latency: opts.latency || {}, fail: {} };
+  const state = { accessTtl: opts.accessTtl ?? 3600, latency: opts.latency || {}, fail: {}, ssoRequests: [], flowTtlMs: 300_000 };
   const users = new Map();          // id → usuário
   const tokens = new Map();         // token_hash → { userId, type, expiresAt, used }
   const sessions = new Map();       // sid → { userId }
   const refresh = new Map();        // refresh_token → { sid, userId, used }
   const outbox = [];
+  const ssoProviders = new Map();   // domínio → { id, enabled }
+  const flows = new Map();          // id do fluxo → { providerId, challenge, method, redirectTo, userId, authCode, createdAt }
   const calls = [];                 // registro (sem corpo) das chamadas, para asserções
   const kid = 'fake-' + crypto.randomBytes(4).toString('hex');
   let privateKey, publicJwk, publicKey;
   if (mode === 'jwks') { const kp = await generateKeyPair('ES256', { extractable: true }); privateKey = kp.privateKey; publicKey = kp.publicKey; publicJwk = { ...(await exportJWK(kp.publicKey)), kid, alg: 'ES256', use: 'sig' }; }
   const hsKey = new TextEncoder().encode(jwtSecret);
-  let issuer = '';
+  let issuer = '', selfUrl = '';
 
   const publicUser = (u) => ({ id: u.id, aud: 'authenticated', role: 'authenticated', email: u.email, email_confirmed_at: u.confirmedAt, invited_at: u.invitedAt, banned_until: u.banned ? '2125-01-01T00:00:00Z' : null, user_metadata: u.metadata, created_at: u.createdAt });
 
@@ -54,7 +60,7 @@ export async function startFakeGoTrue(opts = {}) {
   async function newSession(u) {
     const sid = crypto.randomUUID(); sessions.set(sid, { userId: u.id });
     const rt = crypto.randomBytes(16).toString('base64url'); refresh.set(rt, { sid, userId: u.id, used: false });
-    const access = await mint({ sub: u.id, email: u.email, session_id: sid, app_metadata: { provider: 'email' }, user_metadata: { ...u.metadata, email_verified: true }, is_anonymous: false });
+    const access = await mint({ sub: u.id, email: u.email, session_id: sid, app_metadata: u.appMetadata || { provider: 'email' }, user_metadata: { ...u.metadata, email_verified: u.emailVerifiedClaim ?? true }, is_anonymous: false });
     return { access_token: access, token_type: 'bearer', expires_in: state.accessTtl, expires_at: Math.floor(Date.now() / 1000) + state.accessTtl, refresh_token: rt, user: publicUser(u) };
   }
   async function authUser(req) {
@@ -72,12 +78,23 @@ export async function startFakeGoTrue(opts = {}) {
   // o Supabase real recusa chave nova (não-JWT) no Authorization: imita isso para o teste pegar um cliente que ainda a mande como Bearer
   const opaqueInBearer = (req) => opaque && /^Bearer sb_(publishable|secret)_/.test(req.headers.authorization || '');
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const byEmail = (email) => [...users.values()].find((u) => u.email === String(email || '').trim().toLowerCase());
+  // conta de e-mail/senha pelo e-mail (as contas SAML têm o mesmo e-mail mas são outras: não entram em login, convite nem recuperação)
+  const byEmail = (email) => [...users.values()].find((u) => !u.sso && u.email === String(email || '').trim().toLowerCase());
   function mail(u, type) {
     const token_hash = crypto.randomBytes(24).toString('hex');
     tokens.set(token_hash, { userId: u.id, type, expiresAt: Date.now() + (state.otpTtlMs ?? 3600_000), used: false });
     outbox.push({ to: u.email, type, token_hash, link: `${appOrigin}/auth/confirmar?token_hash=${token_hash}&type=${type}`, displayName: u.metadata?.display_name || null, at: new Date().toISOString() });
     return token_hash;
+  }
+  function addSsoProvider(domain, { id = crypto.randomUUID(), enabled = true } = {}) { ssoProviders.set(String(domain).trim().toLowerCase(), { id, enabled }); return id; }
+  /** Usuário SAML do provedor: OUTRO auth.users (mesmo e-mail da conta de senha, id diferente), reaproveitado pelo par (provedor, NameID). */
+  function ssoUser(providerId, subject, email, emailVerified) {
+    let u = [...users.values()].find((x) => x.sso && x.sso.providerId === providerId && x.sso.subject === subject);
+    if (!u) { u = addUser({ email, displayName: 'Pessoa do SSO' }); u.sso = { providerId, subject }; }
+    u.email = String(email).trim().toLowerCase();
+    u.appMetadata = { provider: `sso:${providerId}`, providers: [`sso:${providerId}`] };
+    u.emailVerifiedClaim = emailVerified;
+    return u;
   }
   function addUser({ email, password, confirmed = true, displayName = 'Usuário de teste', id } = {}) {
     const e = String(email).trim().toLowerCase(); const salt = crypto.randomBytes(8).toString('hex');
@@ -94,13 +111,28 @@ export async function startFakeGoTrue(opts = {}) {
         const to = url.searchParams.get('to'); return json(res, 200, { items: outbox.filter((m) => !to || m.to === to.toLowerCase()) });
       }
       if (p === '/auth/v1/.well-known/jwks.json') return json(res, 200, { keys: mode === 'jwks' ? [publicJwk] : [] });
+      if (p === '/__sso/idp' && method === 'GET') {           // IdP + ACS falsos: o navegador (o teste) chega aqui pela URL devolvida por /sso
+        const f = flows.get(url.searchParams.get('flow') || '');
+        if (!f) return err(res, 404, 'flow_state_not_found', 'invalid flow state');
+        const dest = new URL(f.redirectTo);
+        if (url.searchParams.get('cancel')) { dest.searchParams.set('error', 'access_denied'); dest.searchParams.set('error_code', 'saml_cancelled'); dest.searchParams.set('error_description', 'User cancelled'); }
+        else {
+          const email = url.searchParams.get('email');
+          if (!email) return err(res, 400, 'saml_assertion_no_email', 'SAML Assertion does not contain an email address');
+          const u = ssoUser(f.providerId, url.searchParams.get('sub') || `nameid:${email.trim().toLowerCase()}`, email, url.searchParams.get('verified') !== '0');
+          f.userId = u.id; f.authCode = crypto.randomUUID();
+          dest.searchParams.set('code', f.authCode);
+        }
+        res.writeHead(302, { location: dest.toString() }); return res.end();
+      }
       if (!apikeyOk(req)) return err(res, 401, 'no_authorization', 'No API key found in request');
       if (opaqueInBearer(req)) return err(res, 401, 'bad_jwt', 'invalid JWT: unable to parse or verify signature, token is malformed');
       if (p === '/auth/v1/health' && method === 'GET') return json(res, 200, { version: 'fake', name: 'GoTrue' });
       const body = ['POST', 'PUT'].includes(method) ? await readBody(req) : {};
       const grantType = url.searchParams.get('grant_type');
       const op = p === '/auth/v1/invite' ? 'invite' : p === '/auth/v1/recover' ? 'recover' : p === '/auth/v1/verify' ? 'verify' : p === '/auth/v1/logout' ? 'logout'
-        : p === '/auth/v1/token' ? (grantType === 'refresh_token' ? 'refresh' : 'login') : p.startsWith('/auth/v1/admin/') ? 'admin' : null;
+        : p === '/auth/v1/sso' ? 'sso'
+          : p === '/auth/v1/token' ? (grantType === 'refresh_token' ? 'refresh' : grantType === 'pkce' ? 'pkce' : 'login') : p.startsWith('/auth/v1/admin/') ? 'admin' : null;
       if (op && state.fail[op]) return err(res, state.fail[op], 'unexpected_failure', 'simulated failure');
 
       if (p === '/auth/v1/invite' && method === 'POST') {
@@ -111,6 +143,23 @@ export async function startFakeGoTrue(opts = {}) {
         if (!u) { u = addUser({ email, confirmed: false, displayName: body.data?.display_name || '' }); }
         u.invitedAt = new Date().toISOString(); u.banned = false; mail(u, 'invite');
         return json(res, 200, publicUser(u));
+      }
+      if (p === '/auth/v1/sso' && method === 'POST') {
+        const hasDomain = typeof body.domain === 'string' && body.domain !== '', hasId = typeof body.provider_id === 'string' && body.provider_id !== '';
+        state.ssoRequests.push({ domain: hasDomain ? body.domain : null, providerId: hasId ? body.provider_id : null, redirectTo: body.redirect_to, codeChallenge: body.code_challenge, codeChallengeMethod: body.code_challenge_method, skipHttpRedirect: body.skip_http_redirect, keys: Object.keys(body).sort() });
+        if (hasDomain === hasId) return err(res, 400, 'validation_failed', 'A provider_id or domain needs to be provided');
+        const prov = hasDomain ? ssoProviders.get(body.domain.toLowerCase()) : [...ssoProviders.values()].find((x) => x.id === body.provider_id);
+        if (!prov) return err(res, 404, 'sso_provider_not_found', 'No SSO provider assigned for this domain');
+        if (!prov.enabled) return err(res, 404, 'sso_provider_disabled', 'SSO Provider is currently disabled');
+        const ch = String(body.code_challenge || ''), m = String(body.code_challenge_method || '').toLowerCase();
+        if ((ch === '') !== (m === '')) return err(res, 400, 'validation_failed', 'PKCE flow requires code_challenge_method and code_challenge');
+        if (ch && (ch.length < 43 || ch.length > 128 || !/^[a-zA-Z._~0-9-]+$/.test(ch))) return err(res, 400, 'validation_failed', 'code challenge has to be between 43 and 128 characters');
+        if (ch && !['s256', 'plain'].includes(m)) return err(res, 400, 'validation_failed', 'Invalid code_challenge_method');
+        const redirectTo = typeof body.redirect_to === 'string' && body.redirect_to.startsWith(appOrigin + '/') ? body.redirect_to : appOrigin;   // como o GoTrue: fora da lista → SITE_URL
+        const id = crypto.randomUUID(); flows.set(id, { providerId: prov.id, challenge: ch, method: m, redirectTo, userId: null, authCode: null, createdAt: Date.now() });
+        const idpUrl = `${selfUrl}/__sso/idp?flow=${id}`;
+        if (body.skip_http_redirect === true) return json(res, 200, { url: idpUrl });
+        res.writeHead(303, { location: idpUrl }); return res.end();
       }
       if (p === '/auth/v1/verify' && method === 'POST') {
         const t = tokens.get(String(body.token_hash || ''));
@@ -138,6 +187,19 @@ export async function startFakeGoTrue(opts = {}) {
           const u = users.get(r.userId); if (!u) return err(res, 400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found');
           if (u.banned) return err(res, 403, 'user_banned', 'User is banned');
           r.used = true; sessions.delete(r.sid);
+          return json(res, 200, await newSession(u));
+        }
+        if (grant === 'pkce') {
+          if (!body.auth_code || !body.code_verifier) return err(res, 400, 'validation_failed', 'invalid request: both auth code and code verifier should be non-empty');
+          const entry = [...flows].find(([, x]) => x.authCode && x.authCode === body.auth_code);
+          if (!entry || !entry[1].userId) return err(res, 404, 'flow_state_not_found', 'invalid flow state, no valid flow state found');
+          const [fid, f] = entry;
+          if (Date.now() - f.createdAt > state.flowTtlMs) return err(res, 422, 'flow_state_expired', 'invalid flow state, flow state has expired');
+          const got = f.method === 's256' ? crypto.createHash('sha256').update(String(body.code_verifier)).digest('base64url') : String(body.code_verifier);
+          if (got !== f.challenge) return err(res, 400, 'bad_code_verifier', 'code challenge does not match previously saved code verifier');
+          const u = users.get(f.userId); flows.delete(fid);            // uso único
+          if (!u) return err(res, 404, 'user_not_found', 'User not found');
+          if (u.banned) return err(res, 403, 'user_banned', 'User is banned');
           return json(res, 200, await newSession(u));
         }
         return err(res, 400, 'validation_failed', 'unsupported_grant_type');
@@ -181,7 +243,7 @@ export async function startFakeGoTrue(opts = {}) {
   });
 
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(opts.port ?? 0, '127.0.0.1', resolve); });
-  const port = server.address().port; const url = `http://127.0.0.1:${port}`; issuer = `${url}/auth/v1`;
+  const port = server.address().port; const url = `http://127.0.0.1:${port}`; issuer = `${url}/auth/v1`; selfUrl = url;
   return {
     url, port, mode, keyFormat: opaque ? 'opaque' : 'legacy', anonKey, serviceKey, jwtSecret, issuer, appOrigin,
     jwksUrl: mode === 'jwks' ? `${url}/auth/v1/.well-known/jwks.json` : undefined,
@@ -190,6 +252,9 @@ export async function startFakeGoTrue(opts = {}) {
     clearOutbox: () => { outbox.length = 0; },
     calls, state, users,
     addUser, userByEmail: byEmail,
+    /** SSO: cadastra um provedor SAML para o domínio (devolve o id do provedor); `ssoUsers()` lista as contas SAML criadas; `flows` = fluxos PKCE vivos. */
+    addSsoProvider, ssoUsers: () => [...users.values()].filter((u) => u.sso), flows,
+    sessionsOf: (userId) => [...sessions.values()].filter((x) => x.userId === userId).length,
     /** Assina um token arbitrário (testes de adulteração: iss/aud/exp errados, outro alg…). */
     mintToken: mint,
     /** Falsifica uma sessão válida (útil para forçar expiração): invalida refresh tokens/sessões de um usuário. */

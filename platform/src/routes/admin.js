@@ -64,9 +64,10 @@ export function adminRoutes(deps) {
     try { await gotrue.invite({ email, displayName }); }
     catch (e) { if (e && e.code === 'already_exists') await gotrue.recover(email); else throw e; }
   }
-  /** Bloqueia/desbloqueia no GoTrue pelo e-mail. true = sincronizado (ou nada a fazer); false = falhou. */
+  /** Bloqueia/desbloqueia no GoTrue pelo e-mail — TODAS as contas do GoTrue com esse e-mail (a de senha e a do SSO, que o Supabase cria à parte).
+      true = sincronizado (ou nada a fazer); false = falhou. */
   async function syncBan(email, banned) {
-    try { const id = await gotrue.findUserIdByEmail(email); if (id) await gotrue.ban(id, banned); return true; }
+    try { for (const id of await gotrue.findUserIdsByEmail(email)) await gotrue.ban(id, banned); return true; }
     catch (e) { log.warn('gotrue_ban_failed', { code: e && e.code, banned }); return false; }
   }
 
@@ -79,6 +80,7 @@ export function adminRoutes(deps) {
     const rows = await db.asUser(admin.id, (tx) => tx`
       select u.id, u.email, u.display_name, u.role, u.status, u.created_at, u.created_at::text as created_txt, u.activated_at, u.last_login_at,
              (select count(*)::int from app.presentations p where p.owner_id = u.id and p.deleted_at is null) as presentation_count,
+             (select coalesce(sum(a.size_bytes), 0) from app.assets a where a.uploaded_by = u.id and a.status in ('ready', 'pending'))::text as storage_bytes,
              inv.id as invite_id, inv.status as invite_status, inv.expires_at as invite_expires_at, inv.resent_count
         from app.users u
         left join lateral (select i.id, i.status, i.expires_at, i.resent_count from app.invites i where i.user_id = u.id order by i.created_at desc limit 1) inv on true
@@ -92,7 +94,7 @@ export function adminRoutes(deps) {
     return c.json({
       items: page.map((u) => ({
         id: u.id, email: u.email, displayName: u.display_name, role: u.role, status: u.status, createdAt: u.created_at, activatedAt: u.activated_at, lastLoginAt: u.last_login_at,
-        presentationCount: u.presentation_count,
+        presentationCount: u.presentation_count, storageBytes: Number(u.storage_bytes),   // espaço ocupado (o mesmo critério da cota STORAGE_QUOTA_USER_MB)
         invite: u.invite_id ? { id: u.invite_id, status: u.invite_status, expiresAt: u.invite_expires_at, resentCount: u.resent_count } : null,
       })),
       nextCursor: rows.length > q.limit ? encodeCursor([page[page.length - 1].created_txt, page[page.length - 1].id]) : null,

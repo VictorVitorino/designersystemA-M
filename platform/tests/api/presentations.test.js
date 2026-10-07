@@ -334,6 +334,39 @@ describe('entrada maliciosa e limites', () => {
     const c = await env.post(A, '/api/presentations', { json: { content: evil } }); assert.equal(c.status, 422);
     const d = await env.post(B, `/api/presentations/${p.id}/duplicate`, { json: {} }); assert.equal(d.status, 201, 'duplicar o conteúdo já limpo segue funcionando');
   });
+  test('BE-ED-09: 422 rejected_content traz details.issues [{slide (1-based), elementId, reason}] — salvar e criar — sem ecoar o conteúdo', async () => {
+    const p = await env.create(A, 'Onde', deck('Onde', { slides: 3 }));
+    const evil = deck('Onde', { slides: 3 }); evil.slides[2].els[0].html = '<script>SEGREDO-ISSUES</script>'; evil.slides[1].notes = 'javascript:alert(1)';
+    const r = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: p.rev, content: evil } });
+    assert.equal(r.status, 422); assert.equal(r.json.error.code, 'rejected_content');
+    assert.deepEqual(r.json.error.details.issues, [{ slide: 2, elementId: null, reason: 'url_perigosa' }, { slide: 3, elementId: 't2', reason: 'tag_perigosa' }]);
+    assert.ok(!r.text.includes('SEGREDO-ISSUES') && !r.text.includes('alert('), 'nem o texto recusado nem o trecho voltam');
+    const c = await env.post(A, '/api/presentations', { json: { content: evil } }); assert.equal(c.status, 422); assert.deepEqual(c.json.error.details.issues, r.json.error.details.issues);
+    const many = deck('Muitos', { slides: 30 }); many.slides.forEach((s) => { s.els[0].html = '<iframe src=//x>'; });
+    const m = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: p.rev, content: many } }); assert.equal(m.status, 422); assert.equal(m.json.error.details.issues.length, 20, 'no máximo 20');
+    assert.equal((await row(p.id)).rev, p.rev, 'nada gravado');
+  });
+  test('BE-ED-09: texto digitado citando tags (como o editor guarda) salva; o mesmo HTML literal é recusado com a localização', async () => {
+    const p = await env.create(A, 'Tags', deck('Tags'));
+    const ok = deck('Tags', { slides: 2 }); ok.slides[1].els[0].html = 'use a tag &lt;form&gt; para formulários; &lt;b&gt; para negrito; if (a &lt; b &amp;&amp; c &gt; d)';
+    const r = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: p.rev, content: ok } }); assert.equal(r.status, 200, r.text);
+    const lit = deck('Tags', { slides: 2 }); lit.slides[1].els[0].html = 'use a tag <form action="https://evil.example"> para formulários';
+    const bad = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: r.json.rev, content: lit } });
+    assert.equal(bad.status, 422); assert.deepEqual(bad.json.error.details.issues, [{ slide: 2, elementId: 't1', reason: 'tag_perigosa' }]);
+  });
+  test('BE-ED-09: caractere inválido e arquivo inexistente também apontam slide/elemento', async () => {
+    const p = await env.create(A, 'Chars2', deck('Chars2', { slides: 2 }));
+    const nul = deck('Chars2', { slides: 2 }); nul.slides[1].els[0].html = 'a\u0000b';
+    const r = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: p.rev, content: nul } });
+    assert.equal(r.status, 422); assert.deepEqual(r.json.error.details.issues, [{ slide: 2, elementId: 't1', reason: 'caractere_invalido' }]);
+    const ghost = 'e'.repeat(64); const g = deck('Chars2', { slides: 2 }); g.slides[1].els.push({ id: 'img9', type: 'image', src: asset(ghost) });
+    const r2 = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: p.rev, content: g } });
+    assert.equal(r2.status, 422); assert.deepEqual(r2.json.error.details.reasons, ['asset_inexistente']); assert.deepEqual(r2.json.error.details.missing, [ghost]);
+    assert.deepEqual(r2.json.error.details.issues, [{ slide: 2, elementId: 'img9', reason: 'asset_inexistente' }]);
+    const c = await env.post(A, '/api/presentations', { json: { content: g } }); assert.deepEqual(c.json.error.details.issues, [{ slide: 2, elementId: 'img9', reason: 'asset_inexistente' }]);
+    const th = await env.put(A, `/api/presentations/${p.id}/content`, { json: { baseRev: p.rev, content: deck('Chars2', { text: 'novo' }), thumbSha: 'f'.repeat(64) } });
+    assert.equal(th.status, 422); assert.deepEqual(th.json.error.details.issues, [{ slide: null, elementId: null, reason: 'thumb_invalida' }]);
+  });
   test('NUL e surrogate solto (o jsonb do Postgres não aceita) viram 422, nunca 500', async () => {
     const p = await env.create(A, 'Chars', deck('Chars'));
     for (const bad of ['a\u0000b', 'x\ud83dy', '\udc00']) {
@@ -362,7 +395,7 @@ describe('entrada maliciosa e limites', () => {
     const big = deck('Big', { text: 'x' }); big.slides[0].els[0].src = 'data:image/png;base64,' + 'A'.repeat(200000);
     const r = await put({ baseRev: 1, content: big }); assert.equal(r.status, 422); assert.ok(r.json.error.details.reasons.includes('imagem_nao_externalizada'));
     const huge = await env.request(A, 'PUT', `/api/presentations/${p.id}/content`, { body: Buffer.alloc(14 * 1024 * 1024, 0x20), headers: { 'content-type': 'application/json' } });
-    assert.equal(huge.status, 413); assert.equal(huge.json.error.code, 'too_large');
+    assert.equal(huge.status, 413); assert.equal(huge.json.error.code, 'too_large'); assert.match(huge.json.error.message, /limite de 13 MB por salvamento/, 'fora da Vercel o padrão é 13 MiB (PUB-08)');
     const lying = await env.request(A, 'PUT', `/api/presentations/${p.id}/content`, { body: '{}', headers: { 'content-type': 'application/json', 'content-length': String(50 * 1024 * 1024) } });
     assert.equal(lying.status, 413, 'Content-Length declarado grande demais é barrado antes de ler');
     assert.equal((await row(p.id)).rev, 1);

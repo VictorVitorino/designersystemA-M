@@ -328,8 +328,9 @@ describe('perfil e SSO', () => {
     const [me] = await t.ops.asSystem((tx) => tx`select role from app.users where id = ${a.id}`); assert.equal(me.role, 'member');
     const anon = t.anon(); await anon.ensureCsrf(); assert.equal((await anon.patch('/api/me', { displayName: 'x' })).status, 401);
   });
-  test('SSO ainda não configurado: 501 not_configured', async () => {
-    const c = t.anon();
-    for (const p of ['/api/auth/sso/start', '/api/auth/sso/callback']) { const r = await c.get(p); assert.deepEqual([r.status, r.json.error.code], [501, 'not_configured']); }
+  test('SSO desligado (padrão, sem SSO_ENABLED): 501 not_configured em todas as rotas do SSO, sem chamar o GoTrue', async () => {
+    const c = t.anon(); const before_ = t.fake.state.ssoRequests.length;
+    for (const p of ['/api/auth/sso', '/api/auth/sso?email=ana@am.test', '/api/auth/sso/start', '/api/auth/sso/callback', '/api/auth/sso/callback?code=abcdefgh-1234']) { const r = await c.get(p); assert.deepEqual([r.status, r.json.error.code], [501, 'not_configured'], p); }
+    assert.equal(t.fake.state.ssoRequests.length, before_); assert.equal(t.config.sso.enabled, false);
   });
 });
