@@ -20,8 +20,8 @@ export async function bootstrapRoles(sql, { apiPassword, opsPassword = process.e
       if not exists (select 1 from pg_roles where rolname = 'app_owner')  then create role app_owner  nologin noinherit; end if;
       if not exists (select 1 from pg_roles where rolname = 'app_user')   then create role app_user   nologin noinherit; end if;
       if not exists (select 1 from pg_roles where rolname = 'app_system') then create role app_system nologin noinherit; end if;
-      if not exists (select 1 from pg_roles where rolname = 'app_api')    then create role app_api    login noinherit nosuperuser nocreatedb nocreaterole nobypassrls; end if;
-      if not exists (select 1 from pg_roles where rolname = 'app_ops')    then create role app_ops    login noinherit nosuperuser nocreatedb nocreaterole nobypassrls; end if;
+      if not exists (select 1 from pg_roles where rolname = 'app_api')    then create role app_api    login inherit nosuperuser nocreatedb nocreaterole nobypassrls; end if;
+      if not exists (select 1 from pg_roles where rolname = 'app_ops')    then create role app_ops    login inherit nosuperuser nocreatedb nocreaterole nobypassrls; end if;
     end $$;`);
   if (apiPassword) await sql.unsafe(`alter role app_api with login password ${lit(apiPassword)}`);
   if (opsPassword) await sql.unsafe(`alter role app_ops with login password ${lit(opsPassword)}`);
