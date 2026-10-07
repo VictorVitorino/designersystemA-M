@@ -813,6 +813,25 @@ await scenario('30 · kits de marca e preferências do editor acompanham a pesso
   const c2 = await newCtx('ana'); const q = await openEditor(c2, s.id, 'prefs2'); await sleep(1200);
   const got = await q.evaluate(() => ({ kits: JSON.parse(localStorage.getItem('amStudio.brandKits') || '[]'), rc: JSON.parse(localStorage.getItem('amStudio.recentColors') || '[]'), sw: localStorage.getItem('amStudio.sideW') }));
   check('CL-126 em outro computador (navegador vazio) o kit "Cliente X", as cores recentes e a largura do painel voltam do servidor', got.kits.length === 1 && got.kits[0].name === 'Cliente X' && got.kits[0].colors[0] === '#112233' && got.rc[0] === '#123456' && got.sw === '250', got);
+  /* o servidor limita as gravações de preferências (60/min): um 429 é repetido depois do Retry-After, sem perder o kit */
+  await faults(c2, { prefs429: 1 }); await reqLog(c2, true);
+  await q.evaluate(() => { const k = JSON.parse(localStorage.getItem('amStudio.brandKits') || '[]'); k.unshift({ name: 'Cliente Y', colors: ['#445566'], at: 2 }); localStorage.setItem('amStudio.brandKits', JSON.stringify(k)); });
+  const y = await until(async () => { const pr = (await post(c2, '/prefs')).ana; return pr && pr.brandKits && pr.brandKits.some((k) => k.name === 'Cliente Y') ? pr : null; }, 15000, 300);
+  const pp = (await reqLog(c2)).filter((r) => r.method === 'PUT' && r.path === '/api/me/prefs').map((r) => r.status);
+  check('CL-158 PUT de preferências com 429 (limite de 60/min) é repetido depois do Retry-After e o kit novo chega ao servidor junto com o antigo', !!y && y.brandKits.length === 2 && pp[0] === 429 && pp.includes(200), { pp, kits: y && y.brandKits.map((k) => k.name) });
+  /* o PUT substitui o objeto inteiro: o que outro computador gravou depois que esta aba abriu não pode sumir (lê, troca só as chaves mudadas aqui e grava) */
+  await post(c2, '/prefs', { set: { ana: { ...y, brandKits: [{ name: 'Cliente W', colors: ['#778899'], at: 3 }, ...y.brandKits], tema: { modo: 'escuro' } } } });
+  await q.evaluate(() => localStorage.setItem('amStudio.recentColors', JSON.stringify(['#ABCDEF', '#123456'])));
+  const z = await until(async () => { const pr = (await post(c2, '/prefs')).ana; return pr && pr.editor && pr.editor.recentColors && pr.editor.recentColors[0] === '#ABCDEF' ? pr : null; }, 10000, 300);
+  const zl = await q.evaluate(() => JSON.parse(localStorage.getItem('amStudio.brandKits') || '[]').map((k) => k.name));
+  check('CL-159 preferências: a gravação seguinte lê o servidor e troca só o que mudou nesta aba — o kit e a chave que outro computador gravou depois continuam lá (e o kit chega a este navegador)', !!z && z.tema && z.tema.modo === 'escuro' && z.editor.sideW === 250 && z.brandKits.map((k) => k.name).join() === 'Cliente W,Cliente Y,Cliente X' && zl.join() === 'Cliente W,Cliente Y,Cliente X', { tema: z && z.tema, kits: z && z.brandKits.map((k) => k.name), local: zl });
+  /* notas "Sobre este slide" editadas no player continuam só neste navegador (como no original): o player avisa enquanto edita */
+  await q.keyboard.press('F5'); await q.waitForSelector('#presenter.open', { timeout: 6000 }); await sleep(500);
+  await q.keyboard.press('i'); await q.waitForSelector('#presenter .amp-note.on', { timeout: 4000 });
+  await q.click('#presenter .amp-note-ed'); await sleep(250);
+  const nk = await q.$eval('#presenter .amp-note-k', (n) => n.textContent);
+  for (let i = 0; i < 5 && await q.evaluate(() => document.getElementById('presenter').classList.contains('open')); i++) { await q.keyboard.press('Escape'); await sleep(250); }
+  check('CL-162 editar "Sobre este slide" no player avisa que vale só neste navegador e onde escrever para todos', nk === 'Ctrl+Enter ou clique fora salva · Esc cancela · vale só neste navegador (para todos: “Sobre este slide” no editor)', nk);
   await q.close(); await c2.close();
 });
 
@@ -821,6 +840,8 @@ await scenario('31 · formulário na nuvem: o texto diz que a resposta vai com o
   await p.evaluate(() => { AMStudio.insertFx('form'); }); await sleep(400);
   await p.evaluate(() => { const F = AMStudio.deck.slides[0].els.find((e) => e.kind === 'form'); F.x = 20; F.y = 20; F.w = 560; F.h = 560; AMStudio.renderAll(); AMStudio.commit(); }); await waitSaved(p);
   await p.keyboard.press('F5'); await p.waitForSelector('#presenter.open .amf', { timeout: 6000 }); await sleep(600);
+  const st0 = await p.$eval('#presenter .amf-st', (n) => n.textContent);
+  check('CL-160 antes de enviar, o formulário já avisa: "Ao enviar, a resposta vai com o seu nome para o dono da apresentação."', st0 === 'Ao enviar, a resposta vai com o seu nome para o dono da apresentação.', st0);
   const fill = () => p.evaluate(() => { const ins = [...document.querySelectorAll('#presenter .amf-in')]; ins.forEach((x) => { x.focus(); document.execCommand('insertText', false, 'Ok'); }); [...document.querySelectorAll('#presenter .amf-rb')].slice(0, 1).forEach((b) => b.click()); [...document.querySelectorAll('#presenter .amf-o')].slice(0, 1).forEach((b) => b.click()); document.querySelector('#presenter .amf-send').click(); });
   await fill(); await sleep(500);
   const st1 = await p.$eval('#presenter .amf-st', (n) => n.textContent);
@@ -836,7 +857,19 @@ await scenario('31 · formulário na nuvem: o texto diz que a resposta vai com o
   for (let i = consoleErrors.length - 1; i >= 0; i--) if (/^form-txt: (Refused to connect to|Fetch API cannot load) 'https:\/\/planilha\.example\.com|^form-txt: Fetch API cannot load https:\/\/planilha\.example\.com/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
   hosts.delete('planilha.example.com');   /* bloqueado pela CSP: o pedido não sai do navegador */
   check('CL-128 planilha com endereço fora do Google: a mensagem explica que na versão online só vale um app do Google (em vez de "sem internet")', /na versão online só vale o endereço de um app do Google/.test(st2 || '') && extra.length > 0 && extra.every((v) => /connect-src/.test(v.d) && /example\.com/.test(v.u)), { st2, extra });
-  await leave(); await p.close();
+  await leave();
+  /* "Limpar" apaga só deste computador: não volta ao reabrir (a restauração respeita a marca) e o servidor continua com as respostas */
+  const nSrv = await until(async () => { const n = (await post(ana, '/state')).interactions.filter((i) => i.presentationId === s.id && i.kind === 'form_response').length; return n >= 2 ? n : null; }, 6000, 200);
+  await p.keyboard.press('F5'); await p.waitForSelector('#presenter.open .amf', { timeout: 6000 }); await sleep(600);
+  await p.evaluate(() => { const b = document.querySelector('#presenter .amf-clear'); b.click(); b.click(); }); await sleep(200);
+  const st3 = await p.$eval('#presenter .amf-st', (n) => n.textContent);
+  await leave();
+  const fk = await p.evaluate((id) => Object.keys(localStorage).filter((k) => k.startsWith('amForm.' + id + '.')), s.id);
+  await p.reload(); await p.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved', null, { timeout: 15000 }); await sleep(1500);
+  const back = await p.evaluate((id) => Object.keys(localStorage).filter((k) => k.startsWith('amForm.' + id + '.')), s.id);
+  const nSrv2 = (await post(ana, '/state')).interactions.filter((i) => i.presentationId === s.id && i.kind === 'form_response').length;
+  check('CL-161 "Limpar" do formulário na nuvem apaga só deste computador e as respostas NÃO voltam ao reabrir; o servidor continua com elas (o dono não perde nada)', st3 === 'Respostas apagadas só deste computador (as já enviadas continuam com o dono da apresentação).' && fk.length === 0 && back.length === 0 && nSrv >= 2 && nSrv2 === nSrv, { st3, fk, back, nSrv, nSrv2 });
+  await p.close();
 });
 
 await scenario('32 · comentários da plataforma no editor e no visualizar: listar, criar no slide atual, resolver e excluir (BE-ED-10)', async () => {

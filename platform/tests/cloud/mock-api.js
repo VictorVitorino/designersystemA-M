@@ -51,7 +51,7 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
     };
     S.tokens = new Map(); /* access/refresh → {userId, kind, valid, csrf} */
     S.pres = new Map(); S.assets = new Map(); S.owned = new Map(); S.interactions = []; S.log = []; S.comments = []; S.prefs = new Map();
-    S.faults = { put5xx: 0, putDelayMs: 0, assetPut5xx: 0, assetPut429: 0, refreshFails: false, versionIntervalMs: 10 * 60 * 1000, getDelayMs: 0, presDelayMs: 0, interactions5xx: 0, interactionsLoseResponse: 0, noPrefs: false };
+    S.faults = { put5xx: 0, putDelayMs: 0, assetPut5xx: 0, assetPut429: 0, refreshFails: false, versionIntervalMs: 10 * 60 * 1000, getDelayMs: 0, presDelayMs: 0, interactions5xx: 0, interactionsLoseResponse: 0, noPrefs: false, prefs429: 0 };
     S.counters = { puts: 0, assetPuts: 0, assetChecks: 0 };
   }
   reset();
@@ -154,11 +154,14 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
     if (p === '/me/prefs') {
       if (S.faults.noPrefs) throw new ApiError(404, 'not_found', 'Rota inexistente.');
       if (m === 'GET') return json(200, { prefs: S.prefs.get(user.id) || {} });
-      if (m === 'PUT') {
-        const pr = body && body.prefs;
-        const depth = (v, d = 0) => (v && typeof v === 'object' ? Math.max(d + 1, ...Object.values(v).map((x) => depth(x, d + 1))) : d);
-        if (!pr || typeof pr !== 'object' || Array.isArray(pr) || depth(pr) > 10) throw new ApiError(400, 'invalid_request', 'Preferências inválidas.');
-        if (Buffer.byteLength(JSON.stringify(pr)) > 64 * 1024) throw new ApiError(413, 'too_large', 'Preferências grandes demais.');
+      if (m === 'PUT') { /* como src/routes/prefs.js: substitui o objeto inteiro; forma, chaves proibidas, profundidade (prefs conta 1), 64 KB em bytes, HTML ativo, 60/min */
+        if (S.faults.prefs429 > 0) { S.faults.prefs429--; throw new ApiError(429, 'rate_limited', 'Muitas gravações de preferências.'); }
+        const pr = body && body.prefs, isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+        const depth = (v) => (v && typeof v === 'object' ? 1 + Math.max(0, ...Object.values(v).map(depth)) : 0);
+        const badKey = (v) => !!v && typeof v === 'object' && Object.keys(v).some((k) => ['__proto__', 'constructor', 'prototype'].includes(k) || badKey(v[k]));
+        if (!isObj(pr) || Object.keys(body).length !== 1 || badKey(pr) || depth(pr) > 10 || (pr.brandKits !== undefined && !Array.isArray(pr.brandKits)) || (pr.editor !== undefined && !isObj(pr.editor))) throw new ApiError(400, 'invalid_request', 'Preferências inválidas.');
+        if (Buffer.byteLength(JSON.stringify(pr)) > 64 * 1024) throw new ApiError(413, 'too_large', 'As preferências passam de 64 KB.');
+        if (reasonOf(JSON.stringify(pr))) throw new ApiError(422, 'rejected_content', 'As preferências têm conteúdo recusado por segurança.');
         S.prefs.set(user.id, structuredClone(pr)); return json(200, { prefs: pr });
       }
     }
@@ -276,16 +279,17 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
           const { kind, elementId, payload, clientId } = body || {};
           if (!['form_response', 'board_state', 'vote_state', 'view', 'reaction'].includes(kind) || typeof elementId !== 'string' || !/^[\w-]{1,40}$/.test(elementId) || payload === undefined) throw new ApiError(400, 'invalid_request', 'Interação inválida.');
           if (clientId !== undefined && (typeof clientId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(clientId))) throw new ApiError(400, 'invalid_request', 'clientId inválido.');
-          const cap = kind === 'board_state' || kind === 'vote_state' ? 256 * 1024 : 64 * 1024;
+          const state = kind === 'board_state' || kind === 'vote_state', cap = state ? 256 * 1024 : 64 * 1024 - 1;   /* como o servidor: estado ≤ 256 KB; demais < 64 KB */
           if (Buffer.byteLength(JSON.stringify(payload)) > cap) throw new ApiError(413, 'too_large', 'Resposta grande demais.');
-          if (clientId) { const dup = S.interactions.find((i) => i.presentationId === pr.id && i.userId === user.id && i.clientId === clientId); if (dup) return json(200, { id: dup.id, kind: dup.kind, elementId: dup.elementId }); }
+          /* clientId: o mesmo (apresentação, pessoa, clientId) devolve o item gravado; em board_state/vote_state é aceito e ignorado (o estado já é único) */
+          if (clientId && !state) { const dup = S.interactions.find((i) => i.presentationId === pr.id && i.userId === user.id && i.clientId === clientId); if (dup) return json(200, { id: dup.id, kind: dup.kind, elementId: dup.elementId }); }
           const now = new Date().toISOString();
           let out;
           if (kind === 'board_state' || kind === 'vote_state') {
             const ex = S.interactions.find((i) => i.presentationId === pr.id && i.userId === user.id && i.kind === kind && i.elementId === elementId);
-            if (ex) { ex.payload = payload; ex.updatedAt = now; if (clientId) ex.clientId = clientId; out = [200, { id: ex.id }]; }
+            if (ex) { ex.payload = payload; ex.updatedAt = now; out = [200, { id: ex.id }]; }
           }
-          if (!out) { const it = { id: randomUUID(), presentationId: pr.id, userId: user.id, kind, elementId, payload, createdAt: now, updatedAt: now, clientId: clientId || null }; S.interactions.push(it); out = [201, { id: it.id }]; }
+          if (!out) { const it = { id: randomUUID(), presentationId: pr.id, userId: user.id, kind, elementId, payload, createdAt: now, updatedAt: now, clientId: (!state && clientId) || null }; S.interactions.push(it); out = [201, { id: it.id }]; }
           if (S.faults.interactionsLoseResponse > 0) { S.faults.interactionsLoseResponse--; throw new ApiError(503, 'unavailable', 'Resposta perdida (gravado no servidor).'); }
           return json(out[0], out[1]);
         }
@@ -331,7 +335,10 @@ export async function startMock({ port = 0, distDir = path.join(PLATFORM, 'dist'
     if (p === '/presentation') { const pr = getP(body.id); return json(200, { rev: pr.rev, title: pr.title, content: pr.content, hash: pr.hash, versions: pr.versions.map((v) => ({ no: v.no, kind: v.kind, label: v.label })) }); }
     if (p === '/comment') { const pr = getP(body.id), by = S.users[body.by || 'ana']; const c = { id: randomUUID(), presentationId: pr.id, authorId: by.id, body: String(body.body || 'Comentário'), slideIndex: body.slideIndex ?? null, createdAt: new Date().toISOString(), editedAt: null, resolvedAt: null, deleted: false }; S.comments.push(c); return json(201, { id: c.id }); }
     if (p === '/comments') return json(200, S.comments);
-    if (p === '/prefs') return json(200, Object.fromEntries(Object.entries(S.users).map(([k, u]) => [k, S.prefs.get(u.id) || null])));
+    if (p === '/prefs') { /* {set:{ana:{…}}} grava como se fosse outro computador; sem corpo, devolve as preferências de todos */
+      if (body && body.set) for (const [k, v] of Object.entries(body.set)) S.prefs.set(S.users[k].id, structuredClone(v));
+      return json(200, Object.fromEntries(Object.entries(S.users).map(([k, u]) => [k, S.prefs.get(u.id) || null])));
+    }
     if (p === '/inerte') { const f = path.join(distDir, 'editor', 'index.html'); return sendFile(res, f, { 'Content-Security-Policy': csp('/editor/'), ...SECURITY_HEADERS, 'Cache-Control': 'no-cache' }); }
     return json(404, {});
   }

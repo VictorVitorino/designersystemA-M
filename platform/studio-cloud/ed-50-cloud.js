@@ -14,7 +14,7 @@
 
   var ID = String(CFG.presentationId), VIEW = CFG.mode === 'view', API = String(CFG.apiBase || '/api').replace(/\/$/, '');
   var DEBOUNCE = 3000, THUMB_EVERY = 60000, MAX_UP = 3.6 * 1024 * 1024, MAX_DECK = 4 * 1024 * 1024;   /* corpo de um salvamento: a função da Vercel aceita ~4,5 MB */
-  var LIM = { form_response: 64 * 1024, board_state: 256 * 1024, vote_state: 256 * 1024 };           /* teto de cada interação no servidor (docs/API.md §6) */
+  var LIM = { form_response: 64 * 1024 - 1, board_state: 256 * 1024, vote_state: 256 * 1024 };       /* teto de cada interação no servidor, em bytes (docs/API.md §6) */
 
   /* ---------------------------------------------------------------- utilidades */
   function $(s, r) { return (r || document).querySelector(s); }
@@ -610,7 +610,7 @@
   }, true);
 
   /* ---------------------------------------------------------------- conteúdo recusado (422 rejected_content): diz em QUAL slide e não repete o mesmo PUT */
-  var WHY = { tag_perigosa: 'código HTML não permitido (como <script>, <form> ou <iframe>)', atributo_evento: 'código HTML com evento (on…=)', atributo_perigoso: 'código HTML não permitido', url_perigosa: 'endereço ou imagem em formato não permitido', svg_embutido: 'imagem SVG embutida', data_html: 'conteúdo embutido não permitido', estilo_perigoso: 'estilo (CSS) não permitido', imagem_nao_externalizada: 'imagem que não foi enviada como arquivo', referencia_asset_invalida: 'referência de imagem inválida', string_grande_demais: 'texto ou imagem grande demais', slides_demais: 'mais de 500 slides', chave_proibida: 'dado com nome não permitido', estrutura_invalida: 'estrutura inválida' };
+  var WHY = { tag_perigosa: 'código HTML não permitido (como <script>, <form> ou <iframe>)', atributo_evento: 'código HTML com evento (on…=)', atributo_perigoso: 'código HTML não permitido', url_perigosa: 'endereço ou imagem em formato não permitido', svg_embutido: 'imagem SVG embutida', data_html: 'conteúdo embutido não permitido', estilo_perigoso: 'estilo (CSS) não permitido', imagem_nao_externalizada: 'imagem que não foi enviada como arquivo', referencia_asset_invalida: 'referência de imagem inválida', asset_inexistente: 'imagem que não está no servidor (insira de novo)', string_grande_demais: 'texto ou imagem grande demais', slides_demais: 'mais de 500 slides', chave_proibida: 'dado com nome não permitido', estrutura_invalida: 'estrutura inválida' };
   var KINDN = { text: 'texto', image: 'imagem', shape: 'forma', line: 'linha', brand: 'marca', fx: 'elemento' };
   function issuesOf(e) {
     var d = e.details || {}, deck = e.deck, out = [];
@@ -977,32 +977,53 @@
   if (prEl) new MutationObserver(function () { if (prEl.classList.contains('open')) { closeMenu(false); if (!VIEW) cmClose(); } }).observe(prEl, { attributes: true, attributeFilter: ['class'] });
 
   /* ---------------------------------------------------------------- computador compartilhado: respostas, quadros, votos, notas e preferências de quem usou antes saem antes de qualquer uso */
-  function userSwitch() { if (me) CC.switchLocalUser(me.id); }
+  function userSwitch() { if (!me) return; wiping = true; try { CC.switchLocalUser(me.id); } finally { wiping = false; } }
 
   /* ---------------------------------------------------------------- preferências da pessoa (kits de marca e do editor) ↔ GET/PUT /api/me/prefs */
-  var PREF = { 'amStudio.brandKits': 1, 'amStudio.recentColors': 1, 'amStudio.sideW': 1, 'amStudio.sideOff': 1, 'amStudio.gxWide': 1 }, PF = { on: false, data: null, t: null };
+  var PREF = { 'amStudio.brandKits': 1, 'amStudio.recentColors': 1, 'amStudio.sideW': 1, 'amStudio.sideOff': 1, 'amStudio.gxWide': 1 }, PF = { on: false, data: null, t: null, dirty: {} };
   function jget(L, k) { try { return JSON.parse(L.getItem(k) || 'null'); } catch (e) { return null; } }
-  async function prefsStart() {
-    var L = ls(); if (VIEW || !L) return;
-    var r; try { r = await jreq('GET', '/me/prefs'); } catch (e) { return; }   /* sem a rota (ou sem rede): fica só no navegador, como no editor original */
-    var p = r && r.prefs && typeof r.prefs === 'object' && !Array.isArray(r.prefs) ? r.prefs : {}, ed = p.editor && typeof p.editor === 'object' ? p.editor : {}, set = function (k, v) { try { origSet.call(L, k, v); } catch (e) { } };
-    PF.data = p; PF.on = true;
+  function prefsEd(p) { return p && p.editor && typeof p.editor === 'object' && !Array.isArray(p.editor) ? p.editor : {}; }
+  /* servidor → localStorage deste navegador; não sobrescreve o que esta aba mudou e ainda não gravou */
+  function prefsApply(p) {
+    var L = ls(), ed = prefsEd(p), set = function (k, v) { if (!PF.dirty[k]) try { origSet.call(L, k, v); } catch (e) { } };
+    if (!L) return;
     if (Array.isArray(p.brandKits)) set('amStudio.brandKits', JSON.stringify(p.brandKits.slice(0, 20).map(function (k) { var o = S.brand && S.brand.safe(k); if (o && k && typeof k.at === 'number') o.at = k.at; return o && o.name ? o : null; }).filter(Boolean)));
-    else if (jget(L, 'amStudio.brandKits')) prefsPush();   /* primeira vez nesta conta: os kits deste navegador sobem */
     if (Array.isArray(ed.recentColors)) set('amStudio.recentColors', JSON.stringify(ed.recentColors.filter(function (c) { return /^#[0-9A-F]{6}$/i.test(c); }).slice(0, 8)));
     if (typeof ed.sideW === 'number' && isFinite(ed.sideW)) set('amStudio.sideW', String(Math.round(Math.max(120, Math.min(600, +ed.sideW)))));
     ['sideOff', 'gxWide'].forEach(function (k) { if (typeof ed[k] === 'boolean') set('amStudio.' + k, ed[k] ? '1' : '0'); });
   }
-  function prefsPush() {
+  async function prefsStart() {
+    var L = ls(); if (VIEW || !L) return;
+    var r; try { r = await jreq('GET', '/me/prefs'); } catch (e) { return; }   /* sem a rota (ou sem rede): fica só no navegador, como no editor original */
+    var p = r && r.prefs && typeof r.prefs === 'object' && !Array.isArray(r.prefs) ? r.prefs : {}, ed = prefsEd(p);
+    PF.data = p; PF.on = true;
+    /* primeira vez nesta conta: o que este navegador já tinha sobe */
+    if (!Array.isArray(p.brandKits) && jget(L, 'amStudio.brandKits')) PF.dirty['amStudio.brandKits'] = 1;
+    if (!p.editor) Object.keys(PREF).forEach(function (k) { if (k !== 'amStudio.brandKits' && L.getItem(k) != null) PF.dirty[k] = 1; });
+    prefsApply(p);
+    if (Object.keys(PF.dirty).length) prefsPush();
+  }
+  function prefsPush(key) {
+    if (key) PF.dirty[key] = 1;
     if (!PF.on || A.gone) return; clearTimeout(PF.t);
-    PF.t = setTimeout(function () {
-      var L = ls(), p = Object.assign({}, PF.data), ed = Object.assign({}, p.editor && typeof p.editor === 'object' ? p.editor : {}), k = jget(L, 'amStudio.brandKits'), rc = jget(L, 'amStudio.recentColors'), sw = parseInt(L.getItem('amStudio.sideW'), 10);
-      if (Array.isArray(k)) p.brandKits = k.slice(0, 20);
-      if (Array.isArray(rc)) ed.recentColors = rc.slice(0, 8);
-      if (isFinite(sw)) ed.sideW = sw;
-      ['sideOff', 'gxWide'].forEach(function (x) { var v = L.getItem('amStudio.' + x); if (v === '1' || v === '0') ed[x] = v === '1'; });
+    PF.t = setTimeout(async function () {
+      /* o PUT substitui o objeto inteiro: lê o que está no servidor agora (outro computador pode ter gravado depois que esta aba abriu),
+         troca só as chaves que esta aba mudou e grava — o resto fica como está no servidor (e volta para este navegador) */
+      var base = PF.data, g, again = function (e) { clearTimeout(PF.t); PF.t = setTimeout(prefsPush, Math.max(5000, (e.retryAfter || 0) * 1000)); };
+      try { g = await jreq('GET', '/me/prefs'); if (g && g.prefs && typeof g.prefs === 'object' && !Array.isArray(g.prefs)) base = g.prefs; }
+      catch (e) { if (e.status === 429 || e.network) return again(e); }
+      if (A.gone) return;
+      var L = ls(), d = PF.dirty, p = Object.assign({}, base), ed = Object.assign({}, prefsEd(base)), k, rc, sw;
+      PF.dirty = {};
+      if (d['amStudio.brandKits'] && Array.isArray(k = jget(L, 'amStudio.brandKits'))) p.brandKits = k.slice(0, 20);
+      if (d['amStudio.recentColors'] && Array.isArray(rc = jget(L, 'amStudio.recentColors'))) ed.recentColors = rc.slice(0, 8);
+      if (d['amStudio.sideW'] && isFinite(sw = parseInt(L.getItem('amStudio.sideW'), 10))) ed.sideW = sw;
+      ['sideOff', 'gxWide'].forEach(function (x) { var v = d['amStudio.' + x] && L.getItem('amStudio.' + x); if (v === '1' || v === '0') ed[x] = v === '1'; });
       p.editor = ed;
-      jreq('PUT', '/me/prefs', { prefs: p }).then(function (r) { if (r && r.prefs) PF.data = r.prefs; }, function () { });
+      prefsApply(p);
+      jreq('PUT', '/me/prefs', { prefs: p }).then(function (r) { if (r && r.prefs) PF.data = r.prefs; }, function (e) {   /* 429 (60 gravações/min) ou sem rede: tenta de novo; 400/413/422: fica só neste navegador */
+        if (e.status === 429 || e.network) { Object.keys(d).forEach(function (x) { PF.dirty[x] = 1; }); again(e); }
+      });
     }, 1500);
   }
 
@@ -1126,12 +1147,19 @@
     if (this === ls()) {
       if (k === 'amStudio.draft') return; /* na nuvem o rascunho local é a fila do IndexedDB (apagada após o salvamento confirmado) */
       var r = origSet.apply(this, arguments);
-      try { bridge(String(k), String(v)); if (PREF[k]) prefsPush(); } catch (e) { }
+      try { bridge(String(k), String(v)); if (PREF[k]) prefsPush(String(k)); } catch (e) { }
       return r;
     }
     return origSet.apply(this, arguments);
   };
-  Storage.prototype.removeItem = function (k) { if (this === ls()) { try { if (KEYRE.test(String(k))) seen[k] = 0; } catch (e) { } } return origRemove.apply(this, arguments); };
+  /* "Limpar" do formulário, do quadro e da votação apaga só deste computador: uma marca (com o id de quem limpou) impede que a restauração
+     traga de volta o que já tinha sido enviado; o servidor continua com tudo (o dono da apresentação não perde nada) */
+  var wiping = false;
+  function limpo(k) { return 'amCloud.limpo.' + k; }
+  Storage.prototype.removeItem = function (k) {
+    if (this === ls()) { try { var m = KEYRE.exec(String(k)); if (m) { seen[k] = 0; if (!wiping && m[2] === ID && A.uid0) origSet.call(this, limpo(k), String(A.uid0)); } } catch (e) { } }
+    return origRemove.apply(this, arguments);
+  };
   async function restoreInteractions() {
     try {
       var j = await jreq('GET', '/presentations/' + ID + '/interactions'), items = (j && j.items) || [], L = ls(); if (!L) return;
@@ -1140,6 +1168,7 @@
       mine.forEach(function (it) {
         var key = it.kind === 'form_response' ? 'amForm.' : it.kind === 'board_state' ? 'amBoard.' : it.kind === 'vote_state' ? 'amVote.' : null;
         if (!key || !it.payload) return; key += ID + '.' + it.elementId;
+        if (L.getItem(limpo(key)) === String(A.uid0)) return;   /* limpo neste computador por esta pessoa */
         if (it.kind === 'form_response') {
           var pl = it.payload, okA = pl && Array.isArray(pl.a) && pl.a.length <= 40 && pl.a.every(function (x) { return typeof x === 'string' && x.length <= 4000; }), okQ = pl && Array.isArray(pl.q) && pl.q.length <= 40 && pl.q.every(function (x) { return typeof x === 'string' && x.length <= 400; });
           if (!okA || !okQ || typeof pl.at !== 'string') return; /* só entra o que o formulário realmente produz */
@@ -1165,9 +1194,22 @@
     if (TXT[tx]) n.textContent = TXT[tx];
     else if (/^(Registrada aqui|Voto registrado aqui); sem internet para a planilha\.$/.test(tx)) n.textContent = (/^Voto/.test(tx) ? 'Voto enviado' : 'Resposta enviada') + ' com o seu nome ao dono da apresentação. ' + (/^https:\/\/script\.google(usercontent)?\.com\//i.test(sheet) ? 'A planilha não respondeu.' : 'A planilha não recebeu: na versão online só vale o endereço de um app do Google (https://script.google.com/…/exec).');
   }
+  /* antes de responder, o formulário já diz para onde vai a resposta (o texto some quando o próprio formulário mostra um estado) */
+  var HINT = 'Ao enviar, a resposta vai com o seu nome para o dono da apresentação.', NOTE_ED = 'Ctrl+Enter ou clique fora salva · Esc cancela';
+  function hintForm(n) { if (n && !n.textContent) { n.textContent = HINT; n.classList.add('cl-hint'); } }
+  /* "Sobre este slide" editado no player fica só neste navegador (como no original): avisa enquanto edita */
+  function hintNote(n) { if (n.textContent === NOTE_ED) n.textContent = NOTE_ED + ' · vale só neste navegador' + (VIEW ? '' : ' (para todos: “Sobre este slide” no editor)'); }
   function watchPlayer() {
     if (!prEl || prEl.__cl) return; prEl.__cl = 1;
-    new MutationObserver(function (ms) { ms.forEach(function (m) { var n = m.target.nodeType === 1 ? m.target : m.target.parentNode; if (n && n.matches && n.matches('.amf-st, .amw-st')) fixStatus(n); }); }).observe(prEl, { subtree: true, childList: true, characterData: true });
+    prEl.querySelectorAll('.amf-st').forEach(hintForm);
+    new MutationObserver(function (ms) {
+      ms.forEach(function (m) {
+        var n = m.target.nodeType === 1 ? m.target : m.target.parentNode;
+        if (n && n.matches && n.matches('.amf-st, .amw-st')) { fixStatus(n); if (n.matches('.amf-st')) hintForm(n); }
+        else if (n && n.matches && n.matches('.amp-note-k')) hintNote(n);
+        else if (m.addedNodes) m.addedNodes.forEach(function (a) { if (a.nodeType === 1) { if (a.matches('.amf-st')) hintForm(a); else a.querySelectorAll('.amf-st').forEach(hintForm); } });
+      });
+    }).observe(prEl, { subtree: true, childList: true, characterData: true });
   }
 
   /* ---------------------------------------------------------------- modo visualizar */
