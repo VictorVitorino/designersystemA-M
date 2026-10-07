@@ -1,0 +1,7 @@
+# GitHub → Settings → Secrets and variables → Actions → Variables (do REPOSITÓRIO). Lista explicada: docs/CHAVES.md.
+R2_ACCOUNT_ID=<account-id-do-cloudflare-32-caracteres>
+PRODUCTION_URL=https://canteiro.<dominio-da-empresa>
+STAGING_URL=https://staging.canteiro.<dominio-da-empresa>
+# Interruptores (digite true quando a etapa correspondente de docs/PUBLICACAO.md estiver pronta):
+# STAGING_ENABLED=true   PRODUCTION_ENABLED=true   BACKUP_ENABLED=true
+# Secret TEMPORÁRIO do repositório (apague depois dos dois "Configurar Supabase"): SUPABASE_ACCESS_TOKEN
