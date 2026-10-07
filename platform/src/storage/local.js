@@ -133,7 +133,7 @@ export function createLocalStorage(localDir) {
     async signedGetUrl(sha) { assertSha(sha); return null; },     // mesmo com retorno nulo, a entrada é validada (contrato igual ao do driver s3)
     async createUpload(sha) { assertSha(sha); return null; },
     async getStaging(userId, sha) { stagingKey(userId, sha); return null; },
-    async promoteStaging(userId, sha) { stagingKey(userId, sha); const o = await openObject(sha); if (o) await o.fh.close(); return { promoted: false, existed: !!o }; },
+    async promoteStaging(userId, sha) { stagingKey(userId, sha); const o = await openObject(sha); if (o) await o.fh.close(); return { promoted: false, existed: !!o, mismatch: false }; },
     async deleteStaging(userId, sha) { stagingKey(userId, sha); return { deleted: false }; },
     async purgeStaging() { return { deleted: 0, bytes: 0 }; },
 

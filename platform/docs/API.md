@@ -28,7 +28,7 @@ Pilha: Node 22 (ESM, JavaScript puro com JSDoc), **Hono** (roda igual em Node e 
   (b) `Origin` (ou, na falta, `Sec-Fetch-Site: same-origin`) igual a `APP_ORIGIN`; (c) `Content-Type` JSON ou o tipo permitido do endpoint. Falhou → 403 `csrf`.
 - **Paginação**: `?limit=` (1–100, padrão 30) e `?cursor=` opaco; resposta `{ items: [...], nextCursor: string|null }`.
 - IDs são UUID v4. Datas ISO-8601 UTC.
-- **Limites de taxa** (janela fixa, `app.hit_rate`; estourou → 429 com `Retry-After`): login 8/10 min por e-mail+IP e 30/10 min por IP; esqueci a senha 5/15 min por IP e por e-mail; `verify` 10/15 min **por link** e 100/15 min por IP; `refresh` 10/min **por token de renovação** e 600/min por IP; convites 300/h por admin. Rotas autenticadas: por **usuário** — escrita de conteúdo 120/min, upload 60/min, comentários 30/min, leitura 600/min — e, por **IP**, o mesmo valor × `RATE_IP_MULTIPLIER` (padrão 25: um escritório inteiro atrás do mesmo NAT não se bloqueia; teto contra abuso em massa continua). Os dois baldes são consultados em uma só ida ao banco.
+- **Limites de taxa** (janela fixa, `app.hit_rate`; estourou → 429 com `Retry-After`): login 8/10 min por e-mail+IP e 30/10 min por IP; esqueci a senha 5/15 min por IP e por e-mail; `verify` 10/15 min **por link** e 100/15 min por IP; `refresh` 30/min **por token de renovação** e 600/min por IP; convites 300/h por admin. Rotas autenticadas: por **usuário** — escrita de conteúdo 120/min, upload 60/min, comentários 30/min, leitura 600/min — e, por **IP**, o mesmo valor × `RATE_IP_MULTIPLIER` (padrão 25: um escritório inteiro atrás do mesmo NAT não se bloqueia; teto contra abuso em massa continua). Os dois baldes são consultados em uma só ida ao banco, em cadeia: o balde por IP só é incrementado se o do usuário permitiu (uma requisição já barrada não consome o balde do escritório).
 - Idempotência: `PUT` de conteúdo e upload de arquivo são idempotentes por conteúdo.
 
 ## 3. Autenticação (BFF sobre Supabase Auth / GoTrue)
@@ -62,7 +62,7 @@ Senha: mínimo 12 caracteres, não pode conter o e-mail, não pode estar na list
 | `POST /api/auth/verify` | `{tokenHash, type:'invite'\|'recovery'}` | 200 sessão com `needsPassword:true`; usuário convidado fica `status=invited` até definir a senha (nesse estado só `/api/auth/session`, `/api/auth/password`, `/api/auth/logout` funcionam). 400/410 `link_invalid` se expirado/usado. |
 | `POST /api/auth/password` | `{password}` | 200 sessão; ativa o convite (`resolve_identity(..., touch=true)`) e registra auditoria `auth.password_set`. |
 | `POST /api/auth/forgot` | `{email}` | **sempre 202** (não revela se existe). Limitado por taxa. |
-| `POST /api/auth/refresh` | — | 200 sessão (cookies novos) ou 401 `session_expired`. |
+| `POST /api/auth/refresh` | — | 200 sessão (cookies novos), 401 `session_expired`, ou **429 `rate_limited`** com `Retry-After` (limite compartilhado; a sessão continua válida — o cliente espera e repete em vez de considerar a sessão expirada). |
 | `GET /api/auth/sso/start`, `/callback` | — | **501 `not_configured`** até existir IdP. Veja `docs/SEGURANCA.md` §SSO (vínculo por e-mail verificado preserva contas e dados). |
 | `PATCH /api/me` | `{displayName}` | 200 usuário. |
 

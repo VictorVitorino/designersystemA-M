@@ -41,7 +41,7 @@
   function liveSay(msg) { var l = $('#cloudLive'); if (l) l.textContent = msg; }
 
   /* ---------------------------------------------------------------- API (cookies HttpOnly + CSRF; o navegador nunca vê token de sessão) */
-  var csrfCache = null, me = null, refreshing = null;
+  var csrfCache = null, me = null, refreshing = null, refreshRetryAfter = 0;
   function readCookie(names) {
     var all = String(document.cookie || '').split(/;\s*/);
     for (var i = 0; i < names.length; i++) for (var j = 0; j < all.length; j++) { var p = all[j].indexOf('='); if (p > 0 && all[j].slice(0, p) === names[i]) return decodeURIComponent(all[j].slice(p + 1)); }
@@ -63,9 +63,10 @@
       try {
         var res = await fetch(API + '/auth/refresh', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': await csrfToken(), Accept: 'application/json' } });
         if (res.status === 429) { /* limite de taxa compartilhado (escritório atrás de um só IP): não é sessão expirada — espera e repete uma vez */
-          var wait = Math.min(30, Math.max(1, +res.headers.get('Retry-After') || 5)); await new Promise(function (r) { setTimeout(r, wait * 1000); });
+          var wait = Math.min(61, Math.max(1, +res.headers.get('Retry-After') || 5)); await new Promise(function (r) { setTimeout(r, wait * 1000); });   /* a janela do balde é de 60 s */
           res = await fetch(API + '/auth/refresh', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': await csrfToken(), Accept: 'application/json' } });
         }
+        if (res.status === 429) { refreshRetryAfter = Math.max(1, +res.headers.get('Retry-After') || 30); return 'rate_limited'; }   /* ainda limitado: a sessão continua válida — quem chamou agenda nova tentativa */
         if (!res.ok) return false; await loadSession().catch(function () { }); return true;
       }
       catch (e) { return false; } finally { setTimeout(function () { refreshing = null; }, 0); }
@@ -83,7 +84,10 @@
       catch (e) { throw new ApiError(0, 'network', 'Sem conexão com o servidor.', null, true); }
       if (res.ok) return res;
       var err = await readError(res);
-      if (res.status === 401 && !authTry++ && /session_expired|unauthenticated/.test(err.code) && await tryRefresh()) continue;
+      if (res.status === 401 && !authTry++ && /session_expired|unauthenticated/.test(err.code)) {
+        var rf = await tryRefresh(); if (rf === true) continue;
+        if (rf === 'rate_limited') { var lim = new ApiError(429, 'rate_limited', 'Muitas renovações de sessão ao mesmo tempo. Tentando de novo em instantes.', null, false); lim.retryAfter = refreshRetryAfter; throw lim; }   /* transitório: o autosave recua e repete, sem "sessão expirada" */
+      }
       if (res.status === 403 && err.code === 'csrf' && !csrfTry++) { csrfCache = null; await loadSession().catch(function () { }); continue; }
       throw err;
     }
@@ -710,7 +714,7 @@
         var it = outbox[0];
         try { await jreq('POST', '/presentations/' + ID + '/interactions', { kind: it.kind, elementId: it.elementId, payload: it.payload }); }
         catch (e) {
-          if (e.network || e.status >= 500 || e.status === 429 || e.status === 401) { outFail++; outFlushSoon(Math.min(60000, 2000 * Math.pow(2, Math.min(outFail, 5)))); return; } /* tenta depois; a apresentação nunca para por isso */
+          if (e.network || e.status >= 500 || e.status === 429 || e.status === 401) { outFail++; outFlushSoon(Math.max(Math.min(60000, 2000 * Math.pow(2, Math.min(outFail, 5))), (e.retryAfter || 0) * 1000)); return; } /* tenta depois (respeitando o Retry-After); a apresentação nunca para por isso */
         }
         outbox.shift(); outFail = 0; if (it.stored) await it.stored; if (it.seq != null) idbOp('outbox', 'readwrite', function (s) { return s.delete(it.seq); });
       }

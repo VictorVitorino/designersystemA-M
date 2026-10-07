@@ -232,6 +232,9 @@ describe('esqueci a senha e recuperação', () => {
     const r = await c.post('/api/auth/password', { password: 'Tentativa-Sem-Reautenticacao-99!' }); assert.equal(r.status, 403, r.text); assert.match(r.json.error.message, /Esqueci a senha/);
     assert.equal((await t.anon().login(x.email, x.password)).status, 200, 'a senha antiga continua valendo');
     assert.equal((await t.anon().login(x.email, 'Tentativa-Sem-Reautenticacao-99!')).status, 401);
+    // o estado de recuperação é um token assinado: cookie am_np forjado ("1", vencido ou de outra sessão) não autoriza
+    for (const forged of ['1', `${Math.floor(Date.now() / 1000) + 3600}.${'a'.repeat(64)}`, `1.${'0'.repeat(64)}`]) { c.jar.set(t.names.np, forged); assert.equal((await c.post('/api/auth/password', { password: 'Forjado-Nao-Passa-2026!!' })).status, 403, 'am_np forjado: ' + forged.slice(0, 12)); }
+    c.jar.delete(t.names.np);
   });
   test('trocar a senha (pelo link de recuperação) encerra as OUTRAS sessões', async () => {
     const x = await t.createUser(); const c1 = t.anon(), c2 = t.anon();

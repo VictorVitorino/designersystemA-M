@@ -8,7 +8,7 @@ import { E, HttpError } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 import { requireUser, audit, auditAnon, limit } from '../lib/request.js';
 import { cookieNames, readCookie, setSessionCookies, clearSessionCookies, setCsrfCookie, setNeedsPasswordCookie } from '../auth/cookies.js';
-import { CSRF_TOKEN_RE, newCsrfToken, padTo, sha256hex } from '../auth/hash.js';
+import { CSRF_TOKEN_RE, newCsrfToken, padTo, sha256hex, hmacHex, safeEqual } from '../auth/hash.js';
 import { getAuthKit } from '../auth/kit.js';
 import { JwtRejected } from '../auth/jwt.js';
 import { validatePassword } from '../auth/password.js';
@@ -47,6 +47,16 @@ export function authRoutes(deps) {
     try { return await kit.verifier.verify(accessToken); }
     catch (e) { throw e instanceof JwtRejected && e.reason === 'invalid' ? E.sessionExpired() : E.unavailable(); }
   }
+  /* Estado de RECUPERAÇÃO (pode definir senha): token ASSINADO (HMAC com o segredo do servidor), vinculado à sessão do JWT e com validade de 1 h,
+     emitido só por /verify (convite ou "esqueci a senha"). Um cookie é controlado por quem o envia: um valor fixo como "1" seria forjável por
+     quem roubou os cookies da sessão (AF-1, revisão adversarial). */
+  const recoveryToken = (claims) => { const exp = Math.floor(Date.now() / 1000) + 3600; const sid = (claims && (claims.sessionId || claims.sub)) || ''; return `${exp}.${hmacHex(config.csrfSecret, `np|${sid}|${exp}`)}`; };
+  const inRecovery = (c) => {
+    const v = readCookie(c, names.np); const claims = c.get('claims'); if (!v || !claims) return false;
+    const m = /^(\d{1,12})\.([0-9a-f]{64})$/.exec(v); if (!m) return false;
+    const exp = Number(m[1]); if (!(exp > Math.floor(Date.now() / 1000))) return false;
+    return safeEqual(m[2], hmacHex(config.csrfSecret, `np|${claims.sessionId || claims.sub || ''}|${exp}`));
+  };
   /** Sessão nova que não pode ser usada (sem convite/suspenso): revoga no GoTrue para não deixar sessão órfã. */
   const discard = (tokens) => bestEffort(() => gotrue.logout(tokens.accessToken, 'local'));
 
@@ -66,6 +76,7 @@ export function authRoutes(deps) {
     if (!user || user.status === 'suspended') { await discard(tokens); clearSessionCookies(c, config); throw user ? E.suspended() : E.notInvited(); }
     setSessionCookies(c, config, tokens);
     kit.cache.set(claims.sub, user);
+    c.set('claims', claims);   // quem renovou passa a ter as claims da sessão nova (inRecovery usa a sessão do JWT)
     return user;
   }
 
@@ -80,13 +91,13 @@ export function authRoutes(deps) {
       if (rt && problem !== 'not_configured') {
         try { user = await refreshSession(c, rt); }
         catch (e) {
-          if (e instanceof HttpError && e.code === 'unavailable') throw e;       // provedor fora do ar: não apaga cookies nem desloga
+          if (e instanceof HttpError && (e.code === 'unavailable' || e.code === 'rate_limited')) throw e;   // provedor fora do ar ou limitando: não apaga cookies nem desloga (o cliente espera e repete)
           user = null; clearSessionCookies(c, config);
         }
       }
     }
     if (!user) return c.json({ authenticated: false, csrfToken });
-    return c.json(sessionBody(user, csrfToken, user.status === 'invited' || readCookie(c, names.np) === '1'));
+    return c.json(sessionBody(user, csrfToken, user.status === 'invited' || inRecovery(c)));
   });
 
   // ------------------------------------------------------------------------------------------------ login
@@ -144,7 +155,8 @@ export function authRoutes(deps) {
     kit.cache.invalidateUser(user.id);
     kit.cache.set(claims.sub, user);
     setSessionCookies(c, config, tokens);
-    setNeedsPasswordCookie(c, config, true);
+    c.set('claims', claims);
+    setNeedsPasswordCookie(c, config, recoveryToken(claims));
     const csrfToken = ensureCsrf(c, { rotate: true });
     await auditUser(c, user, 'auth.verify', { type });
     return c.json(sessionBody(user, csrfToken, true));
@@ -154,7 +166,7 @@ export function authRoutes(deps) {
   r.post('/password', async (c) => {
     const user = requireUser(c, { allowInvited: true });
     // só quem acabou de provar a posse do e-mail (convite ou link de recuperação) define a senha: uma sessão ativa roubada não toma a conta (AF-1)
-    if (!(user.status === 'invited' || readCookie(c, names.np) === '1')) throw E.forbidden('Para trocar a senha, use "Esqueci a senha" na tela de entrada: enviaremos um link ao seu e-mail.');
+    if (!(user.status === 'invited' || inRecovery(c))) throw E.forbidden('Para trocar a senha, use "Esqueci a senha" na tela de entrada: enviaremos um link ao seu e-mail.');
     const { password } = await readJson(c, PasswordBody);
     const v = validatePassword(password, user.email);
     if (!v.ok) throw E.badRequest(v.reason, { fields: [{ path: 'password', message: v.reason }] });
@@ -188,10 +200,10 @@ export function authRoutes(deps) {
   r.post('/refresh', async (c) => {
     const rt = readCookie(c, names.rt);
     if (!rt) throw E.sessionExpired();
-    await limit(c, 'refresh_tok', sha256hex(rt).slice(0, 32), 60, 10);        // por token de renovação (HttpOnly, rotativo): não é superfície de força bruta
+    await limit(c, 'refresh_tok', sha256hex(rt).slice(0, 32), 60, 30);        // por token de renovação (HttpOnly, rotativo): não é superfície de força bruta; 30 cobre dezenas de abas renovando juntas
     await limit(c, 'refresh_ip', c.get('ip') || 'unknown', 60, 600);           // teto por IP alto: dezenas de pessoas atrás do mesmo NAT renovam sem derrubar umas às outras (A2)
     const user = await refreshSession(c, rt);
-    return c.json(sessionBody(user, ensureCsrf(c), user.status === 'invited' || readCookie(c, names.np) === '1'));
+    return c.json(sessionBody(user, ensureCsrf(c), user.status === 'invited' || inRecovery(c)));
   });
 
   // ------------------------------------------------------------------------------------------------ SSO (futuro)

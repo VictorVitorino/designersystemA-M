@@ -158,7 +158,11 @@ export function assetsRoutes(deps) {
     let info;
     try { info = await validateUpload(stg.body, { kind: cur.kind, maxBytes: cap }); }
     catch (e) { if (e && e.status) await discard(e, { kind: cur.kind }); throw e; }
-    const prom = await storage.promoteStaging(user.id, want, { mime: info.mime });   // chave canônica: copia se ainda não existir (nada é regravado); o preparo é apagado
+    // chave canônica: cópia condicional ao ETag conferido (se o preparo mudou depois da conferência → 422); nada é regravado se já existir; o preparo é apagado
+    const prom = await storage.promoteStaging(user.id, want, { mime: info.mime, etag: stg.etag || null, body: stg.body });
+    if (prom.mismatch) { const e = E.rejected('O arquivo enviado foi alterado depois de conferido.', { reasons: ['preparo_alterado'] }); await discard(e); throw e; }
+    if (!prom.promoted && !prom.existed) { await dropStaging(); throw E.conflict('O arquivo ainda não foi enviado ao armazenamento.'); }   // preparo sumiu entre a conferência e a promoção
+    if (!(await storage.head(want))) throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');              // nunca "ready" sem objeto
     const status = await txAsUser(c, async (tx) => {
       await grantOwnership(tx, user.id, want);
       const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${cur.kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;

@@ -15,7 +15,7 @@
      • Se, na fase 2, surgir uma referência a um arquivo marcado, ele é REATIVADO (status 'ready') em vez de apagado.
    A marcação grava last_ref_at = agora (é o relógio da carência). */
 import { ToolError, buildRedactor, makeLogger, parseArgs, fmtBytes, runCli, isMain, mapLimit } from './lib/common.js';
-import { openPrimaryStore } from './lib/targets.js';
+import { openPrimaryStore, purgeStaging } from './lib/targets.js';
 import { keyOfSha, shaOfKey } from './lib/mirror.js';
 import { connect } from './lib/pg.js';
 
@@ -102,7 +102,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const store = openPrimaryStore(env); const sql = connect(url, { max: 2 });
   try {
     const rep = await runGc({ sql, store, apply: !!args.apply, ageDays: Number(args['age-days'] ?? 14), graceHours: Number(args['grace-hours'] ?? 24), guardHours: Number(args['guard-hours'] ?? 48), limit: args.limit ? Number(args.limit) : Infinity, scanStorage: !!args['scan-storage'], deleteUnknown: !!args['delete-unknown'], log: (m) => logger.info(m) });
-    if (args.apply && typeof store.purgeStaging === 'function') { const hours = Number(args['staging-hours'] ?? 48); const ps = await store.purgeStaging({ olderThanMs: hours * 3600 * 1000 }); rep.staging = ps; if (ps.deleted) logger.info(`preparos de upload abandonados (> ${hours} h) apagados: ${ps.deleted} (${fmtBytes(ps.bytes)})`); }
+    { const hours = Number(args['staging-hours'] ?? 48); const ps = await purgeStaging(store, { olderThanMs: hours * 3600 * 1000, apply: !!args.apply }); rep.staging = ps; if (ps.deleted) logger.info(`preparos de upload abandonados (> ${hours} h): ${ps.deleted} (${fmtBytes(ps.bytes)}) ${args.apply ? 'apagados' : 'a apagar (--apply)'}`); }
     logger.info(args.apply ? `GC aplicado: ${rep.marked} marcados, ${rep.deleted} apagados (${fmtBytes(rep.deletedBytes)}), ${rep.revived} reativados, ${rep.skipped.length} pulados, ${rep.errors.length} erros` : `GC em modo RELATÓRIO: nada foi alterado. Para aplicar: --apply`);
     for (const e of rep.errors) logger.error(`${e.fase} ${e.sha}: ${e.error}`);
     if (args.json) process.stdout.write(JSON.stringify(rep) + '\n'); return rep.ok ? 0 : 1;

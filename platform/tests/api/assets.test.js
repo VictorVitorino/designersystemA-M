@@ -275,7 +275,8 @@ describe('upload direto (arquivos grandes) e finalize', () => {
     await env.sys((tx) => tx`insert into app.assets(sha256, size_bytes, mime, kind, status, uploaded_by) values (${sha}, 7, 'application/pdf', 'attachment', 'pending', ${C.id})`);   // C pré-registrou com mentiras
     const r = await putRaw(A, sha, buf); assert.equal(r.status, 200, r.text);
     const a = await rowOf(sha); assert.equal(a.status, 'ready'); assert.equal(a.mime, 'image/png'); assert.equal(Number(a.size_bytes), buf.length); assert.equal(a.kind, 'image'); assert.equal(a.width, 8);
-    assert.equal((await env.get(C, `/api/assets/${sha}`)).status, 200, 'C continua sendo possuidor do próprio registro');
+    assert.equal((await env.get(C, `/api/assets/${sha}`)).status, 404, 'quem só pré-registrou o hash (sem nunca enviar os bytes) NÃO ganha acesso: a posse passa a quem provou os bytes (migração 0006)');
+    assert.equal((await rowOf(sha)).uploaded_by, A.id, 'uploaded_by é quem provou os bytes');
     assert.equal((await env.get(B, `/api/assets/${sha}`)).headers.get('content-type'), 'application/json', 'B (sem acesso) recebe só o erro JSON');
   });
 });

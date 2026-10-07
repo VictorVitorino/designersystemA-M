@@ -164,3 +164,17 @@ export function assertSeparateFromPrimary(spec, env = process.env) {
   if (env.BACKUP_ENCRYPTION_KEY && [env.S3_SECRET_ACCESS_KEY, env.BACKUP_S3_SECRET_ACCESS_KEY, env.SUPABASE_SERVICE_ROLE_KEY].includes(env.BACKUP_ENCRYPTION_KEY)) errors.push('BACKUP_ENCRYPTION_KEY não pode ser igual a nenhuma credencial de bucket/serviço');
   return { errors, warnings };
 }
+
+// ----------------------------------------------------------------------------------------------------------------- área de preparo
+/** Apaga preparos de upload direto abandonados (chaves up/<usuário>/<sha> mais antigas que `olderThanMs`). Vale para FileStore e S3Store. */
+export async function purgeStaging(store, { olderThanMs = 48 * 3600 * 1000, limit = 1000, apply = true, now = Date.now() } = {}) {
+  let seen = 0, deleted = 0, bytes = 0; const cutoff = now - olderThanMs;
+  for await (const o of store.list('up/')) {
+    seen++; const t = o.lastModified ? new Date(o.lastModified).getTime() : 0;
+    if (!t || t >= cutoff) continue;
+    if (deleted >= limit) break;
+    if (apply) await store.delete(o.key);
+    deleted++; bytes += Number(o.size || 0);
+  }
+  return { seen, deleted, bytes, applied: apply };
+}

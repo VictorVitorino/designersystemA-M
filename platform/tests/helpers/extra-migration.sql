@@ -17,10 +17,10 @@ begin
   if me is null or not app.is_active() then return null; end if;
   -- Metadados vêm da validação feita pela API sobre os bytes reais: corrigem qualquer valor "declarado" por quem registrou antes.
   update app.assets a
-     set status = 'ready', ready_at = now(), last_ref_at = now(), size_bytes = p_size, mime = p_mime, kind = p_kind, width = p_width, height = p_height
+     set status = 'ready', ready_at = now(), last_ref_at = now(), size_bytes = p_size, mime = p_mime, kind = p_kind, width = p_width, height = p_height, uploaded_by = me
    where a.sha256 = p_sha and a.status in ('pending', 'deleted')   -- 'deleted' = marcado pela coleta de lixo e reenviado antes da remoção (reativa)
      and (a.uploaded_by = me or exists (select 1 from app.asset_uploads u where u.sha256 = a.sha256 and u.user_id = me))
-  returning a.status into st;
+  returning a.status into st;   -- (0006) uploaded_by = me: a posse do registro é de quem provou os bytes
   if st is not null then return st; end if;
   -- Já pronto (ou rejeitado): devolve o estado, mas só a quem tem posse (não revela a existência de arquivos alheios).
   select a.status into st from app.assets a

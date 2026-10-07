@@ -156,18 +156,27 @@ describe('s3 (moto): URLs assinadas', { skip }, () => {
     assert.equal(await st.head(sha), null, 'nada na chave canônica antes do finalize');
     assert.equal(await st.getStaging(other, sha), null, 'a pasta de preparo é por usuário');
     const stg = await st.getStaging(uid, sha); assert.ok(stg && stg.body.equals(b) && stg.size === b.length);
-    assert.deepEqual(await st.promoteStaging(uid, sha, { mime: 'application/pdf' }), { promoted: true, existed: false });
+    assert.deepEqual(await st.promoteStaging(uid, sha, { mime: 'application/pdf' }), { promoted: true, existed: false, mismatch: false });
     assert.deepEqual(await st.verify(sha), { ok: true, size: b.length, actualSha: sha }); assert.equal(await st.getStaging(uid, sha), null, 'preparo apagado após promover');
     assert.equal((await raw.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey(sha) }))).ContentType, 'application/pdf');
     // segundo usuário com os MESMOS bytes: promover não regrava (deduplicação) e apaga o preparo dele
     const up2 = await st.createUpload(sha, { size: b.length, mime: 'application/pdf', stagingFor: other }); await (await fetch(up2.url, { method: 'PUT', headers: up2.headers, body: b })).arrayBuffer();
-    assert.deepEqual(await st.promoteStaging(other, sha, { mime: 'application/pdf' }), { promoted: false, existed: true });
+    assert.deepEqual(await st.promoteStaging(other, sha, { mime: 'application/pdf' }), { promoted: false, existed: true, mismatch: false });
     assert.deepEqual(await st.deleteStaging(other, sha), { deleted: false });
     // preparo abandonado: a limpeza (idade zero aqui) apaga
     const up3 = await st.createUpload(sha, { size: b.length, mime: 'application/pdf', stagingFor: other }); await (await fetch(up3.url, { method: 'PUT', headers: up3.headers, body: b })).arrayBuffer();
     const pg = await st.purgeStaging({ olderThanMs: -60000 }); assert.ok(pg.deleted >= 1 && pg.bytes >= b.length); assert.equal(await st.getStaging(other, sha), null);
     for (const bad of ['nao-uuid', '', null, '../../x']) await assert.rejects(() => st.getStaging(bad, sha), StorageKeyError);
     await assert.rejects(() => st.createUpload(sha, { size: 1, mime: 'application/pdf', stagingFor: 'x' }), StorageKeyError);
+  });
+  test('área de preparo: a promoção é condicional ao ETag conferido — se o preparo mudar depois da conferência do hash, nada é promovido (TOCTOU)', async () => {
+    const uid = '11111111-2222-4333-8444-555555555555'; const [sha, b] = mk('bytes conferidos no preparo'); const [, evil] = mk('bytes trocados depois da conferência');
+    const up = await st.createUpload(sha, { size: b.length, mime: 'application/pdf', stagingFor: uid }); await (await fetch(up.url, { method: 'PUT', headers: up.headers, body: b })).arrayBuffer();
+    const stg = await st.getStaging(uid, sha); assert.ok(stg && stg.etag, 'ETag do preparo é devolvido');
+    await raw.send(new PutObjectCommand({ Bucket: bucket, Key: `up/${uid}/${sha}`, Body: evil }));   // o dono da URL assinada sobrescreve o preparo depois da conferência
+    const r = await st.promoteStaging(uid, sha, { mime: 'application/pdf', etag: stg.etag, body: stg.body });
+    assert.deepEqual(r, { promoted: false, existed: false, mismatch: true }); assert.equal(await st.head(sha), null, 'nada chegou à chave canônica (ou a cópia foi desfeita ao conferir os bytes)');
+    assert.equal(await st.getStaging(uid, sha), null, 'o preparo adulterado foi apagado');
   });
   test('createUpload: size/mime/ttl inválidos lançam; checksum:"off" não envia o cabeçalho', async () => {
     const [sha] = mk('cu');

@@ -22,7 +22,7 @@ Ordem dos middlewares (`src/app.js`): `requestId` → `securityHeaders` → `acc
 | `__Host-am_at` | access token (JWT, ~1 h) | HttpOnly, Secure, SameSite=Lax, Path=/ |
 | `__Host-am_rt` | refresh token (30 d) | idem |
 | `__Host-am_csrf` | 32 bytes aleatórios (base64url) | **não** HttpOnly (o app o devolve no cabeçalho), Secure, Lax |
-| `__Host-am_np` | "precisa definir senha" (só UX) | HttpOnly |
+| `__Host-am_np` | estado de **recuperação** (pode definir senha): `exp.HMAC-SHA256(segredo, sessão do JWT, exp)`, emitido só por `/verify`, 1 h — é **autorização**, não só UX; um valor forjado não passa | HttpOnly |
 
 Em `local`/`test` com `http://` os nomes não têm prefixo e não há `Secure`. O prefixo `__Host-` obriga Secure + Path=/ + sem Domain: nenhum subdomínio ou HTTP consegue plantar o cookie.
 

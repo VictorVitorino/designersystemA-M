@@ -175,7 +175,8 @@ export async function request(method, path, opts = {}) {
   if (auth && err.status === 401 && (err.code === 'session_expired' || err.code === 'unauthenticated') && !retry.refreshed) {
     try {
       if (epochAtSend === refreshEpoch) await refreshSession(); // se outro refresh terminou depois do envio, só repete
-    } catch {
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 429) throw e;   // limite de taxa compartilhado (escritório atrás de um IP): a sessão continua válida — mostra a mensagem do 429, não manda para /entrar
       err.redirecting = true;
       goToLogin('sessao');
       throw err;

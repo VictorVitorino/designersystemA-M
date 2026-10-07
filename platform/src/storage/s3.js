@@ -134,19 +134,32 @@ export function createS3Storage(cfg, opts = {}) {
     async getStaging(userId, sha) {
       const Key = stagingKey(userId, sha);
       let r; try { r = await client.send(new GetObjectCommand({ Bucket, Key })); } catch (e) { if (isNotFound(e)) return null; throw e; }
-      const body = Buffer.from(await r.Body.transformToByteArray()); return { body, size: body.length };
+      const body = Buffer.from(await r.Body.transformToByteArray()); return { body, size: body.length, etag: r.ETag || null };
     },
     /** Promove o preparo para a chave canônica (cópia no próprio provedor; se já existir, nada é regravado) e apaga o preparo. */
-    async promoteStaging(userId, sha, { mime } = {}) {
+    async promoteStaging(userId, sha, { mime, etag = null, body = null } = {}) {
       const from = stagingKey(userId, sha), to = objectKey(sha);
-      if (!(await headRaw(from))) return { promoted: false, existed: !!(await headRaw(to)) };
+      if (!(await headRaw(from))) return { promoted: false, existed: !!(await headRaw(to)), mismatch: false };
       const existed = !!(await headRaw(to));
       if (!existed) {
-        try { await client.send(new CopyObjectCommand({ Bucket, Key: to, CopySource: `${Bucket}/${from}`, MetadataDirective: 'REPLACE', ...(mime ? { ContentType: assertMime(mime) } : {}), CacheControl: CACHE_CONTROL })); }
-        catch (e) { /* provedor sem CopyObject: copia pela API (bytes já conferidos pelo chamador) */ const r = await client.send(new GetObjectCommand({ Bucket, Key: from })); const body = Buffer.from(await r.Body.transformToByteArray()); await client.send(new PutObjectCommand({ Bucket, Key: to, Body: body, ContentType: mime ? assertMime(mime) : undefined, CacheControl: CACHE_CONTROL })); }
+        try {
+          /* cópia CONDICIONAL ao ETag lido na conferência do hash: se o dono da URL assinada trocou o preparo nesse meio-tempo, o provedor recusa (412) */
+          await client.send(new CopyObjectCommand({ Bucket, Key: to, CopySource: `${Bucket}/${from}`, ...(etag ? { CopySourceIfMatch: etag } : {}), MetadataDirective: 'REPLACE', ...(mime ? { ContentType: assertMime(mime) } : {}), CacheControl: CACHE_CONTROL }));
+        } catch (e) {
+          if (e && (e.name === 'PreconditionFailed' || e.$metadata?.httpStatusCode === 412)) return { promoted: false, existed: false, mismatch: true };
+          /* provedor sem CopyObject: grava os bytes JÁ CONFERIDOS pelo chamador (nunca relê o preparo, que pode ter mudado), com o checksum do hash */
+          if (!body) throw e;
+          await client.send(new PutObjectCommand({ Bucket, Key: to, Body: toBuffer(body), ...(mime ? { ContentType: assertMime(mime) } : {}), CacheControl: CACHE_CONTROL, ...(checksumOn ? { ChecksumSHA256: b64OfSha(sha) } : {}) }));
+        }
+      }
+      if (!existed) {
+        /* prova final, independente do provedor honrar CopySourceIfMatch: os bytes sob a chave canônica TÊM de ter o hash da chave; senão a cópia é desfeita */
+        const r = await getRaw(sha); let ok = false;
+        if (r) { const h = createHash('sha256'); for await (const chunk of r.Body) h.update(chunk); ok = h.digest('hex') === sha; }
+        if (!ok) { await client.send(new DeleteObjectCommand({ Bucket, Key: to })).catch(() => {}); await client.send(new DeleteObjectCommand({ Bucket, Key: from })).catch(() => {}); return { promoted: false, existed: false, mismatch: true }; }
       }
       await client.send(new DeleteObjectCommand({ Bucket, Key: from }));
-      return { promoted: !existed, existed };
+      return { promoted: !existed, existed, mismatch: false };
     },
     async deleteStaging(userId, sha) {
       const Key = stagingKey(userId, sha); const existed = !!(await headRaw(Key));

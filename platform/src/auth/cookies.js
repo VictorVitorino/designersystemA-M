@@ -24,7 +24,7 @@ export function setSessionCookies(c, config, { accessToken, refreshToken, expire
 export function setCsrfCookie(c, config, token) { setCookie(c, cookieNames(config).csrf, token, { ...base(config, false), maxAge: RT_MAX_AGE_S }); }
 export function setNeedsPasswordCookie(c, config, on) {
   const n = cookieNames(config).np;
-  if (on) setCookie(c, n, '1', { ...base(config, true), maxAge: 3600 });
+  if (on) setCookie(c, n, typeof on === 'string' ? on : '1', { ...base(config, true), maxAge: 3600 });   // valor = token assinado emitido por /verify (AF-1); nunca um literal que o cliente possa forjar
   else setCookie(c, n, '', { ...base(config, true), maxAge: 0 });
 }
 /** Apaga os cookies de sessão (o CSRF permanece, a menos que `csrf: true`). */

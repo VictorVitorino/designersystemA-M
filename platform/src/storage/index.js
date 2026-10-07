@@ -1,7 +1,7 @@
 /* Fábrica do armazenamento de objetos. A interface (idêntica nos dois drivers) está documentada em docs/arquivos-e-armazenamento.md:
      put(sha, bytes, {mime}) · get(sha) · getStream(sha) · head(sha) · delete(sha) · signedGetUrl(sha, opts) · createUpload(sha, opts)
      verify(sha) · list({prefix, limit, cursor}) · ping()
-     getStaging(userId, sha) · promoteStaging(userId, sha, {mime}) · deleteStaging(userId, sha) · purgeStaging({olderThanMs})  (área de preparo do upload direto)
+     getStaging(userId, sha) → {body,size,etag} · promoteStaging(userId, sha, {mime, etag, body}) → {promoted, existed, mismatch} · deleteStaging(userId, sha) · purgeStaging({olderThanMs})  (área de preparo do upload direto)
    Toda chave de objeto sai de objectKey(sha) (keys.js): nenhuma entrada do cliente vira caminho. */
 import { createLocalStorage } from './local.js';
 import { createS3Storage } from './s3.js';

@@ -21,6 +21,7 @@ export function emailHash(config, email) {
 }
 
 export const sha256hex = (s) => crypto.createHash('sha256').update(s).digest('hex');
+export const hmacHex = (secret, s) => crypto.createHmac('sha256', String(secret)).update(s).digest('hex');
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Espera até que `minMs` tenham passado desde `startedAt` (equaliza o tempo de respostas de falha: e-mail inexistente × senha errada). */

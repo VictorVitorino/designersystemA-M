@@ -33,18 +33,24 @@ export async function limit(c, bucket, key, windowS, max) {
   return r;
 }
 
-/** Vários limites de uma vez, em UMA consulta (uma ida ao banco em vez de uma por balde). specs: [[bucket, key, windowS, max], …]. Lança 429 no primeiro estourado. */
+/** Vários limites de uma vez, em UMA consulta e em CADEIA: o balde k só é consultado (e incrementado) se todos os anteriores permitiram —
+    uma requisição já barrada no balde do usuário não consome o balde do IP (senão um único cliente abusivo fecharia o escritório inteiro).
+    specs: [[bucket, key, windowS, max], …]. Lança 429 no primeiro estourado. */
 export async function limitMany(c, specs) {
   const { db } = c.get('deps');
-  const rows = await db.anon((tx) => {
-    let q = null;
-    specs.forEach(([bucket, key, windowS, max], i) => { const part = tx`select ${i}::int as i, * from app.hit_rate(${bucket}, ${String(key)}, ${windowS}::int, ${max}::int)`; q = q ? tx`${q} union all ${part}` : part; });
-    return q;
-  });
-  for (const r of rows) {
-    if (!r.allowed) { const [bucket, key] = specs[r.i]; try { await auditAnon(c, 'security.rate_limited', 'bucket', bucket, { key_kind: String(key).length > 40 ? 'hash' : 'id' }); } catch { /* auditoria nunca derruba o bloqueio */ } throw E.rateLimited(r.reset_in); }
+  const chain = (tx, k) => {
+    const [bucket, key, windowS, max] = specs[k];
+    const next = k + 1 < specs.length ? tx`case when a.allowed then ${chain(tx, k + 1)} end` : tx`null::jsonb`;   // CASE só avalia o sub-select se o balde anterior permitiu
+    return tx`(select to_jsonb(a) || jsonb_build_object('next', ${next}) from app.hit_rate(${bucket}, ${String(key)}, ${windowS}::int, ${max}::int) a)`;
+  };
+  const [row] = await db.anon((tx) => tx`select ${chain(tx, 0)} as r`);
+  let node = row.r; const out = [];
+  for (let k = 0; k < specs.length && node; k++) {
+    out.push({ allowed: node.allowed, reset_in: node.reset_in });
+    if (!node.allowed) { const [bucket, key] = specs[k]; try { await auditAnon(c, 'security.rate_limited', 'bucket', bucket, { key_kind: String(key).length > 40 ? 'hash' : 'id' }); } catch { /* auditoria nunca derruba o bloqueio */ } throw E.rateLimited(node.reset_in); }
+    node = node.next;
   }
-  return rows;
+  return out;
 }
 
 const SENSITIVE = /pass(word)?|senha|token|secret|authorization|cookie|apikey|api_key|jwt|bearer|credential/i;
