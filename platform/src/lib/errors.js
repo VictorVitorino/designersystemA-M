@@ -18,6 +18,7 @@ export const E = {
   exists: (message = 'Já existe.') => new HttpError(409, 'already_exists', message),
   gone: (message = 'Este link expirou ou já foi usado.') => new HttpError(410, 'link_invalid', message),
   tooLarge: (message = 'Arquivo ou conteúdo grande demais.') => new HttpError(413, 'too_large', message),
+  quotaExceeded: (message, details) => new HttpError(413, 'quota_exceeded', message, details),
   unsupported: (message = 'Tipo de arquivo não aceito.') => new HttpError(415, 'unsupported_media', message),
   rejected: (message = 'Conteúdo recusado por segurança.', details) => new HttpError(422, 'rejected_content', message, details),
   rateLimited: (retryAfterS = 60) => new HttpError(429, 'rate_limited', 'Muitas tentativas. Aguarde um pouco e tente de novo.', { retryAfterS }, { 'Retry-After': String(retryAfterS) }),

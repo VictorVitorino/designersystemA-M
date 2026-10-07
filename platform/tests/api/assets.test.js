@@ -194,14 +194,17 @@ describe('POST /api/assets/check', () => {
     for (const bad of [{ shas: ['x'] }, { shas: [s1.toUpperCase()] }, { shas: 'x' }, {}, { shas: [s1], extra: 1 }, { shas: [null] }]) assert.equal((await env.post(A, '/api/assets/check', { json: bad })).status, 400, JSON.stringify(bad));
     assert.equal((await env.post(null, '/api/assets/check', { json: { shas: [] } })).status, 401);
   });
-  test('limite de taxa de upload: 60/min → 429 com Retry-After', async () => {
-    const left = 60000 - (Date.now() % 60000); if (left < 12000) await new Promise((r) => setTimeout(r, left + 200));
+  test('limite de taxa de upload: 300/min por pessoa (BE-ED-13: importar PPTX/PDF com muitas imagens) → 429 com Retry-After; o balde por IP também conta', async () => {
+    const left = 60000 - (Date.now() % 60000); if (left < 20000) await new Promise((r) => setTimeout(r, left + 200));
     await env.resetRates();
     const U = await env.mkUser({ name: 'Rajada de uploads' });
-    let last; for (let i = 0; i < 60; i++) last = await env.post(U, '/api/assets/check', { json: { shas: [] }, ip: '198.51.100.77' });
-    assert.equal(last.status, 200);
+    let last; for (let i = 0; i < 300; i++) { last = await env.post(U, '/api/assets/check', { json: { shas: [] }, ip: '198.51.100.77' }); if (last.status !== 200) break; }
+    assert.equal(last.status, 200, '300 envios no mesmo minuto passam (antes eram 60)');
     const over = await env.post(U, '/api/assets/check', { json: { shas: [] }, ip: '198.51.100.77' });
     assert.equal(over.status, 429); assert.equal(over.json.error.code, 'rate_limited'); assert.ok(Number(over.headers.get('retry-after')) > 0);
+    const [ip] = await env.sys((tx) => tx`select sum(hits)::int n from app.rate_limits where bucket = 'upload:ip' and key = '198.51.100.77'`);
+    assert.equal(ip.n, 300, 'o 301º (barrado no balde da pessoa) não consome o balde do IP');
+    assert.equal((await env.post(ADM, '/api/assets/check', { json: { shas: [] }, ip: '198.51.100.77' })).status, 200, 'outra pessoa no mesmo IP segue (teto por IP = 300 × RATE_IP_MULTIPLIER)');
     await env.resetRates();
   });
 });

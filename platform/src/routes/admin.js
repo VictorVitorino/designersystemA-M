@@ -79,6 +79,7 @@ export function adminRoutes(deps) {
     const rows = await db.asUser(admin.id, (tx) => tx`
       select u.id, u.email, u.display_name, u.role, u.status, u.created_at, u.created_at::text as created_txt, u.activated_at, u.last_login_at,
              (select count(*)::int from app.presentations p where p.owner_id = u.id and p.deleted_at is null) as presentation_count,
+             (select coalesce(sum(a.size_bytes), 0) from app.assets a where a.uploaded_by = u.id and a.status in ('ready', 'pending'))::text as storage_bytes,
              inv.id as invite_id, inv.status as invite_status, inv.expires_at as invite_expires_at, inv.resent_count
         from app.users u
         left join lateral (select i.id, i.status, i.expires_at, i.resent_count from app.invites i where i.user_id = u.id order by i.created_at desc limit 1) inv on true
@@ -92,7 +93,7 @@ export function adminRoutes(deps) {
     return c.json({
       items: page.map((u) => ({
         id: u.id, email: u.email, displayName: u.display_name, role: u.role, status: u.status, createdAt: u.created_at, activatedAt: u.activated_at, lastLoginAt: u.last_login_at,
-        presentationCount: u.presentation_count,
+        presentationCount: u.presentation_count, storageBytes: Number(u.storage_bytes),   // espaço ocupado (o mesmo critério da cota STORAGE_QUOTA_USER_MB)
         invite: u.invite_id ? { id: u.invite_id, status: u.invite_status, expiresAt: u.invite_expires_at, resentCount: u.resent_count } : null,
       })),
       nextCursor: rows.length > q.limit ? encodeCursor([page[page.length - 1].created_txt, page[page.length - 1].id]) : null,

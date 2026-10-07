@@ -4,7 +4,9 @@
    • o SHA-256 é recalculado no servidor e TEM de bater com o da URL (ninguém grava bytes diferentes sob o hash de outro arquivo);
    • ordem segura: registrar (pending) → gravar no armazenamento → só então promover a ready (app.asset_mark_ready). Nunca há "ready" sem objeto;
    • deduplicação: bytes já existentes não são regravados; quem reenvia os mesmos bytes só ganha a POSSE (app.asset_uploads) — a prova de que os possui;
-   • leitura: só quem pode ver o arquivo (policy assets_select) — 404 para os demais, sem distinguir "não existe" de "não é seu". */
+   • leitura: só quem pode ver o arquivo (policy assets_select) — 404 para os demais, sem distinguir "não existe" de "não é seu";
+   • cota opcional por pessoa (STORAGE_QUOTA_USER_MB, F9): vale ao registrar um arquivo NOVO (bytes que ainda não existiam); reenviar o que já
+     existe (deduplicação) não ocupa espaço e nunca é barrado. Estourou → 413 `quota_exceeded`. */
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
@@ -64,8 +66,29 @@ export function assetsRoutes(deps) {
   }
   /** Posse (app.asset_uploads) = prova de que a pessoa tem os bytes. Só é concedida depois que o servidor conferiu o SHA-256 do que ELA enviou. */
   async function grantOwnership(tx, userId, sha) { await tx`insert into app.asset_uploads(sha256, user_id) values (${sha}, ${userId}::uuid) on conflict do nothing`; }
-  /** Caminho da API: os bytes já foram conferidos pelo chamador → registra e concede a posse de uma vez. */
-  async function register(tx, userId, a) { const created = await registerPending(tx, userId, a); await grantOwnership(tx, userId, a.sha); return created; }
+  /** Cota por pessoa: espaço que a pessoa ocupa = arquivos `ready`/`pending` registrados por ela (uploaded_by) — o que outra pessoa já tinha enviado
+      (deduplicação) não conta. Trava consultiva por pessoa na MESMA transação do registro: dois envios simultâneos não passam juntos do limite.
+      `sha`/`size` = o arquivo novo (fica fora da soma, que pode já conter o próprio registro pendente). */
+  const quota = config.storage.quotaUserBytes || 0;
+  const mb = (n) => Math.max(1, Math.ceil(n / 1048576));
+  async function assertQuota(tx, userId, { sha, size }) {
+    if (!quota) return;
+    await tx`select pg_advisory_xact_lock(hashtextextended(${'cota|' + userId}, 0))`;
+    const [u] = await tx`select coalesce(sum(size_bytes), 0)::bigint as used from app.assets
+        where uploaded_by = ${userId}::uuid and status in ('ready', 'pending') and sha256 <> ${sha}`;   // RLS assets_select: a pessoa vê o que enviou
+    const used = Number(u.used);
+    if (used + size > quota) {
+      throw E.quotaExceeded(`Seu espaço de armazenamento acabou: o limite é de ${mb(quota)} MB por pessoa e você já usa ${mb(used)} MB. Imagens que nenhuma apresentação usa mais são liberadas automaticamente em alguns dias; se precisar de espaço agora, fale com um administrador.`,
+        { quotaBytes: quota, usedBytes: used, fileBytes: size });
+    }
+  }
+  /** Caminho da API: os bytes já foram conferidos pelo chamador → registra (conferindo a cota se o arquivo é novo) e concede a posse de uma vez. */
+  async function register(tx, userId, a) {
+    const created = await registerPending(tx, userId, a);
+    if (created) await assertQuota(tx, userId, { sha: a.sha, size: a.size });
+    await grantOwnership(tx, userId, a.sha);
+    return created;
+  }
   const publicInfo = (a, deduplicated) => ({ sha256: a.sha, size: a.size, mime: a.mime, ...(a.width != null ? { width: a.width, height: a.height } : {}), deduplicated });
 
   // ------------------------------------------------------------------ o que falta enviar
@@ -93,7 +116,9 @@ export function assetsRoutes(deps) {
     catch (e) { if (e && e.status) await auditReject(c, want, e, { size: bytes.length, kind }); throw e; }
     const meta = { sha: want, size: info.size, mime: info.mime, kind, width: info.width, height: info.height };
 
-    const created = await txAsUser(c, (tx) => register(tx, user.id, meta));
+    let created;
+    try { created = await txAsUser(c, (tx) => register(tx, user.id, meta)); }
+    catch (e) { if (e && e.code === 'quota_exceeded') await auditReject(c, want, e, { size: info.size, kind }); throw e; }
     // grava ANTES de marcar pronto; objeto já presente com o mesmo tamanho = deduplicação (nada é regravado)
     const have = await storage.head(want);
     const reused = !!have && have.size === bytes.length;
@@ -119,7 +144,11 @@ export function assetsRoutes(deps) {
     // alheio não dá acesso a nada — só o finalize, depois de conferir o SHA-256 do que ela enviou, promove o objeto e concede a posse (AF-2).
     const up = await storage.createUpload(b.sha256, { size: b.size, mime: b.mime, ttlS: 300, stagingFor: user.id });
     if (!up) return c.json({ mode: 'api' });
-    await txAsUser(c, (tx) => registerPending(tx, user.id, { sha: b.sha256, size: b.size, mime: b.mime, kind: b.kind }));   // sem posse
+    try {
+      await txAsUser(c, async (tx) => {                                                      // sem posse; arquivo novo confere a cota pelo tamanho declarado
+        if (await registerPending(tx, user.id, { sha: b.sha256, size: b.size, mime: b.mime, kind: b.kind })) await assertQuota(tx, user.id, { sha: b.sha256, size: b.size });
+      });
+    } catch (e) { if (e && e.code === 'quota_exceeded') await auditReject(c, b.sha256, e, { size: b.size, kind: b.kind }); throw e; }
     return c.json({ mode: 'direct', url: up.url, method: up.method, headers: up.headers, expiresAt: up.expiresAt });
   });
 
@@ -158,6 +187,11 @@ export function assetsRoutes(deps) {
     let info;
     try { info = await validateUpload(stg.body, { kind: cur.kind, maxBytes: cap }); }
     catch (e) { if (e && e.status) await discard(e, { kind: cur.kind }); throw e; }
+    // cota com o tamanho REAL (o declarado em /uploads podia ser menor), antes de promover o objeto: barrado, nada chega à chave canônica
+    if (quota) {
+      try { await txAsUser(c, (tx) => assertQuota(tx, user.id, { sha: want, size: info.size })); }
+      catch (e) { if (e && e.code === 'quota_exceeded') await discard(e, { kind: cur.kind }); throw e; }
+    }
     // chave canônica: cópia condicional ao ETag conferido (se o preparo mudou depois da conferência → 422); nada é regravado se já existir; o preparo é apagado
     const prom = await storage.promoteStaging(user.id, want, { mime: info.mime, etag: stg.etag || null, body: stg.body });
     if (prom.mismatch) { const e = E.rejected('O arquivo enviado foi alterado depois de conferido.', { reasons: ['preparo_alterado'] }); await discard(e); throw e; }

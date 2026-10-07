@@ -24,8 +24,9 @@ export async function rate(c, user, bucket, windowS, max) {
   const deps = c.get('deps'); const mult = (deps && deps.config && deps.config.rateIpMultiplier) || IP_MULTIPLIER;
   await limitMany(c, [[`${bucket}:u`, user.id, windowS, max], [`${bucket}:ip`, c.get('ip') || 'sem-ip', windowS, max * mult]]);
 }
-/* prefs: gravação das preferências da própria pessoa (GET usa o limite de leitura). */
-export const RATES = Object.freeze({ write: [60, 120], upload: [60, 60], comment: [60, 30], read: [60, 600], asset_read: [60, 600], prefs: [60, 60] });
+/* upload: 300/min por pessoa (BE-ED-13 — importar um PPTX/PDF com dezenas de imagens envia check + PUT por imagem; os bytes são conferidos e
+   deduplicados, então o freio de abuso é o teto por IP, que continua sendo o valor × RATE_IP_MULTIPLIER). prefs: gravação das preferências. */
+export const RATES = Object.freeze({ write: [60, 120], upload: [60, 300], comment: [60, 30], read: [60, 600], asset_read: [60, 600], prefs: [60, 60] });
 
 /** Lê o corpo no máximo `maxBytes` — para de ler ao estourar (não carrega 1 GB na memória só para depois recusar). */
 export async function readBodyLimited(c, maxBytes) {

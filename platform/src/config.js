@@ -23,6 +23,7 @@ const Env = z.object({
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_FORCE_PATH_STYLE: bool(true),
+  STORAGE_QUOTA_USER_MB: z.coerce.number().int().min(0).max(10_485_760).default(0),   // cota de armazenamento por pessoa em MB (0 = desligada)
   CSRF_SECRET: z.string().min(32).optional(),
   INVITE_ALLOWED_DOMAINS: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
@@ -56,7 +57,7 @@ export function loadConfig(env = process.env) {
     cookiePrefix: secure || origin.protocol === 'https:' ? '__Host-' : '', cookieSecure: secure || origin.protocol === 'https:',
     db: { url: e.DATABASE_URL, ssl: e.DATABASE_SSL || (secure ? 'require' : undefined), max: e.DB_POOL_MAX },
     supabase: { url: e.SUPABASE_URL?.replace(/\/$/, ''), anonKey: e.SUPABASE_ANON_KEY, serviceKey: e.SUPABASE_SERVICE_ROLE_KEY, jwksUrl: e.SUPABASE_JWKS_URL, jwtSecret: e.SUPABASE_JWT_SECRET },
-    storage: { driver: e.STORAGE_DRIVER, localDir: e.STORAGE_LOCAL_DIR, s3: { endpoint: e.S3_ENDPOINT, region: e.S3_REGION, bucket: e.S3_BUCKET, accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY, forcePathStyle: e.S3_FORCE_PATH_STYLE } },
+    storage: { driver: e.STORAGE_DRIVER, localDir: e.STORAGE_LOCAL_DIR, quotaUserBytes: e.STORAGE_QUOTA_USER_MB * 1024 * 1024, s3: { endpoint: e.S3_ENDPOINT, region: e.S3_REGION, bucket: e.S3_BUCKET, accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY, forcePathStyle: e.S3_FORCE_PATH_STYLE } },
     csrfSecret: e.CSRF_SECRET, inviteDomains: (e.INVITE_ALLOWED_DOMAINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     logLevel: e.LOG_LEVEL, sentryDsn: e.SENTRY_DSN, trustProxy: e.TRUST_PROXY, publicDir: e.PUBLIC_DIR, release: e.RELEASE, rateIpMultiplier: e.RATE_IP_MULTIPLIER,
     maxJsonBytes: 13 * 1024 * 1024, maxApiUploadBytes: 4 * 1024 * 1024,
