@@ -13,7 +13,7 @@ name: canteiro
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:65b16a8b326e0cfbdf33fa7e783f2a0cb352a61448616ccccfd616ef42aa0f65   # fixada por digest (2026-10-07); para atualizar: docker buildx imagetools inspect postgres:16
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}"
@@ -76,7 +76,7 @@ services:
     networks: [interna, web]
 
   caddy:
-    image: caddy:2
+    image: caddy:2@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772   # fixada por digest (2026-10-07)
     restart: unless-stopped
     ports:
       - "80:80"

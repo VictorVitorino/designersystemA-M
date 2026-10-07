@@ -1,0 +1,19 @@
+# Contexto do "docker build -f platform/Dockerfile ." (raiz do repositório): só o que a imagem precisa.
+# Sem isto o contexto levava ~2 GB (platform/.tmp, node_modules, .git) e qualquer .env local para dentro das camadas da imagem.
+.git
+.github
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+platform/.tmp
+platform/dist
+platform/.data
+platform/test-results
+platform/playwright-report
+platform/infra/docker/pgcerts
+platform/tests
+platform/docs
+original
+referencias
+*.log
