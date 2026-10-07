@@ -370,6 +370,14 @@ main:focus { outline: none; }
 .auth__card #conta-email { margin: calc(-1 * var(--sp-3)) 0 var(--sp-4); }
 .auth__foot { margin-top: var(--sp-4); font-size: var(--fs-xs); color: var(--mut); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .auth__foot .row { gap: 6px; }
+/* login corporativo (SSO): divisória "ou" em mono (rótulo do editor) + botão .mb de largura total; sem indicador do servidor, o botão fica discreto */
+.auth__or { display: flex; align-items: center; gap: 12px; margin: 16px 0 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 600; line-height: 1; letter-spacing: var(--ls-eyebrow); text-transform: uppercase; color: var(--mut); }
+.auth__or::before, .auth__or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+#btn-sso .ic { color: var(--steel-600); }
+#btn-sso:hover .ic { color: var(--orange-ink); }
+.auth__sso { display: flex; justify-content: center; margin-top: 10px; }
+.auth__sso .btn { color: var(--steel-600); }
+.auth__sso .btn:hover { color: var(--navy); }
 .auth__center { text-align: center; padding: var(--sp-3) 0 0; }
 .auth__center .ic--xl { color: var(--steel-600); margin-bottom: var(--sp-3); }
 .auth__center .ic--xl.is-ok { color: var(--ok); }

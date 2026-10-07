@@ -36,7 +36,7 @@ const mock = await startMock({ port: Number(process.env.PORT || 4201) });
 const ORIGIN = mock.origin;
 const browser = await chromium.launch();
 const cspViolations = [], pageErrors = [], consoleErrors = [], cspHeaders = [];
-const EXPECTED_NET = /Failed to load resource: the server responded with a status of (400|401|403|404|409|422|429|500|502)|net::ERR_(FAILED|ABORTED|INTERNET_DISCONNECTED|CONNECTION_REFUSED)/;
+const EXPECTED_NET = /Failed to load resource: the server responded with a status of (400|401|403|404|409|422|429|500|501|502)|net::ERR_(FAILED|ABORTED|INTERNET_DISCONNECTED|CONNECTION_REFUSED)/;
 
 async function newCtx(opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', acceptDownloads: true, ...opts });
@@ -271,6 +271,82 @@ async function sessionTests() {
   mock.state.users.get(IDS.bia).status = 'suspended';
   await page.goto(`${ORIGIN}/acervo`); await page.waitForURL('**/entrar**'); await page.waitForSelector('#form-alert .alert');
   check('conta suspensa enquanto logada: volta para /entrar com o motivo e a explicação', new URL(page.url()).searchParams.get('motivo') === 'suspended' && /suspensa/.test(await page.locator('#form-alert').innerText()));
+  await collectCsp(page); await ctx.close();
+}
+
+/* ═════════════════════════════ 3c. Login corporativo (SSO) ═════════════════════════════ */
+const SSO_MOTIVOS = ['not_invited', 'suspended', 'sessao', 'sso_email', 'sso_dominio', 'sso_indisponivel', 'sso_expirou', 'sso_falhou', 'sso_limite'];
+async function ssoTests() {
+  head('3c. Login corporativo (SSO) em /entrar');
+  mock.reset();
+  let ctx = await newCtx(); let page = await newPage(ctx, 'sso');
+  // como o back-end está hoje: SSO desligado e /api/auth/session sem indicador → botão discreto; o clique confere e o 501 vira aviso
+  await page.goto(`${ORIGIN}/entrar?next=%2Fimportar`); await page.waitForSelector('#form-login');
+  const sso = page.locator('#btn-sso');
+  const look = (pg) => pg.locator('#btn-sso').evaluate((b) => { const cs = getComputedStyle(b); return { ghost: b.classList.contains('btn--ghost'), bg: cs.backgroundColor, border: cs.borderTopColor, h: b.getBoundingClientRect().height, w: Math.round(b.getBoundingClientRect().width), formW: Math.round(b.closest('form').getBoundingClientRect().width), type: b.type, after: b.compareDocumentPosition(document.querySelector('#btn-entrar')) === Node.DOCUMENT_POSITION_PRECEDING }; });
+  let L = await look(page);
+  check('sem indicador do servidor: "Entrar com a conta A&M (SSO)" aparece DISCRETO (fantasma, sem fundo), do tipo button e logo depois de "Entrar"', (await sso.count()) === 1 && /^Entrar com a conta A&M \(SSO\)$/.test((await sso.innerText()).trim()) && L.ghost && L.bg === 'rgba(0, 0, 0, 0)' && L.type === 'button' && L.after && L.w < L.formW && (await page.locator('.auth__or').count()) === 0, L);
+  await mpost('/__test/clear-requests');
+  await sso.click();
+  check('sem e-mail: pede o e-mail corporativo no próprio campo (foco nele) e não chama o servidor', /Informe seu e-mail corporativo/.test(await page.innerText('#email-err')) && (await page.evaluate(() => document.activeElement.id)) === 'email' && (await mstate()).requests.every((r) => !r.path.startsWith('/api/auth/sso')));
+  await page.fill('#email', 'bia@am.test');
+  await sso.click(); await page.waitForSelector('#form-alert .alert');
+  let reqs = (await mstate()).requests.filter((r) => r.path.startsWith('/api/auth/sso')).map((r) => r.path);
+  check('SSO desligado (501 not_configured): aviso "O login corporativo ainda não está disponível" e a página fica (sem JSON cru na tela)', /O login corporativo ainda não está disponível/.test(await page.innerText('#form-alert')) && new URL(page.url()).pathname === '/entrar' && JSON.stringify(reqs) === JSON.stringify(['/api/auth/sso']), { reqs, url: page.url() });
+  check('a conferência não leva o e-mail nem abre tentativa (GET /api/auth/sso sem parâmetros, sem seguir redirecionamento)', reqs.every((x) => !x.includes('email')));
+  // SSO ligado (ainda sem indicador): confere, segue ao provedor e volta logada no destino pedido
+  await mpost('/__test/sso?on=1');
+  await page.reload(); await page.waitForSelector('#form-login');
+  await page.fill('#email', ' Bia@AM.test ');
+  await mpost('/__test/clear-requests');
+  await Promise.all([page.waitForURL(/\/__test\/idp/), sso.click()]);
+  reqs = (await mstate()).requests.filter((r) => r.path.startsWith('/api/auth/sso')).map((r) => r.path);
+  check('SSO ligado: o botão leva a /api/auth/sso?email=<e-mail digitado>&next=<destino atual> e daí ao provedor', reqs.includes('/api/auth/sso?email=Bia%40AM.test&next=%2Fimportar') && /Provedor de identidade/.test(await page.innerText('h1')), reqs);
+  await Promise.all([page.waitForURL((u) => u.pathname === '/importar'), page.click('#idp-ok')]);
+  await page.waitForSelector('#user-name');
+  check('volta do provedor com sessão: abre o destino pedido (/importar) já como Bia Souza', (await page.innerText('#user-name')) === 'Bia Souza' && (await mstate()).audit.includes('auth.login'));
+  await collectCsp(page); await ctx.close();
+  // erros: o servidor volta para /entrar?motivo=… e a tela explica (o destino é preservado)
+  ctx = await newCtx(); page = await newPage(ctx, 'sso-erros');
+  const viaSso = async (email, then) => {
+    await page.goto(`${ORIGIN}/entrar?next=%2Fimportar`); await page.waitForSelector('#form-login');
+    await page.fill('#email', email);
+    if (then) { await Promise.all([page.waitForURL(/\/__test\/idp/), page.click('#btn-sso')]); await Promise.all([page.waitForURL(/\/entrar\?/), page.click(then)]); }
+    else await Promise.all([page.waitForURL(/\/entrar\?motivo=/), page.click('#btn-sso')]);
+    await page.waitForSelector('#form-alert .alert');
+    const u = new URL(page.url());
+    return { motivo: u.searchParams.get('motivo'), next: u.searchParams.get('next'), text: await page.innerText('#form-alert') };
+  };
+  let r = await viaSso('alguem@outra-empresa.com');
+  check('e-mail de outro domínio: motivo=sso_dominio, mensagem própria e o destino continua (/importar)', r.motivo === 'sso_dominio' && r.next === '/importar' && /só para os domínios da A&M/.test(r.text), r);
+  r = await viaSso('bia@am.test', '#idp-cancel');
+  check('cancelou no provedor: motivo=sso_falhou com mensagem clara', r.motivo === 'sso_falhou' && /cancelado ou recusado/.test(r.text), r);
+  r = await viaSso('pessoa.nova@am.test', '#idp-ok');
+  check('conta A&M sem convite: motivo=not_invited e a orientação de pedir convite (nenhuma conta é criada)', r.motivo === 'not_invited' && /não foi convidado/.test(r.text) && !(await mstate()).users.some((u) => /pessoa\.nova/.test(u.displayName)), r);
+  await page.goto(`${ORIGIN}/api/auth/sso/callback?code=abc123`); await page.waitForSelector('#form-alert .alert');
+  check('retorno sem a tentativa deste navegador (outro navegador ou expirada): motivo=sso_expirou', new URL(page.url()).searchParams.get('motivo') === 'sso_expirou' && /expirou/.test(await page.innerText('#form-alert')));
+  check('depois de um erro de SSO o botão fica em destaque (o login corporativo está ligado)', (await page.locator('.auth__or').count()) === 1 && (await page.locator('#btn-sso[data-sso=ligado]').count()) === 1);
+  // cada motivo tem mensagem própria; motivo desconhecido ou forjado não mostra nada
+  const textos = {};
+  for (const m of SSO_MOTIVOS) { await page.goto(`${ORIGIN}/entrar?motivo=${m}`); await page.waitForSelector('#form-login'); textos[m] = (await page.locator('#form-alert').innerText()).trim(); }
+  check('cada motivo (not_invited, suspended, sessao e os 6 sso_*) tem mensagem própria em português', Object.values(textos).every((t) => t.length > 30) && new Set(Object.values(textos)).size === SSO_MOTIVOS.length, textos);
+  check('mensagens dos erros de SSO são anunciadas (role=alert), a de sessão expirada não interrompe', await (async () => { await page.goto(`${ORIGIN}/entrar?motivo=sso_falhou`); await page.waitForSelector('#form-login'); return (await page.locator('#form-alert [role=alert]').count()) === 1; })());
+  await page.goto(`${ORIGIN}/entrar?motivo=%3Cimg%20src%3Dx%20onerror%3D%22window.__xss%3D9%22%3E`); await page.waitForSelector('#form-login');
+  check('motivo desconhecido ou forjado: nenhuma mensagem e nada do parâmetro na página', (await page.locator('#form-alert .alert').count()) === 0 && !(await page.content()).includes('onerror') && (await page.evaluate(() => window.__xss)) === undefined);
+  // indicador em /api/auth/session (sso: {enabled}) — se o servidor passar a mandar
+  await mpost('/__test/sso?on=1&indicator=1');
+  await page.goto(`${ORIGIN}/entrar`); await page.waitForSelector('#form-login');
+  L = await look(page);
+  const E = await page.evaluate(() => { const b = document.querySelector('#btn-sso'); const cs = getComputedStyle(b); const o = getComputedStyle(document.querySelector('.auth__or')); return { bg: cs.backgroundColor, color: cs.color, border: cs.borderTopColor, radius: cs.borderTopLeftRadius, fw: cs.fontWeight, fs: cs.fontSize, orFont: o.fontFamily.split(',')[0].replace(/["']/g, ''), orCase: o.textTransform }; });
+  check('com o indicador ligado: botão em destaque = .mb do editor (branco, navy, linha #DCE3EC, raio 8 px, 13 px/600, largura total) abaixo da divisória "ou" em mono', !L.ghost && E.bg === 'rgb(255, 255, 255)' && E.color === 'rgb(0, 42, 70)' && E.border === 'rgb(220, 227, 236)' && E.radius === '8px' && E.fw === '600' && E.fs === '13px' && L.h >= 38 && Math.abs(L.w - L.formW) <= 1 && E.orFont === 'JetBrains Mono' && E.orCase === 'uppercase', { L, E });
+  await page.fill('#email', 'bia@am.test'); await mpost('/__test/clear-requests');
+  await Promise.all([page.waitForURL(/\/__test\/idp/), page.click('#btn-sso')]);
+  reqs = (await mstate()).requests.filter((r) => r.path.startsWith('/api/auth/sso')).map((r) => r.path);
+  check('com o indicador ligado vai direto, sem a conferência prévia (uma única chamada, com e-mail e destino)', JSON.stringify(reqs) === JSON.stringify(['/api/auth/sso?email=bia%40am.test&next=%2Facervo']), reqs);
+  await mpost('/__test/sso?on=0&indicator=1');
+  await page.goto(`${ORIGIN}/entrar`); await page.waitForSelector('#form-login');
+  check('com o indicador dizendo "desligado": o botão de SSO não aparece', (await page.locator('#btn-sso').count()) === 0 && (await page.locator('.auth__or').count()) === 0);
+  await mpost('/__test/sso?on=0&indicator=0');
   await collectCsp(page); await ctx.close();
 }
 
@@ -1088,10 +1164,10 @@ async function a11yAndResponsive() {
   await page.goto(`${ORIGIN}/entrar`); await page.waitForSelector('#form-login');
   check('ao abrir, o foco já está no campo de e-mail (autofoco)', (await page.evaluate(() => document.activeElement.id)) === 'email');
   const order = [];
-  for (let i = 0; i < 4; i++) { await page.keyboard.press('Tab'); order.push(await page.evaluate(() => document.activeElement.id || document.activeElement.getAttribute('aria-label'))); }
+  for (let i = 0; i < 5; i++) { await page.keyboard.press('Tab'); order.push(await page.evaluate(() => document.activeElement.id || document.activeElement.getAttribute('aria-label'))); }
   await page.focus('#email'); await page.keyboard.press('Shift+Tab');
   const back = await page.evaluate(() => document.activeElement.className);
-  check('ordem de Tab no login: e-mail → senha → mostrar senha → Entrar → Esqueci a senha; Shift+Tab do e-mail vai ao link de pular', JSON.stringify(order) === JSON.stringify(['senha', 'Mostrar senha', 'btn-entrar', 'link-esqueci']) && back === 'skip-link', { order, back });
+  check('ordem de Tab no login: e-mail → senha → mostrar senha → Entrar → Entrar com a conta A&M (SSO) → Esqueci a senha; Shift+Tab do e-mail vai ao link de pular', JSON.stringify(order) === JSON.stringify(['senha', 'Mostrar senha', 'btn-entrar', 'btn-sso', 'link-esqueci']) && back === 'skip-link', { order, back });
   await page.focus('#btn-entrar');
   const ring = await page.evaluate(() => { const cs = getComputedStyle(document.activeElement); return { w: parseFloat(cs.outlineWidth), s: cs.outlineStyle }; });
   check('foco visível (anel de ≥ 2 px) nos controles', ring.s !== 'none' && ring.w >= 2, ring);
@@ -1401,7 +1477,7 @@ async function screenshots() {
 }
 
 /* ═════════════════════════════ execução ═════════════════════════════ */
-const sections = [sourceHygiene, apiClient, loginTests, sessionTests, confirmTests, forgotTests, acervoTests, respostasTests, modelosTests, baixarTests, adminTests, importTests, a11yAndResponsive, familiaVisual, screenshots];
+const sections = [sourceHygiene, apiClient, loginTests, sessionTests, ssoTests, confirmTests, forgotTests, acervoTests, respostasTests, modelosTests, baixarTests, adminTests, importTests, a11yAndResponsive, familiaVisual, screenshots];
 const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
 for (const fn of sections) {
   if (only && !only.some((o) => fn.name.toLowerCase().includes(o.toLowerCase()))) continue;

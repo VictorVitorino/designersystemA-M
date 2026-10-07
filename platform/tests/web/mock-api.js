@@ -134,7 +134,7 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
       ['acervo.visibility', { value: 'all_members', updatedAt: null }], ['versions.keep_last', { value: 50, updatedAt: null }], ['versions.keep_daily_days', { value: 90, updatedAt: null }],
       ['uploads.max_bytes', { value: 104857600, updatedAt: null }], ['invites.ttl_days', { value: 7, updatedAt: null }],
     ]);
-    S = { users, pres, comments, inter, audit, settings, assets, thumbs, png, at: new Map(), rt: new Map(), linkTokens: new Map(), requests: [], refreshCount: 0, refreshFails: false, csrfBlocked: 0, auditSeq: 2000, created: [], uploads: [], loginFails: new Map(), invites: new Map([[uuidN('99999999', 1), { id: uuidN('99999999', 1), email: 'eva@am.test', userId: IDS.eva, status: 'pending', expiresAt: new Date(now + 5 * 864e5).toISOString(), resent: 0 }]]) };
+    S = { users, pres, comments, inter, audit, settings, assets, thumbs, png, at: new Map(), rt: new Map(), linkTokens: new Map(), requests: [], refreshCount: 0, refreshFails: false, csrfBlocked: 0, auditSeq: 2000, created: [], uploads: [], loginFails: new Map(), sso: { enabled: false, indicator: false, domains: ['am.test'] }, ssoStates: new Map(), invites: new Map([[uuidN('99999999', 1), { id: uuidN('99999999', 1), email: 'eva@am.test', userId: IDS.eva, status: 'pending', expiresAt: new Date(now + 5 * 864e5).toISOString(), resent: 0 }]]) };
     S.linkTokens.set(TOKENS.invite, { type: 'invite', userId: IDS.eva, used: false });
     S.linkTokens.set(TOKENS.recovery, { type: 'recovery', userId: IDS.bia, used: false });
     RL.clear();
@@ -184,6 +184,14 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
     setCookie(res, 'am_at', at, { maxAge: 3600 }); setCookie(res, 'am_rt', rt, { maxAge: 30 * 86400 });
   }
   const sessionBody = (user, csrfToken) => ({ authenticated: true, csrfToken, user: pub(user), needsPassword: user.status === 'invited' || !user.password });
+  /** Indicador opcional do SSO em /api/auth/session (o back-end atual não manda; /__test/sso?indicator=1 liga). */
+  const withSso = (b) => (S.sso.indicator ? { ...b, sso: { enabled: S.sso.enabled } } : b);
+  const ssoNext = (raw) => (typeof raw === 'string' && /^\/(?![/\\])[^\s]*$/.test(raw) && raw.length <= 512 ? raw : '/acervo');
+  function ssoBack(res, motivo, next) {
+    const qs = new URLSearchParams({ motivo }); if (next && next !== '/acervo') qs.set('next', next);
+    return send(res, 302, '', { Location: `/entrar?${qs}` });
+  }
+  const esc = (t) => String(t).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
   /* ───────── API ───────── */
   async function api(req, res, url) {
@@ -226,8 +234,39 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
         if (t && Date.now() <= t.exp && !S.refreshFails) { S.rt.delete(cookies.am_rt); user = cand; S.refreshCount++; startSession(res, user); }
         else clearCookie(res, 'am_rt');
       }
-      if (user && user.status === 'suspended') return send(res, 200, { authenticated: false, csrfToken: csrf, reason: 'suspended' });
-      return send(res, 200, user ? sessionBody(user, csrf) : { authenticated: false, csrfToken: csrf });
+      if (user && user.status === 'suspended') return send(res, 200, withSso({ authenticated: false, csrfToken: csrf, reason: 'suspended' }));
+      return send(res, 200, withSso(user ? sessionBody(user, csrf) : { authenticated: false, csrfToken: csrf }));
+    }
+    /* ---- login corporativo (SSO), no contrato do back-end (routes/auth.js): desligado → 501 not_configured; ligado → 302 ao provedor;
+       erros de navegação → 302 /entrar?motivo=<código> (preservando next ≠ /acervo). O "provedor" é a página /__test/idp. ---- */
+    if ((p === '/api/auth/sso' || p === '/api/auth/sso/start') && m === 'GET') {
+      if (!S.sso.enabled) return fail(res, 501, 'not_configured', 'Login corporativo (SSO) não está habilitado.');
+      const next = ssoNext(q.get('next'));
+      if (hit('sso_ip', req.socket.remoteAddress, 100, 600)) return ssoBack(res, 'sso_limite', next);
+      const email = (q.get('email') || '').trim().toLowerCase(); const domain = (q.get('domain') || '').trim().toLowerCase();
+      if (!!email === !!domain || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) || (domain && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain))) return ssoBack(res, 'sso_email', next);
+      const d = email ? email.split('@')[1] : domain;
+      if (!S.sso.domains.includes(d)) { audit(null, 'auth.sso_refused', 'sso', null, { reason: 'dominio' }); return ssoBack(res, 'sso_dominio', next); }
+      const state = crypto.randomBytes(16).toString('hex');
+      S.ssoStates.set(state, { email: email || null, next });
+      setCookie(res, 'am_sso', state, { maxAge: 600 });
+      audit(null, 'auth.sso_start', 'sso', d);
+      return send(res, 302, '', { Location: `/__test/idp?${new URLSearchParams({ hint: email || d })}` });
+    }
+    if (p === '/api/auth/sso/callback' && m === 'GET') {
+      if (!S.sso.enabled) return fail(res, 501, 'not_configured', 'Login corporativo (SSO) não está habilitado.');
+      const st = cookies.am_sso ? S.ssoStates.get(cookies.am_sso) : null;
+      if (cookies.am_sso) { S.ssoStates.delete(cookies.am_sso); clearCookie(res, 'am_sso'); }   // uso único
+      const next = st ? st.next : '/acervo';
+      if (q.has('error') || q.has('error_code')) return ssoBack(res, 'sso_falhou', next);   // cancelou ou o provedor recusou
+      if (!st || !/^[A-Za-z0-9_-]{2,200}$/.test(q.get('code') || '')) return ssoBack(res, 'sso_expirou', next);
+      const email = String(q.get('as') || st.email || '').toLowerCase();   // o e-mail que o provedor afirmou
+      if (!S.sso.domains.includes(email.split('@')[1] || '')) return ssoBack(res, 'sso_dominio', next);
+      const u = [...S.users.values()].find((x) => x.email === email);
+      if (!u || u.status === 'invited') return ssoBack(res, 'not_invited', next);
+      if (u.status === 'suspended') return ssoBack(res, 'suspended', next);
+      startSession(res, u); u.lastLoginAt = new Date().toISOString(); audit(u.id, 'auth.login', 'user', u.id, { via: 'sso' });
+      return send(res, 302, '', { Location: next });
     }
     if (p === '/api/auth/login' && m === 'POST') {
       const email = String(body.email || '').trim().toLowerCase(); const ip = req.socket.remoteAddress;
@@ -275,7 +314,6 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
       S.refreshCount++; S.rt.delete(c.am_rt); startSession(res, S.users.get(t.userId));
       return send(res, 200, sessionBody(S.users.get(t.userId), cookies.am_csrf));
     }
-    if (p === '/api/auth/sso/start') return fail(res, 501, 'not_configured', 'SSO ainda não configurado.');
 
     /* ---- daqui para baixo exige sessão ---- */
     const { user, expired } = authOf(req);
@@ -548,6 +586,14 @@ export async function startMock({ port = 0, cloudCore = process.env.WEB_CLOUD_CO
     }
     if (p === '/__test/more-users') { const n = Number(url.searchParams.get('n') || 60); for (let i = 0; i < n; i++) { const id = crypto.randomUUID(); S.users.set(id, { id, email: `extra${i}@am.test`, displayName: `Extra ${String(i).padStart(2, '0')}`, role: 'member', status: 'active', password: PASSWORD, createdAt: new Date(Date.now() - (100 + i) * 864e5).toISOString(), activatedAt: new Date().toISOString(), lastLoginAt: null }); } return send(res, 200, { ok: true }); }
     if (p === '/__test/clear-requests') { S.requests.length = 0; return send(res, 200, { ok: true }); }
+    if (p === '/__test/sso') { const g = (k) => url.searchParams.get(k); if (g('on') !== null) S.sso.enabled = g('on') === '1'; if (g('indicator') !== null) S.sso.indicator = g('indicator') === '1'; return send(res, 200, { ok: true, sso: S.sso }); }
+    if (p === '/__test/idp') {   // "provedor de identidade" simulado: confirma (com o e-mail sugerido ou outro) ou cancela
+      const hint = String(url.searchParams.get('hint') || '');
+      const who = hint.includes('@') ? hint : `pessoa@${hint}`;
+      const link = (id, href, text) => `<p><a id="${id}" href="${esc(href)}">${esc(text)}</a></p>`;
+      res.writeHead(200, pageHeaders(MIME['.html']));
+      return res.end(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Provedor A&amp;M (simulado)</title></head><body><main><h1>Provedor de identidade A&amp;M (simulado)</h1>${link('idp-ok', `/api/auth/sso/callback?${new URLSearchParams({ code: 'ok-' + crypto.randomBytes(4).toString('hex'), as: who })}`, `Continuar como ${who}`)}${link('idp-cancel', '/api/auth/sso/callback?error=access_denied', 'Cancelar')}</main></body></html>`);
+    }
     if (p === '/__test/link-token') { S.linkTokens.set(url.searchParams.get('t'), { type: url.searchParams.get('type'), userId: IDS[url.searchParams.get('u')], used: false }); return send(res, 200, { ok: true }); }
     return send(res, 404, { ok: false });
   }
