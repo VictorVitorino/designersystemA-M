@@ -14,17 +14,29 @@
   "regions": [
     "gru1"
   ],
+  "redirects": [
+    {
+      "source": "/(editor|visualizar)",
+      "destination": "/acervo",
+      "permanent": false
+    },
+    {
+      "source": "/(editor|visualizar)/((?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$).*)",
+      "destination": "/acervo",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "/api"
     },
     {
-      "source": "/editor/:id",
+      "source": "/editor/:id([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
       "destination": "/editor/index.html"
     },
     {
-      "source": "/visualizar/:id",
+      "source": "/visualizar/:id([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
       "destination": "/visualizar/index.html"
     }
   ],

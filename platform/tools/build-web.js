@@ -35,6 +35,9 @@ export function pdfjsClassic(src) {
   return '/* gerado por tools/build-web.js a partir de pdf.min.mjs (4.10.38): versão clássica para CSP com strict-dynamic */\n' + out;
 }
 
+/** id de apresentação nas rotas do editor (o boot do editor só liga a nuvem com um UUID; sem ele o HTML seria o editor original, fora da nuvem) */
+export const UUID_SRC = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+
 export function vercelConfig(csp) {
   const h = (obj) => Object.entries(obj).map(([key, value]) => ({ key, value }));
   const sec = { ...SECURITY_HEADERS, 'X-Robots-Tag': 'noindex, nofollow' };
@@ -47,10 +50,15 @@ export function vercelConfig(csp) {
     cleanUrls: true,
     functions: { 'api/index.js': { maxDuration: 60, memory: 1024 } },
     regions: ['gru1'],
+    /* /editor e /visualizar sem o UUID de uma apresentação (/editor/, /editor/abc, /editor/index.html) → acervo (mesma regra de src/static.js) */
+    redirects: [
+      { source: '/(editor|visualizar)', destination: '/acervo', permanent: false },
+      { source: `/(editor|visualizar)/((?!${UUID_SRC}/?$).*)`, destination: '/acervo', permanent: false }
+    ],
     rewrites: [
       { source: '/api/(.*)', destination: '/api' },
-      { source: '/editor/:id', destination: '/editor/index.html' },
-      { source: '/visualizar/:id', destination: '/visualizar/index.html' }
+      { source: `/editor/:id(${UUID_SRC})`, destination: '/editor/index.html' },
+      { source: `/visualizar/:id(${UUID_SRC})`, destination: '/visualizar/index.html' }
     ],
     headers: [
       { source: '/((?!api/|editor/|visualizar/).*)', headers: h({ 'Content-Security-Policy': csp.default, ...sec }) },

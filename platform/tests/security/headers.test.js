@@ -122,10 +122,16 @@ describe('servidor estático', () => {
   const body = async (p, o) => { const r = await get(p, o); return [r, await r.text()]; };
 
   test('páginas e reescritas de SPA → index.html da pasta', async () => {
-    for (const [url, page] of [['/', 'raiz'], ['/index.html', 'raiz'], ['/editor/index.html', 'editor'], ['/editor/3f0f6a52-1111-4000-8000-000000000001', 'editor'], ['/editor/qualquer-id_1', 'editor'],
+    for (const [url, page] of [['/', 'raiz'], ['/index.html', 'raiz'], ['/editor/3f0f6a52-1111-4000-8000-000000000001', 'editor'], ['/editor/3F0F6A52-1111-4000-8000-000000000001/', 'editor'],
       ['/visualizar/3f0f6a52-1111-4000-8000-000000000001', 'visualizar'], ['/acervo', 'acervo'], ['/acervo/', 'acervo'], ['/admin', 'admin'], ['/admin/usuarios', 'admin'], ['/entrar', 'entrar'], ['/importar', 'importar'],
-      ['/esqueci-senha', 'esqueci-senha'], ['/auth/confirmar?token_hash=abc&type=invite', 'auth'], ['/editor/', 'editor']]) {
+      ['/esqueci-senha', 'esqueci-senha'], ['/auth/confirmar?token_hash=abc&type=invite', 'auth']]) {
       const [r, text] = await body(url); assert.equal(r.status, 200, url); assert.ok(text.includes(`PAGINA:${page}`), `${url} → ${text}`); assert.equal(r.headers.get('content-type'), 'text/html; charset=utf-8');
+    }
+  });
+  test('editor sem o id (UUID) de uma apresentação → 302 para /acervo (o HTML abriria o editor original fora da nuvem)', async () => {
+    for (const url of ['/editor', '/editor/', '/editor/index.html', '/editor/qualquer-id_1', '/editor/abc/def', '/visualizar', '/visualizar/xyz', '/editor/3f0f6a52-1111-4000-8000-000000000001/extra']) {
+      const r = await get(url); assert.equal(r.status, 302, url); assert.equal(r.headers.get('location'), '/acervo', url); assert.ok(!(await r.text()).includes('PAGINA'), url);
+      assert.equal((await get(url, { method: 'HEAD' })).status, 302, `HEAD ${url}`);
     }
   });
   test('rotas desconhecidas e arquivos inexistentes → 404 (nunca devolvem HTML no lugar de asset)', async () => {
@@ -153,7 +159,7 @@ describe('servidor estático', () => {
   });
   test('SVG aberto direto não executa script (CSP com sandbox)', async () => assert.match((await get('/assets/logo.svg')).headers.get('content-security-policy'), /sandbox/));
   test('Cache-Control: HTML no-cache; /assets e /js COM hash → 1 ano imutável; sem hash → revalida', async () => {
-    assert.equal((await get('/')).headers.get('cache-control'), 'no-cache'); assert.equal((await get('/editor/abc')).headers.get('cache-control'), 'no-cache');
+    assert.equal((await get('/')).headers.get('cache-control'), 'no-cache'); assert.equal((await get('/editor/3f0f6a52-1111-4000-8000-000000000001')).headers.get('cache-control'), 'no-cache');
     assert.equal((await get('/assets/app.0123456789abcdef.js')).headers.get('cache-control'), 'public, max-age=31536000, immutable'); assert.equal((await get('/js/vendor.deadbeefcafe.js')).headers.get('cache-control'), 'public, max-age=31536000, immutable');
     for (const u of ['/js/boot.js', '/assets/estilo.css', '/robots.txt']) assert.equal((await get(u)).headers.get('cache-control'), 'no-cache', u);
   });
@@ -164,15 +170,15 @@ describe('servidor estático', () => {
     for (const m of ['POST', 'PUT', 'DELETE', 'PATCH']) { const x = await get('/', { method: m }); assert.equal(x.status, 405, m); assert.equal(x.headers.get('allow'), 'GET, HEAD'); }
   });
   test('CSP por página (dist/csp.json): /editor/, /visualizar/ e default; só em HTML', async () => {
-    assert.equal((await get('/editor/abc')).headers.get('content-security-policy'), EDITOR_CSP); assert.equal((await get('/editor/index.html')).headers.get('content-security-policy'), EDITOR_CSP);
-    assert.equal((await get('/visualizar/xyz')).headers.get('content-security-policy'), VIEW_CSP);
+    assert.equal((await get('/editor/3f0f6a52-1111-4000-8000-000000000001')).headers.get('content-security-policy'), EDITOR_CSP); assert.equal((await get('/editor/aaaaaaaa-1111-4000-8000-000000000002/')).headers.get('content-security-policy'), EDITOR_CSP);
+    assert.equal((await get('/visualizar/3f0f6a52-1111-4000-8000-000000000001')).headers.get('content-security-policy'), VIEW_CSP);
     for (const u of ['/', '/acervo', '/admin', '/entrar', '/auth/confirmar']) assert.equal((await get(u)).headers.get('content-security-policy'), "default-src 'self'; script-src 'self' 'sha256-DEFAULT'", u);
     assert.equal((await get('/assets/estilo.css')).headers.get('content-security-policy'), null);
   });
   test('CSP padrão estrita quando o csp.json não existe, é inválido ou tenta injetar cabeçalho', async () => {
     const strict = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
     assert.equal(DEFAULT_CSP, strict);
-    const run = async (file) => (await serveStatic(t.api, t.config, { cspFile: file }).request('/editor/abc')).headers.get('content-security-policy');
+    const run = async (file) => (await serveStatic(t.api, t.config, { cspFile: file }).request('/editor/3f0f6a52-1111-4000-8000-000000000001')).headers.get('content-security-policy');
     assert.equal(await run(path.join(dist, 'nao-existe.json')), strict);
     const bad = path.join(dist, 'bad.json'); fs.writeFileSync(bad, '{nao json'); assert.equal(await run(bad), strict);
     fs.writeFileSync(bad, JSON.stringify({ default: "default-src 'self'\r\nSet-Cookie: x=1", '/editor/': 42 })); assert.equal(await run(bad), strict, 'quebra de linha recusada');

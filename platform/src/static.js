@@ -1,8 +1,10 @@
 /* Servidor estático (desenvolvimento, testes E2E e hospedagem em contêiner). Na Vercel os arquivos saem da CDN; aqui valem as mesmas regras:
    • serve só dentro de config.publicDir (path traversal, byte nulo, barra invertida, %2f, links simbólicos que escapam → recusados);
    • sem listagem de diretório; sem dotfiles; GET/HEAD apenas;
-   • SPA: /editor/:id → /editor/index.html, /visualizar/:id → /visualizar/index.html e as telas (/acervo, /admin, /entrar, /importar,
+   • SPA: /editor/<uuid> → /editor/index.html, /visualizar/<uuid> → /visualizar/index.html e as telas (/acervo, /admin, /entrar, /importar,
      /esqueci-senha, /auth/confirmar) → index.html da própria pasta; caminho com extensão que não existe → 404 (nunca cai no HTML);
+   • /editor e /visualizar SEM o id (UUID) de uma apresentação (/editor/, /editor/abc, /editor/index.html) → 302 para /acervo: sem o id o
+     HTML abriria o editor original, fora da nuvem (nada salvo no servidor e sem aviso). A mesma regra está nos redirects do vercel.json;
    • CSP por página, lida de dist/csp.json ({default, "/editor/", "/visualizar/"}); sem o arquivo, CSP padrão estrita;
    • Cache-Control: HTML no-cache; /assets e /js com hash no nome → 1 ano imutável; o resto revalida (ETag);
    • nunca atende /api: repassa para a API (e um caminho codificado que desembrulhe em /api é 404). */
@@ -27,6 +29,11 @@ const MIME = {
 /** Pastas-tela: a rota /<pasta>[/…] cai no index.html da pasta. `auth` serve /auth/confirmar. */
 const SCREEN_DIRS = new Set(['editor', 'visualizar', 'acervo', 'admin', 'entrar', 'importar', 'esqueci-senha', 'auth']);
 const HASHED = /[.-][0-9a-f]{8,}\.[a-z0-9]+$/i;
+/** Páginas do editor só existem com o id da apresentação. Caminho "limpo" (letras, números, _ - . /) sem UUID → /acervo; com extensão de
+ *  arquivo que não seja .html, ou com caracteres codificados, segue as regras de sempre (404). */
+const EDITOR_ANY = /^\/(?:editor|visualizar)(?:\/[\w.-]*)*$/i;
+const EDITOR_UUID = /^\/(?:editor|visualizar)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
+export const editorWithoutId = (p) => EDITOR_ANY.test(p) && !EDITOR_UUID.test(p) && !/\.(?!html?$)[a-z0-9]+$/i.test(p);
 
 const isApiPath = (p) => p === '/api' || p.startsWith('/api/');
 
@@ -106,6 +113,7 @@ export function serveStatic(apiApp, config, opts = {}) {
 
   root.on(['GET', 'HEAD'], '*', async (c) => {
     const url = new URL(c.req.url);
+    if (editorWithoutId(url.pathname)) return new Response(null, { status: 302, headers: { Location: '/acervo', 'Cache-Control': 'no-store' } });
     const file = locate(url.pathname === '/' ? '/index.html' : url.pathname);
     if (!file) return notFound(c);
     const st = fs.statSync(file);
