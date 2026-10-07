@@ -643,7 +643,7 @@ describe('abuso: custo do lint, tetos e limites de taxa', () => {
     const hostile = ('" ' + 'on'.repeat(50) + ' ' + '&#x'.repeat(30) + '%2' + '\\u'.repeat(20)).repeat(9000).slice(0, 2 * 1024 * 1024 - 100);
     const t2 = performance.now(); try { lintDeck(deck('x', { html: hostile })); } catch { /* recusa é aceitável */ } const hostileMs = performance.now() - t2; LOG.push({ level: 'metric', m: 'lint_hostile_2mb_ms', f: { ms: Math.round(hostileMs) } }); assert.ok(hostileMs < 5000, `regex hostil levou ${hostileMs} ms`);
   });
-  test('tetos: 1000 comentários ativos por apresentação (1001º → 409); 500 interações por pessoa/elemento (501ª → 409); payload > 64 KB → 413', async () => {
+  test('tetos: 1000 comentários ativos por apresentação (1001º → 409); 500 interações por pessoa/elemento (501ª → 409); resposta > 64 KB e estado de quadro > 256 KB → 413', async () => {
     await resetRates(); const p = (await cA.post('/api/presentations', { title: 'Tetos' })).json;
     await t.ops.asSystem((tx) => tx`insert into app.comments(presentation_id, author_id, body) select ${p.id}::uuid, ${B.id}::uuid, 'c' || g from generate_series(1, 999) g`);
     assert.equal((await cB.post(`/api/presentations/${p.id}/comments`, { body: 'nº 1000' })).status, 201);
@@ -651,7 +651,8 @@ describe('abuso: custo do lint, tetos e limites de taxa', () => {
     await t.ops.asSystem((tx) => tx`insert into app.interactions(presentation_id, user_id, kind, element_id, payload) select ${p.id}::uuid, ${B.id}::uuid, 'form_response', 'f', '{}'::jsonb from generate_series(1, 499)`);
     assert.equal((await cB.post(`/api/presentations/${p.id}/interactions`, { kind: 'form_response', elementId: 'f', payload: { a: [] } })).status, 201);
     assert.equal((await cB.post(`/api/presentations/${p.id}/interactions`, { kind: 'form_response', elementId: 'f', payload: { a: [] } })).status, 409);
-    assert.equal((await cB.post(`/api/presentations/${p.id}/interactions`, { kind: 'board_state', elementId: 'b', payload: { x: 'y'.repeat(65 * 1024) } })).status, 413);
+    assert.equal((await cB.post(`/api/presentations/${p.id}/interactions`, { kind: 'form_response', elementId: 'g', payload: { x: 'y'.repeat(65 * 1024) } })).status, 413, 'resposta > 64 KB');
+    assert.equal((await cB.post(`/api/presentations/${p.id}/interactions`, { kind: 'board_state', elementId: 'b', payload: { x: 'y'.repeat(257 * 1024) } })).status, 413, 'estado de quadro > 256 KB (o teto subiu de 64 KB para 256 KB no contrato: BE-ED-14)');
     let deepP = 1; for (let i = 0; i < 26; i++) deepP = { a: deepP };
     assert.equal((await cB.post(`/api/presentations/${p.id}/interactions`, { kind: 'board_state', elementId: 'b', payload: deepP })).status, 400, 'profundidade > 20');
     assert.equal((await t.ops.asSystem((tx) => tx`select count(*)::int n from app.comments where presentation_id = ${p.id} and deleted_at is null`))[0].n, 1000);
