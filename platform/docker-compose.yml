@@ -61,7 +61,6 @@ services:
       SUPABASE_ANON_KEY: "${AUTH_ANON_KEY:?}"
       SUPABASE_SERVICE_ROLE_KEY: "${AUTH_SERVICE_KEY:?}"
       SUPABASE_JWT_SECRET: "${AUTH_JWT_SECRET:?}"
-      ALLOW_SERVICE_KEY_IN_API: "1"
       STORAGE_DRIVER: s3
       S3_ENDPOINT: "${S3_ENDPOINT:?defina S3_ENDPOINT (http://minio:9000 no perfil completo)}"
       S3_REGION: "${S3_REGION:-us-east-1}"

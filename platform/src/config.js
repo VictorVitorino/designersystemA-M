@@ -27,8 +27,8 @@ const Env = z.object({
   INVITE_ALLOWED_DOMAINS: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
   SENTRY_DSN: z.string().optional(),
-  ALLOW_SERVICE_KEY_IN_API: bool(false),
   TRUST_PROXY: bool(true),                 // atrás da Vercel/Cloudflare: usa x-forwarded-for / x-real-ip
+  RATE_IP_MULTIPLIER: z.coerce.number().int().min(5).max(1000).default(25),   // limite por IP nas rotas autenticadas = limite por usuário × fator
   GOTRUE_FAKE: bool(false),                // somente test/local: aponta SUPABASE_URL para tools/fake-gotrue.js
   PUBLIC_DIR: z.string().default('./dist/public'),
   RELEASE: z.string().default('dev'),
@@ -58,7 +58,7 @@ export function loadConfig(env = process.env) {
     supabase: { url: e.SUPABASE_URL?.replace(/\/$/, ''), anonKey: e.SUPABASE_ANON_KEY, serviceKey: e.SUPABASE_SERVICE_ROLE_KEY, jwksUrl: e.SUPABASE_JWKS_URL, jwtSecret: e.SUPABASE_JWT_SECRET },
     storage: { driver: e.STORAGE_DRIVER, localDir: e.STORAGE_LOCAL_DIR, s3: { endpoint: e.S3_ENDPOINT, region: e.S3_REGION, bucket: e.S3_BUCKET, accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY, forcePathStyle: e.S3_FORCE_PATH_STYLE } },
     csrfSecret: e.CSRF_SECRET, inviteDomains: (e.INVITE_ALLOWED_DOMAINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
-    logLevel: e.LOG_LEVEL, sentryDsn: e.SENTRY_DSN, trustProxy: e.TRUST_PROXY, publicDir: e.PUBLIC_DIR, release: e.RELEASE,
+    logLevel: e.LOG_LEVEL, sentryDsn: e.SENTRY_DSN, trustProxy: e.TRUST_PROXY, publicDir: e.PUBLIC_DIR, release: e.RELEASE, rateIpMultiplier: e.RATE_IP_MULTIPLIER,
     maxJsonBytes: 13 * 1024 * 1024, maxApiUploadBytes: 4 * 1024 * 1024,
   });
 }

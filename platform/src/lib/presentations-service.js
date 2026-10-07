@@ -19,9 +19,10 @@ export function uuidParam(c, name = 'id') { const v = c.req.param(name); if (!is
 /** Limites de taxa (API.md §2): por usuário no valor do contrato; por IP em RATE_IP_MULTIPLIER× (padrão 25×: um escritório inteiro atrás do mesmo
     NAT — 50 pessoas salvando a cada 3–5 s — não se bloqueia; o teto por IP continua existindo contra abuso em massa). Os dois baldes são
     consultados em UMA ida ao banco (A1/A5 do teste de carga). */
-export const IP_MULTIPLIER = Math.max(5, Number(process.env.RATE_IP_MULTIPLIER) || 25);
+export const IP_MULTIPLIER = 25;   /* padrão; o valor em vigor vem de config.rateIpMultiplier (RATE_IP_MULTIPLIER validada em config.js: inteiro 5–1000) */
 export async function rate(c, user, bucket, windowS, max) {
-  await limitMany(c, [[`${bucket}:u`, user.id, windowS, max], [`${bucket}:ip`, c.get('ip') || 'sem-ip', windowS, max * IP_MULTIPLIER]]);
+  const deps = c.get('deps'); const mult = (deps && deps.config && deps.config.rateIpMultiplier) || IP_MULTIPLIER;
+  await limitMany(c, [[`${bucket}:u`, user.id, windowS, max], [`${bucket}:ip`, c.get('ip') || 'sem-ip', windowS, max * mult]]);
 }
 export const RATES = Object.freeze({ write: [60, 120], upload: [60, 60], comment: [60, 30], read: [60, 600], asset_read: [60, 600] });
 

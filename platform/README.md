@@ -35,7 +35,8 @@ Tudo o que é de produção (Supabase, Vercel, domínio, e-mail) está em [`docs
 ## Comandos
 
 ```bash
-npm test                 # unit + banco + API + segurança (Postgres local)
+npm test                 # unit + banco + API (Postgres local)
+npm run test:security    # suíte ofensiva, CSRF, cabeçalhos, sessões e limites
 npm run test:e2e         # ponta a ponta com a pilha real (Playwright)
 npm run test:load        # 50 usuários simultâneos
 npm run test:parity      # prova de paridade original × editor em nuvem (≈ 1 h); depois: npm run test:parity:evidence

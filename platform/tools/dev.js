@@ -56,7 +56,7 @@ const env = {
   ...process.env, APP_ENV: 'local', APP_ORIGIN: ORIGIN, PORT: String(PORT), DATABASE_URL: dbUrl('app_api', secrets.apiPw), DATABASE_SSL: 'disable',
   SUPABASE_URL: fake.url, SUPABASE_ANON_KEY: fake.anonKey || 'fake-anon-key-0000000000', SUPABASE_SERVICE_ROLE_KEY: fake.serviceKey || 'fake-service-role-key-000000',
   SUPABASE_JWKS_URL: fake.url + '/auth/v1/.well-known/jwks.json', STORAGE_DRIVER: 'local', STORAGE_LOCAL_DIR: path.join(DATA, 'objects'), CSRF_SECRET: secrets.csrf,
-  PUBLIC_DIR: publicDir, LOG_LEVEL: process.env.LOG_LEVEL || 'info', ALLOW_SERVICE_KEY_IN_API: '1', GOTRUE_FAKE: '1', TRUST_PROXY: '0',
+  PUBLIC_DIR: publicDir, LOG_LEVEL: process.env.LOG_LEVEL || 'info', GOTRUE_FAKE: '1', TRUST_PROXY: '0',
 };
 delete env.DATABASE_ADMIN_URL; delete env.DATABASE_OPS_URL;
 const { start } = await import('../src/server.js');

@@ -1,6 +1,6 @@
 # Evidências de teste — plataforma online do Canteiro
 
-Tudo abaixo foi **executado nesta máquina** (Linux, 4 CPUs, 16 GB, Postgres 16 local, Chromium via Playwright, sem rede para fornecedores) em 2026-10-06.
+Tudo abaixo foi **executado nesta máquina** (Linux, 4 CPUs, 16 GB, Postgres 16 local, Chromium via Playwright, sem rede para fornecedores) em 2026-10-06 e 2026-10-07; cada seção diz a data e o log de origem.
 O que depende de contas externas (Supabase, Vercel, GitHub Actions, domínio, e-mail) **não foi executado** e está marcado como tal em [`CONFIGURACAO.md`](CONFIGURACAO.md).
 
 ## 1. Preservação do editor original

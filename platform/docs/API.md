@@ -103,7 +103,7 @@ Tipos aceitos (conferidos por **magic bytes**, nunca pelo nome/Content-Type do c
 |---|---|---|
 | `POST /api/assets/check` | `{shas:[hex64…≤200]}` | `{missing:[hex64…]}` — o que ainda precisa enviar para o usuário poder referenciar (já inclui prova de posse quando o servidor já tem o arquivo e o usuário o reenviar via `PUT`). |
 | `PUT /api/assets/:sha256` | corpo binário; `Content-Type` do arquivo; `X-Asset-Kind: image\|thumb\|attachment` | 201/200 `{sha256,size,mime,width?,height?,deduplicated:boolean}`. O servidor recalcula o SHA-256 e compara com `:sha256` (400 se diferente), valida o tipo, grava (idempotente) e registra a posse do usuário. Corpo ≤ 4 MB (limite das Functions da Vercel); acima disso use o fluxo direto abaixo. |
-| `POST /api/assets/uploads` | `{sha256,size,mime,kind}` | `{mode:'direct', url, method:'PUT', headers, expiresAt}` (URL assinada, 5 min, que escreve na **área de preparo da própria pessoa** `up/<usuário>/<sha>` — nunca na chave canônica) **ou** `{mode:'api'}` quando o driver não suporta (local). Registra o arquivo como `pending`; **não** concede posse. |
+| `POST /api/assets/uploads` | `{sha256,size,mime,kind}` | `{mode:'direct', url, method:'PUT', headers, expiresAt}` (URL assinada, 5 min, que escreve na **área de preparo da própria pessoa** `up/<usuário>/<sha>` — nunca na chave canônica) **ou** `{mode:'api'}` quando o driver não suporta (local). Registra o arquivo como `pending`; **não** concede posse. Hoje os clientes do produto não usam este caminho: a CSP não lista o host do bucket em `connect-src`, e o editor recomprime imagens para caber no `PUT` pela API (ver `editor-em-nuvem.md` §7.4). |
 | `POST /api/assets/:sha256/finalize` | — | Lê o que a pessoa enviou à sua área de preparo, confere o SHA-256 e o tipo pelos bytes, **só então** concede a posse, promove o objeto para a chave canônica (nada é regravado se já existir) e marca `ready`. 201 igual ao `PUT` (200 se já estava pronto). 404 se não há registro visível nem bytes enviados; 409 se os bytes ainda não chegaram; 422/415 se não conferem (preparo apagado). |
 | `GET /api/assets/:sha256` | — | Bytes (≤ 8 MB: transmitidos) ou `302` para URL assinada (5 min). Cabeçalhos: `Content-Type` do banco, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, max-age=31536000, immutable`, `Content-Disposition: inline` só para imagens (demais `attachment`). 404 se o usuário não puder ver. |
 
@@ -155,14 +155,19 @@ Auditoria (`app.audit`): `auth.login`, `auth.login_failed`, `auth.logout`, `auth
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` | driver s3 (Supabase Storage S3, R2, S3, MinIO) |
 | `CSRF_SECRET` | segredo ≥ 32 bytes (HMAC de tokens auxiliares) |
 | `INVITE_ALLOWED_DOMAINS` | lista opcional (ex.: `alvarezandmarsal.com`) |
-| `LOG_LEVEL`, `SENTRY_DSN` | observabilidade |
+| `LOG_LEVEL`, `SENTRY_DSN`, `RELEASE` | observabilidade (nível de log, Sentry opcional, identificador da versão publicada) |
+| `RATE_IP_MULTIPLIER` | limite por IP nas rotas autenticadas = limite por usuário × fator (inteiro 5–1000; padrão 25) |
+| `TRUST_PROXY` | `1` (padrão) atrás da Vercel/Cloudflare: IP do cliente vem de `x-forwarded-for`/`x-real-ip`; `0` em execução direta |
+| `DB_POOL_MAX` | conexões por processo (padrão 5; 2–3 na Vercel, 10 por processo em contêiner) |
+| `PORT`, `PUBLIC_DIR` | porta local/contêiner (ignorada na Vercel) e pasta do site gerado (`dist/public`) |
+| `GOTRUE_FAKE` | só `local`/`test`: aponta o login para `tools/fake-gotrue.js`; proibido em staging/produção |
 | `DATABASE_ADMIN_URL`, `DATABASE_OPS_URL`, `APP_API_DB_PASSWORD`, `APP_OPS_DB_PASSWORD` | **somente ferramentas/CI** (migração, backup, GC) — não configurar na API em produção |
 
-A API **falha ao iniciar** em produção se faltar variável obrigatória, se `APP_ORIGIN` não for `https://`, se `CSRF_SECRET` for curto, ou se `DATABASE_ADMIN_URL`/`DATABASE_OPS_URL`/`SUPABASE_SERVICE_ROLE_KEY` estiverem presentes no mesmo processo que serve o navegador **sem** a flag `ALLOW_SERVICE_KEY_IN_API=1` (a chave de serviço é necessária para convidar; as de banco de operação, nunca).
+A API **falha ao iniciar** em staging/produção se faltar variável obrigatória (`DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CSRF_SECRET`), se `APP_ORIGIN` não for `https://`, se `CSRF_SECRET` for curto, se `GOTRUE_FAKE` estiver ligado, se `DATABASE_SSL=disable`, ou se `DATABASE_ADMIN_URL`/`DATABASE_OPS_URL` estiverem presentes no ambiente da API (são só de ferramentas/CI). A chave de serviço do Supabase é **necessária** no processo da API (convites e administração) e **nunca** chega ao navegador — o CI confere que o site publicado não contém nenhum segredo.
 
 ## 10. Extensão de nuvem do editor (cliente) — resumo do contrato
 
-Detalhes em `docs/ARQUITETURA.md`. O build "cloud" (`studio-cloud/`) acrescenta ao editor, sem alterar `studio/`:
+Detalhes em `docs/editor-em-nuvem.md`. O build "cloud" (`studio-cloud/`) acrescenta ao editor, sem alterar `studio/`:
 carregamento por `/editor/<id>` → `GET /api/presentations/:id` → hidratar `asset:` em `data:` → `AMStudio.loadDeck`; autosave com debounce (3 s) → externalizar imagens (`POST /api/assets/check` + `PUT /api/assets/:sha`) → `PUT …/content` com `baseRev`;
 indicador de estado (Salvando… / Salvo às HH:MM / Sem conexão — alterações guardadas neste computador / Conflito); fila local em IndexedDB para falhas de rede, com recuperação; tela de conflito; histórico de versões; "Criar cópia"; modo **visualizar** (apresentação direta, sem edição) para apresentações de outras pessoas;
 interações (formulários) enviadas à API quando há `window.AM_CLOUD`.

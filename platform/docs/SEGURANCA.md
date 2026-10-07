@@ -9,8 +9,7 @@ Este documento é a saída da **revisão de segurança ofensiva (caixa-branca)**
   Execução desta revisão (2026-10-06, antes das correções): **50 testes, 45 passam, 5 falham**. Cada falha é um **achado** (o teste codifica a defesa desejada; falha vermelha = defeito, não se ajusta o teste). **Depois das correções do mesmo dia: 50/50** (faz parte de `npm run test:security`).
 - `tests/security/offensive-browser.cjs` — ataques pelo navegador (Playwright/Chromium) contra a **pilha real** em `http://localhost:4403`.
   Execução desta revisão: **62 verificações, 62 passam, 0 falham, 6 violações de CSP** (todas das injeções de teste, nenhuma espontânea).
-- Cadeia de suprimento: `npm audit --omit=dev` → **1 alta** (sharp/libvips) na revisão; **0 vulnerabilidades** depois de fixar `sharp` em 0.35.5 (2026-10-07); build reprodutível (dois builds → mesmo sha256 do editor
-  `08a412bc…`); vendor pdf.js do build **byte-idêntico** ao de `studio/vendor` (`pdf.min.mjs` `27fc2a05…`, `pdf.worker.min.mjs` `1baa1844…`).
+- Cadeia de suprimento: `npm audit --omit=dev` → **1 alta** (sharp/libvips) na revisão; **0 vulnerabilidades** depois de fixar `sharp` em 0.35.5 (2026-10-07); build reprodutível (dois builds → mesmo sha256 do editor; o sha vigente está em `EVIDENCIAS.md` §1); vendor pdf.js do build **byte-idêntico** ao de `studio/vendor` (`pdf.min.mjs` `27fc2a05…`, `pdf.worker.min.mjs` `1baa1844…`).
 
 Como reproduzir tudo:
 
@@ -154,7 +153,7 @@ Classificação por risco residual (considerando as mitigações existentes). Ca
 - **Cadeia de suprimento**: `npm audit`, integridade do vendor pdf.js, build reprodutível.
 
 ### Observação de documentação (não é vulnerabilidade)
-`docs/API.md §9` menciona a flag `ALLOW_SERVICE_KEY_IN_API=1` para permitir a chave de serviço no processo da API; o código (`src/config.js`)
+`docs/API.md §9` mencionava a flag `ALLOW_SERVICE_KEY_IN_API=1` (removida em 2026-10-07: nunca era lida pelo código) para permitir a chave de serviço no processo da API; o código (`src/config.js`)
 atualmente **exige** `SUPABASE_SERVICE_ROLE_KEY` em produção e **não lê** essa flag (ela só é usada por `tools/dev.js`). É *drift* de documentação —
 alinhar o texto do contrato ao comportamento do código.
 

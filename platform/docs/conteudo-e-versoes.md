@@ -83,8 +83,7 @@ O conteúdo da versão passa **de novo** pelo lint (as regras podem ter ficado m
   `min(padrão do tipo, uploads.max_bytes)`. O SHA-256 é recalculado e comparado (400 se diferente).
 * **Deduplicação**: se o objeto já existe com o mesmo tamanho, **não é regravado**; quem reenvia os mesmos bytes só ganha a **posse** (a prova de que os possui) e passa a poder referenciar/ler o arquivo.
   Se alguém pré-registrar (`pending`) um hash com metadados falsos, quando os bytes reais chegam tipo/tamanho/`kind` verdadeiros **substituem** os declarados.
-* **Direto** (`POST /uploads` + `/finalize`): driver `local` → `{mode:'api'}`; no S3 a URL assinada exige o checksum SHA-256 (o provedor recusa bytes diferentes). `finalize` relê o objeto, confere hash e tipo; se não
-  confere, **apaga o lixo** (o que está numa chave de hash e não tem esse hash é inválido por definição), descarta o registro pendente e audita `asset.reject`.
+* **Direto** (`POST /uploads` + `/finalize`): driver `local` → `{mode:'api'}`; no S3 a URL assinada escreve na **área de preparo da própria pessoa** (`up/<usuário>/<sha>`) e exige o checksum SHA-256. `/uploads` registra só o `pending`, sem posse. `finalize` lê o preparo da própria pessoa, confere hash e tipo pelos bytes, só então concede a posse, promove para a chave canônica (cópia condicional ao ETag; verificação dos bytes depois da cópia) e marca `ready`; se não confere, **apaga o preparo**, descarta o registro pendente (só se foi ela que o criou) e audita `asset.reject`. A posse do registro passa a quem provou os bytes (migração 0006).
 * **Leitura** (`GET`): só quem pode ver (policy) — o 404 é idêntico ao de arquivo inexistente. Cabeçalhos: `Content-Type` do banco, `nosniff`, `CSP: default-src 'none'; sandbox`, `CORP: same-origin`,
   `Cache-Control: private, max-age=31536000, immutable`, `Content-Disposition: inline` só para imagens, `ETag: "<sha>"` (+ `If-None-Match` → 304). > 8 MB com URL assinada → 302 (`no-store`, a URL expira em 5 min).
 
@@ -102,7 +101,7 @@ Excel pt-BR). Para `form_response` o cabeçalho é **dinâmico**: `Data/hora (UT
 
 ## 6. Limites de taxa e auditoria
 
-`limit()` por **usuário** com os valores do contrato (escrita 120/min, upload 60/min, comentários 30/min, leitura 600/min) e por **IP em 5×** (vários usuários atrás do mesmo NAT do escritório não se bloqueiam;
+`limit()` por **usuário** com os valores do contrato (escrita 120/min, upload 60/min, comentários 30/min, leitura 600/min) e por **IP em `RATE_IP_MULTIPLIER`×** (padrão 25, mínimo 5; os dois baldes em uma só ida ao banco, em cadeia — `limitMany`; vários usuários atrás do mesmo NAT do escritório não se bloqueiam;
 um atacante com várias contas num só IP continua limitado). Leitura de arquivos tem balde próprio (`asset_read`, 600/min) para as imagens de um deck não consumirem o orçamento da API. Janela fixa por minuto
 (`app.hit_rate`). Estourou → 429 + `Retry-After` + auditoria `security.rate_limited`.
 

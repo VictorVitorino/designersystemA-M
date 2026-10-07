@@ -18,7 +18,7 @@ Um editor de apresentações completo em **um único HTML** (sem servidor): edit
 | SmartArt / modelos de consultoria | 14 leiautes (listas, ciclo, funil, fluxograma, mapa mental, PDCA, Gantt, AS-IS/TO-BE, Porter, BCG, roadmap, árvore de problemas, cadeia de valor, BMC, OKR, BSC…) |
 | Layouts de slide | 18 (13 no seletor "Novo slide" + 5 institucionais A&M ocultos) |
 | Blocos prontos | 5 sequências (institucional A&M 5, proposta comercial 6, painel executivo 3, roadmap 3, apresentação executiva 5) e 6 projetos prontos na capa |
-| Animações | 18 de entrada, 11 contínuas, 11 de passagem do mouse, 8 transições de slide |
+| Animações | 17 de entrada, 10 contínuas, 10 ao passar o mouse, 7 transições de slide (cada seletor tem ainda a opção “nenhuma”) — com componentes, ícones e modelos, 196 caixas no Acervo de efeitos |
 | Menus | Arquivo, Editar, Inserir, Slide, Organizar, Apresentar, Ajuda; barra de ferramentas com 17 botões; atalhos documentados em `studio/docs/KEYMAP.md` (118 linhas) |
 | Importar | `.pptx` e `.pdf` → slides editáveis; reconhecimento dos slides institucionais A&M |
 | Exportar | HTML autônomo (apresentação com player), PDF, PowerPoint editável |

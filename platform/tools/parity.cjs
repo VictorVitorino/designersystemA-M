@@ -17,9 +17,11 @@
       prontos da capa, os 5 blocos prontos, os 14 SmartArt, formas, textos, linhas e marcas.
    3. Serializa o deck (JSON) e carrega o MESMO JSON em A e em B (ids iguais → comparação exata).
    4. Para cada slide compara: (a) DOM renderizado (outerHTML de RT.renderSlide); (b) raster 1280×720 (AMExport.rasterSlide, o
-      mesmo caminho do PDF) pixel a pixel; (c) quadros do player em t = 0, 150, 400, 800, 1500 e 3000 ms; (d) nas transições,
-      quadros a 80, 250 e 500 ms após avançar; (e) HTML exportado (sha256), CSS/JS do runtime embutido (sha256) e PPTX (entradas do zip,
-      exceto docProps/core.xml que leva data).
+      mesmo caminho do PDF) pixel a pixel; (c) quadros do player em t = 0, 150, 400, 800, 1500 e 3000 ms + inventário das animações
+      (alvo, tipo, nome, duração, atraso, iterações, easing, fill); (d) nas transições, quadros a 80, 250 e 500 ms após avançar, cada
+      instante numa sequência nova e com as lâminas em camada própria; (e) quadros com o mouse sobre os elementos com efeito de hover
+      (.am-hov) a 150 e 400 ms; (f) HTML exportado (sha256), CSS/JS do runtime embutido (sha256) e PPTX nos modos editável e imagem
+      (entradas do zip, exceto docProps/core.xml que leva data).
    5. Escreve <out>/relatorio.json, <out>/relatorio.md e, para cada divergência, <out>/diff/<slide>-<camada>-{a,b,diff}.png.
    Determinismo: o relógio da página é pausado no MESMO instante absoluto em A e B antes de cada captura (DOM, quadros, transição) — ids
    derivados de Date.now() e a fase de rAF/performance.now ficam iguais; toda animação é fixada em t e verificada (pausada, em t) antes da foto.
@@ -41,6 +43,7 @@ const FONTS = process.env.AM_FONTS_DIR || path.join(__dirname, '..', '..', 'font
 const ACAO = { 'Access-Control-Allow-Origin': '*' };
 const FRAME_T = QUICK ? [0, 400, 1500] : [0, 150, 400, 800, 1500, 3000];
 const TR_T = QUICK ? [250] : [80, 250, 500];
+const HOVER_T = QUICK ? [250] : [150, 400];   /* quadros com o ponteiro "sobre" os elementos que têm efeito de mouse (classe .am-hov do runtime) */
 const FIXED_TIME = Date.UTC(2026, 9, 6, 12, 0, 0);
 const RESUME = !!args.resume; if (RESUME && !args.deck) args.deck = OUT;   /* --resume: continua uma execução interrompida (mesmo deck de prova, mesmos builds), a partir de <out>/progress.jsonl */
 if (!RESUME) fs.rmSync(path.join(OUT, 'diff'), { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, 'diff'), { recursive: true });
@@ -49,6 +52,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const log = (...m) => console.error(new Date().toISOString().slice(11, 19), ...m);
 const TRACE = process.env.AM_PARITY_TRACE === '1'; const trace = (...m) => { if (TRACE) log('   ·', ...m); };
+const HARNESS_SHA = sha(fs.readFileSync(__filename)).slice(0, 16);   /* identidade da medição: registros de retomada só valem com o mesmo harness, A, B e parâmetros */
+let clockFailures = 0;
 /* cão de guarda: um stall do navegador (sem progresso por 5 min) encerra com código 3; quem lançou retoma com --resume do último checkpoint */
 let lastProgress = Date.now(); const WATCHDOG_MS = Number(process.env.AM_PARITY_WATCHDOG_MS || 300000);
 setInterval(() => { if (Date.now() - lastProgress > WATCHDOG_MS) { log(`WATCHDOG: sem progresso há ${Math.round(WATCHDOG_MS / 60000)} min — saindo com código 3 para retomada (--resume)`); process.exit(3); } }, 10000).unref();
@@ -206,7 +211,7 @@ const ANCHOR0 = FIXED_TIME + 2 * 3600 * 1000, SLOT = 600000;
 /* instante ABSOLUTO do relógio falso por slide e tentativa (fase idêntica de rAF/performance.now/Date.now em A e B): k = 0 DOM/raster, 1 quadros do player, 3 transição.
    Faixas de 10 min por tentativa: o relógio corre em tempo real entre pausas e pauseAt não volta no tempo — a folga absorve máquinas lentas. */
 const anchorFor = (i, k, attempt = 1) => ANCHOR0 + (i * 2 + (attempt - 1)) * SLOT + k * 120000;
-async function pauseClockAt(p, t) { try { await p.clock.pauseAt(t); return true; } catch (e) { log('AVISO relógio: ' + String(e.message).slice(0, 90)); return false; } }
+async function pauseClockAt(p, t) { try { await p.clock.pauseAt(t); return true; } catch (e) { clockFailures++; log('AVISO relógio: ' + String(e.message).slice(0, 90)); return false; } }
 /* fixa TODAS as animações em t e só devolve quando duas leituras seguidas mostram: mesma contagem, nenhuma em execução, todas em t */
 async function pinAll(p, t) {
   let last = null;
@@ -223,13 +228,13 @@ async function pauseAll(p, t) { return p.evaluate((t) => { document.getAnimation
    saírem byte-idênticas — só então o quadro é o estado fixado, e não um estado intermediário do rasterizador. */
 const REPAINT = process.env.AM_PARITY_REPAINT === '1';
 const PROMOTE = process.env.AM_PARITY_PROMOTE !== '0';   /* promoção de camada das lâminas após fixar a transição (padrão ligado; AM_PARITY_PROMOTE=0 desliga) */   /* opcional: invalidar a pintura antes da foto (não altera o resultado nos casos medidos) */
-async function stableShot(el, opts) {
+async function stableShot(el, opts, need = 2) {
   /* invalida a pintura das camadas do palco antes da foto: os blocos de raster são refeitos TODOS na translação atual (sem isso, um bloco
      rasterizado num instante anterior da animação de transform fica com a borda meio pixel deslocada em relação aos demais) */
   if (REPAINT) { try { await el.evaluate((v) => { v.ownerDocument.querySelectorAll('#presenter .amp-slide, #presenter .amp-view, #presenter .amp-deck').forEach((n) => { n.style.outline = '0px solid transparent'; void n.offsetWidth; }); }); await sleep(20); await el.evaluate((v) => { v.ownerDocument.querySelectorAll('#presenter .amp-slide, #presenter .amp-view, #presenter .amp-deck').forEach((n) => { n.style.outline = ''; void n.offsetWidth; }); }); await sleep(20); } catch (e) { } }
-  let prev = await el.screenshot(opts);
-  for (let k = 0; k < 5; k++) { await sleep(40); const cur = await el.screenshot(opts); if (cur.equals(prev)) return cur; prev = cur; }
-  return prev;
+  let prev = await el.screenshot(opts), run = 1;
+  for (let k = 0; k < 7; k++) { await sleep(40); const cur = await el.screenshot(opts); if (cur.equals(prev)) { run++; if (run >= need) return { png: cur, stable: true, shots: k + 2 }; } else run = 1; prev = cur; }
+  return { png: prev, stable: false, shots: 8 };   /* nunca estabilizou em 6 fotos: registrado na linha do slide (unstableShots) */
 }
 async function framesOf(p, i, times, attempt = 1) {
   const out = [];
@@ -247,13 +252,24 @@ async function framesOf(p, i, times, attempt = 1) {
     trace('frames', i, 't=' + t, 'pauseAll'); await pauseAll(p, t);
     trace('frames', i, 't=' + t, 'runFor', t - prev); if (t > prev) await p.clock.runFor(t - prev); prev = t;
     trace('frames', i, 't=' + t, 'settle+pin'); await settleAnims(p); await pinAll(p, t); trace('frames', i, 't=' + t, 'foto');
+    if (t === times[0]) {
+      /* inventário das animações do slide com tudo fixado em t=0: só as que estão DENTRO do palco (as da interface do editor ficam de fora) e só
+         CSSAnimation/Animation (CSSTransition reage a estados e ao tempo real: aparece e some conforme o instante da leitura). Compara a cronologia
+         declarada — alvo, pseudo-elemento, nome, duração, atraso, iterações, easing, fill, direção — não só os pixels. */
+      out.inventory = await p.evaluate(() => {
+        const root = document.querySelector('#presenter .amp-view'); if (!root) return '[]';
+        const pathOf = (el) => { const parts = []; let n = el; while (n && n !== root && n.parentElement) { parts.unshift(n.tagName.toLowerCase() + '[' + Array.from(n.parentElement.children).indexOf(n) + ']'); n = n.parentElement; } return n === root ? parts.join('/') : null; };
+        const rows = []; for (const a of document.getAnimations()) { if (a instanceof CSSTransition) continue; const el = a.effect && a.effect.target; const pth = el ? pathOf(el) : null; if (pth == null) continue; const t = a.effect.getTiming ? a.effect.getTiming() : {}; rows.push(JSON.stringify([pth, a.effect.pseudoElement || '', a.constructor.name, a.animationName || '', t.duration, t.delay, t.iterations, t.easing, t.fill, t.direction])); }
+        return JSON.stringify(rows.sort());
+      });
+    }
     const el = await p.$('#presenter .amp-view'); const png = await el.screenshot({ type: 'png', animations: 'allow', caret: 'hide' });
     const bar = await p.$('#presenter .amp-bar'); const barPng = bar ? await bar.screenshot({ type: 'png', animations: 'allow', caret: 'hide' }) : null;
     out.push({ t, png, barPng });
   }
   trace('frames', i, 'escape'); await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
   await p.evaluate(() => { const pr = document.getElementById('presenter'); if (pr && pr.classList.contains('open')) { pr.classList.remove('open'); } });
-  trace('frames', i, 'fim'); return out;
+  trace('frames', i, 'fim'); if (out.inventory == null) out.inventory = '[]'; return out;
 }
 async function trFramesOf(p, i, times, attempt = 1) {
   /* Cada instante t é medido numa SEQUÊNCIA NOVA (reabrir o player, avançar, fixar em t, fotografar). Medir t = 80, 250 e 500 ms na mesma
@@ -275,12 +291,35 @@ async function trFramesOf(p, i, times, attempt = 1) {
     /* Depois de fixar a transição em t, as lâminas são promovidas a camada própria (will-change): o compositor refaz TODOS os blocos de raster no estado
        fixado, em vez de reaproveitar blocos rasterizados em instantes anteriores da animação (que deixavam uma costura de 1 px na borda da lâmina em
        movimento, diferente entre dois documentos com histórico de raster diferente). Medido: com isto a transição "Deslizar" a 250 ms sai idêntica. */
-    if (PROMOTE) { await p.evaluate(() => document.querySelectorAll('#presenter .amp-slide').forEach((q) => { q.style.willChange = 'transform, opacity'; void q.offsetWidth; })); await sleep(80); }
-    const el = await p.$('#presenter .amp-view'); out.push({ t, png: await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' }) });
+    if (PROMOTE) { await p.evaluate(() => document.querySelectorAll('#presenter .amp-slide').forEach((q) => { q.style.willChange = 'transform, opacity'; void q.offsetWidth; })); await sleep(200); }
+    const el = await p.$('#presenter .amp-view'); const shot = await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' }, 3); out.push({ t, png: shot.png, stable: shot.stable, shots: shot.shots });
     if (PROMOTE) await p.evaluate(() => document.querySelectorAll('#presenter .amp-slide').forEach((q) => { q.style.willChange = ''; }));
     await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
     await p.evaluate(() => { const pr = document.getElementById('presenter'); if (pr && pr.classList.contains('open')) { pr.classList.remove('open'); } });
   }
+  return out;
+}
+/* Quadros com o MOUSE sobre os elementos: o runtime liga os efeitos "Ao passar o mouse" em `[data-hover]:is(:hover, .am-hov)`; a classe .am-hov é a
+   via programática equivalente ao ponteiro. Depois que as entradas terminaram (3,5 s), todas as animações existentes são concluídas, a classe é
+   aplicada a todos os elementos com data-hover de uma vez e SÓ as animações novas (as de hover) são fixadas em t. */
+async function hoverFramesOf(p, i, times, attempt = 1) {
+  const out = [];
+  await pauseClockAt(p, anchorFor(i, 4, attempt));
+  await p.evaluate((i) => { window.__amSeed(9000 + i); AMStudio.present(i, true); }, i);
+  await p.clock.runFor(50);
+  await p.waitForSelector('#presenter.open', { timeout: 5000 }).catch(() => {});
+  await p.clock.runFor(3500); await settleAnims(p);
+  await p.evaluate(() => { document.getAnimations().forEach((a) => { try { a.finish(); } catch (e) { } }); window.__amBefore = new Set(document.getAnimations()); document.querySelectorAll('#presenter [data-hover]').forEach((el) => el.classList.add('am-hov')); void document.body.offsetHeight; });
+  let prev = 0;
+  for (const t of times) {
+    if (t > prev) await p.clock.runFor(t - prev); prev = t;
+    await settleAnims(p);
+    for (let k = 0; k < 40; k++) { const left = await p.evaluate((t) => { const as = document.getAnimations().filter((a) => !window.__amBefore.has(a)); as.forEach((a) => { try { a.pause(); a.currentTime = t; } catch (e) { } }); return as.filter((a) => a.playState === 'running' || a.currentTime !== t).length; }, t); if (!left) break; await sleep(25); }
+    const el = await p.$('#presenter .amp-view'); const shot = await stableShot(el, { type: 'png', animations: 'allow', caret: 'hide' }); out.push({ t, png: shot.png, stable: shot.stable, shots: shot.shots });
+  }
+  await p.evaluate(() => { document.querySelectorAll('#presenter .am-hov').forEach((el) => el.classList.remove('am-hov')); delete window.__amBefore; });
+  await p.keyboard.press('Escape'); await p.clock.runFor(1500); await p.clock.resume(); await sleep(80);
+  await p.evaluate(() => { const pr = document.getElementById('presenter'); if (pr && pr.classList.contains('open')) { pr.classList.remove('open'); } });
   return out;
 }
 async function pixelDiff(aBuf, bBuf) {
@@ -347,47 +386,70 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
      bordas de clip-path — íris 43 px/máx 49, diagonal 174 px/máx 11). Nada abaixo deste envelope pode ser atribuído ao candidato;
      mesmo assim cada caso é listado no relatório e tem a imagem de diferença gravada. Raster e DOM continuam exigindo igualdade exata. */
   const NOISE = { px: 300, pct: 0.05, maxCh: 64 }; report.noise = []; report.noiseEnvelope = NOISE; report.unstable = [];
-  const normIds = (h) => h.replace(/\b(gg|gr|gc|cl|mk|am|fx|sw|ic)[0-9a-z]{1,6}\b/g, (m, pfx) => pfx + '#');
+  /* ids internos de contador (prefixo + dígitos) só dentro de id="…", url(#…) e href="#…": nunca palavras comuns do DOM */
+  const normIds = (h) => h.replace(/(id="|url\(#|href="#)(gg|gr|gc|cl|mk|am|fx|sw|ic)\d{1,6}(?=["\)])/g, '$1$2#');
   const ONLY = args.only ? new Set(String(args.only).split(',').map((x) => Number(x.trim())).filter((x) => Number.isInteger(x))) : null;
   const wr = (name, buf) => fs.writeFileSync(path.join(OUT, 'diff', name), buf);
+  const inEnvelope = (d) => d.px <= NOISE.px && d.pct <= NOISE.pct && d.maxCh <= NOISE.maxCh;
   async function compareSlide(i, tag, attempt) {
-    const row = { i, it: tag.it, kind: tag.kind, name: tag.name }; const mism = [], noise = [], files = []; const n = { dom: 0, raster: 0, frames: 0, framesTotal: 0, tr: 0, trTotal: 0, idOnly: 0, barChecks: 0, barAntialias: 0, framesNoise: 0, trNoise: 0 };
+    const row = { i, it: tag.it, kind: tag.kind, name: tag.name }; const mism = [], noise = [], files = []; const cf0 = clockFailures;
+    const n = { dom: 0, raster: 0, frames: 0, framesTotal: 0, tr: 0, trTotal: 0, hover: 0, hoverTotal: 0, anims: 0, animsTotal: 0, idOnly: 0, barChecks: 0, barAntialias: 0, framesNoise: 0, trNoise: 0, hoverNoise: 0, unstableShots: 0, clockWarnings: 0 };
     /* relógios de A e B no MESMO instante antes do DOM: ids gerados com Date.now() (quadros de post-its etc.) saem iguais */
     await pauseClockAt(A.p, anchorFor(i, 0, attempt)); await pauseClockAt(B.p, anchorFor(i, 0, attempt));
     trace('slide', i, 'dom'); const [dA, dB] = await Promise.all([domOf(A.p, i), domOf(B.p, i)]); row.dom = dA === dB;
-    if (!row.dom && normIds(dA) === normIds(dB)) { row.dom = true; row.domIdsOnly = true; n.idOnly++; }
+    if (!row.dom && normIds(dA) === normIds(dB)) { row.dom = true; row.domIdsOnly = true; n.idOnly++; files.push([`${i}-dom-ids-a.html`, dA], [`${i}-dom-ids-b.html`, dB]); }
     if (row.dom) n.dom++; else { mism.push({ layer: 'dom', i, it: tag.it }); files.push([`${i}-dom-a.html`, dA], [`${i}-dom-b.html`, dB]); }
     for (const X of [A, B]) { try { await X.p.clock.resume(); } catch (e) { } }   /* o raster (caminho do PDF) usa temporizadores reais */
     trace('slide', i, 'raster'); const [rA, rB] = await Promise.all([rasterOf(A.p, i), rasterOf(B.p, i)]); trace('slide', i, 'raster ok');
     if (rA === rB) { row.raster = true; n.raster++; } else { const bufA = b64png(rA), bufB = b64png(rB); const d = await pixelDiff(bufA, bufB); row.raster = d.same; row.rasterPct = d.pct; if (d.same) n.raster++; else { mism.push({ layer: 'raster', i, it: tag.it, pct: d.pct, px: d.px }); files.push([`${i}-raster-a.png`, bufA], [`${i}-raster-b.png`, bufB]); if (d.diffPng) files.push([`${i}-raster-diff.png`, d.diffPng]); } }
+    const judge = async (layer, k, times, a, b, stem) => {
+      /* compara um par de quadros: igual → conta; dentro do envelope de ruído → listado como ruído (com caixa envolvente e imagem); senão → divergência com as 3 imagens */
+      if (a.stable === false || b.stable === false) { n.unstableShots++; (row.unstableShots = row.unstableShots || []).push(`${layer}@${times[k]}`); }
+      if (a.png.equals(b.png)) return true;
+      const d = await pixelDiff(a.png, b.png); if (d.same) return true;
+      if (inEnvelope(d)) { noise.push({ layer, kind: 'borda', i, it: tag.it, t: times[k], pct: d.pct, px: d.px, maxCh: d.maxCh, bbox: d.bbox }); if (d.diffPng) files.push([`${i}-${stem}${times[k]}-ruido-diff.png`, d.diffPng]); return 'ruido'; }
+      mism.push({ layer, i, it: tag.it, t: times[k], pct: d.pct, px: d.px, maxCh: d.maxCh, bbox: d.bbox }); files.push([`${i}-${stem}${times[k]}-a.png`, a.png], [`${i}-${stem}${times[k]}-b.png`, b.png]); if (d.diffPng) files.push([`${i}-${stem}${times[k]}-diff.png`, d.diffPng]); return false;
+    };
     if (FRAMES) {
       const fA = await framesOf(A.p, i, FRAME_T, attempt), fB = await framesOf(B.p, i, FRAME_T, attempt);
+      n.animsTotal++; if (fA.inventory === fB.inventory) { n.anims++; row.anims = true; } else { row.anims = false; mism.push({ layer: 'anim-inventory', i, it: tag.it }); files.push([`${i}-anims-a.json`, fA.inventory], [`${i}-anims-b.json`, fB.inventory]); }
       row.frames = [];
       for (let k = 0; k < FRAME_T.length; k++) {
         if (fA[k].barPng && fB[k].barPng && !fA[k].barPng.equals(fB[k].barPng)) { const bd = await pixelDiff(fA[k].barPng, fB[k].barPng); n.barChecks++; if (bd.pct > 0.05 || bd.maxCh > 16) { mism.push({ layer: 'player-bar', i, it: tag.it, t: FRAME_T[k], pct: bd.pct, maxCh: bd.maxCh }); if (bd.diffPng) files.push([`${i}-bar${FRAME_T[k]}-diff.png`, bd.diffPng]); } else n.barAntialias++; }
-        n.framesTotal++; if (fA[k].png.equals(fB[k].png)) { n.frames++; row.frames.push(true); continue; }
-        const d = await pixelDiff(fA[k].png, fB[k].png); row.frames.push(d.same ? true : d.pct); if (d.same) { n.frames++; continue; }
-        if (d.px <= NOISE.px && d.pct <= NOISE.pct && d.maxCh <= NOISE.maxCh) { n.framesNoise++; row.frames[row.frames.length - 1] = 'ruido'; noise.push({ layer: 'frame', i, it: tag.it, t: FRAME_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh }); if (d.diffPng) files.push([`${i}-frame${FRAME_T[k]}-ruido-diff.png`, d.diffPng]); }
-        else { mism.push({ layer: 'frame', i, it: tag.it, t: FRAME_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh }); files.push([`${i}-frame${FRAME_T[k]}-a.png`, fA[k].png], [`${i}-frame${FRAME_T[k]}-b.png`, fB[k].png]); if (d.diffPng) files.push([`${i}-frame${FRAME_T[k]}-diff.png`, d.diffPng]); }
+        n.framesTotal++; const v = await judge('frame', k, FRAME_T, fA[k], fB[k], 'frame'); row.frames.push(v === true ? true : v); if (v === true) n.frames++; else if (v === 'ruido') n.framesNoise++;
       }
       if (tag.kind === 'tr' && i > 0) {
         const tA = await trFramesOf(A.p, i, TR_T, attempt), tB = await trFramesOf(B.p, i, TR_T, attempt); row.tr = [];
-        for (let k = 0; k < TR_T.length; k++) { n.trTotal++; if (tA[k].png.equals(tB[k].png)) { n.tr++; row.tr.push(true); continue; } const d = await pixelDiff(tA[k].png, tB[k].png); row.tr.push(d.same ? true : d.pct); if (d.same) { n.tr++; continue; }
-          const seam = d.bbox && d.px <= NOISE.px && (d.bbox.w <= 1 || d.bbox.h <= 1);   /* costura: 1 coluna/linha de pixels meio cobertos na borda da lâmina em movimento (raster por blocos do compositor) */
-          if ((d.px <= NOISE.px && d.pct <= NOISE.pct && d.maxCh <= NOISE.maxCh) || seam) { n.trNoise++; row.tr[row.tr.length - 1] = seam && d.maxCh > NOISE.maxCh ? 'costura' : 'ruido'; noise.push({ layer: 'transition', kind: seam && d.maxCh > NOISE.maxCh ? 'costura' : 'borda', i, it: tag.it, t: TR_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh, bbox: d.bbox }); if (d.diffPng) files.push([`${i}-tr${TR_T[k]}-ruido-diff.png`, d.diffPng]); }
-          else { mism.push({ layer: 'transition', i, it: tag.it, t: TR_T[k], pct: d.pct, px: d.px, maxCh: d.maxCh }); files.push([`${i}-tr${TR_T[k]}-a.png`, tA[k].png], [`${i}-tr${TR_T[k]}-b.png`, tB[k].png]); if (d.diffPng) files.push([`${i}-tr${TR_T[k]}-diff.png`, d.diffPng]); } }
+        for (let k = 0; k < TR_T.length; k++) { n.trTotal++; const v = await judge('transition', k, TR_T, tA[k], tB[k], 'tr'); row.tr.push(v === true ? true : v); if (v === true) n.tr++; else if (v === 'ruido') n.trNoise++; }
+      }
+      if (/data-hover="/.test(dA)) {
+        const hA = await hoverFramesOf(A.p, i, HOVER_T, attempt), hB = await hoverFramesOf(B.p, i, HOVER_T, attempt); row.hover = [];
+        for (let k = 0; k < HOVER_T.length; k++) { n.hoverTotal++; const v = await judge('hover', k, HOVER_T, hA[k], hB[k], 'hover'); row.hover.push(v === true ? true : v); if (v === true) n.hover++; else if (v === 'ruido') n.hoverNoise++; }
       }
     }
+    n.clockWarnings = clockFailures - cf0; if (n.clockWarnings) row.clockWarnings = n.clockWarnings;
     return { row, mism, noise, files, n };
   }
   const idx = [...Array(N).keys()].filter((i) => !ONLY || ONLY.has(i)); report.only = ONLY ? idx : null;
-  const done = new Map();
-  if (RESUME && fs.existsSync(PROG)) { for (const line of fs.readFileSync(PROG, 'utf8').split('\n')) { if (!line.trim()) continue; try { const rec = JSON.parse(line); if (rec.deckSha === sha(deckJson).slice(0, 16)) done.set(rec.i, rec); } catch (e) { } } log('retomando: ' + done.size + ' slides já comparados nesta pasta (progress.jsonl)'); report.resumedFrom = done.size; }
+  const identity = { deckSha: sha(deckJson).slice(0, 16), aSha: report.aSha.slice(0, 16), bSha: report.bSha.slice(0, 16), harnessSha: HARNESS_SHA, frameT: FRAME_T.join(','), trT: TR_T.join(','), hoverT: HOVER_T.join(','), noise: `${NOISE.px}/${NOISE.pct}/${NOISE.maxCh}`, promote: PROMOTE };
+  report.identity = identity; report.frameT = FRAME_T; report.trT = TR_T; report.hoverT = HOVER_T; report.promote = PROMOTE;
+  const sameIdentity = (rec) => rec.identity && Object.keys(identity).every((k) => String(rec.identity[k]) === String(identity[k]));
+  const done = new Map(); let refused = 0;
+  if (RESUME && fs.existsSync(PROG)) {
+    for (const line of fs.readFileSync(PROG, 'utf8').split('\n')) { if (!line.trim()) continue; try { const rec = JSON.parse(line); if (sameIdentity(rec)) done.set(rec.i, rec); else refused++; } catch (e) { } }
+    log(`retomando: ${done.size} slides já comparados nesta pasta com a MESMA identidade (harness ${HARNESS_SHA}, A, B, parâmetros); ${refused} registros de outra medição ignorados`); report.resumedFrom = done.size; report.resumeRefused = refused;
+    /* imagens de slides que serão recalculados (ou de registros recusados) saem da pasta diff/ para diff/descartados/, para a pasta refletir só a medição vigente */
+    const disc = path.join(OUT, 'diff', 'descartados'); let moved = 0;
+    for (const f of fs.readdirSync(path.join(OUT, 'diff'))) { const m = /^(\d+)-/.exec(f); if (!m || done.has(Number(m[1]))) continue; fs.mkdirSync(disc, { recursive: true }); fs.renameSync(path.join(OUT, 'diff', f), path.join(disc, f)); moved++; }
+    if (moved) log(`  ${moved} imagem(ns) de medições substituídas movidas para diff/descartados/`); report.diffDiscarded = moved;
+  }
+  const addN = (m) => { domSame += m.dom; rasterSame += m.raster; framesSame += m.frames; framesTotal += m.framesTotal; trSame += m.tr; trTotal += m.trTotal; hoverSame += m.hover || 0; hoverTotal += m.hoverTotal || 0; animsSame += m.anims || 0; animsTotal += m.animsTotal || 0; idOnly += m.idOnly; barChecks += m.barChecks; barAntialias += m.barAntialias; framesNoise += m.framesNoise; trNoise += m.trNoise; hoverNoise += m.hoverNoise || 0; unstableShots += m.unstableShots || 0; clockWarnings += m.clockWarnings || 0; };
+  let hoverSame = 0, hoverTotal = 0, animsSame = 0, animsTotal = 0, hoverNoise = 0, unstableShots = 0, clockWarnings = 0; const stamps = [];
   for (let k = 0; k < idx.length; k++) {
     const i = idx[k]; const tag = byIndex[i] || { it: 'slide:' + i, kind: 'outro', name: '' };
     if (done.has(i)) {
       const rec = done.get(i); report.mismatches.push(...rec.mism); report.noise.push(...rec.noise); report.slides.push(rec.row); if (rec.unstable) { report.unstable.push(rec.unstable); unstable++; } if (rec.row.retried || rec.row.unstableFirstCapture) retried++;
-      domSame += rec.n.dom; rasterSame += rec.n.raster; framesSame += rec.n.frames; framesTotal += rec.n.framesTotal; trSame += rec.n.tr; trTotal += rec.n.trTotal; idOnly += rec.n.idOnly; barChecks += rec.n.barChecks; barAntialias += rec.n.barAntialias; framesNoise += rec.n.framesNoise; trNoise += rec.n.trNoise;
+      addN(rec.n); if (rec.ts) stamps.push(rec.ts);
       continue;
     }
     let r = await compareSlide(i, tag, 1);
@@ -398,33 +460,41 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
       retried++; log(`  slide ${i + 1} (${tag.it}): ${r.mism.length} divergência(s) na 1ª captura [${r.mism.map((m) => m.layer + (m.t != null ? '@' + m.t : '')).join(', ')}] → recapturando`);
       const first = r; r = await compareSlide(i, tag, 2);
       for (const [name, buf] of first.files) wr(name.replace(/^(\d+)-/, '$1-t1-'), buf);
-      if (!r.mism.length) { unstable++; report.unstable.push({ i, it: tag.it, first: first.mism.map((m) => ({ layer: m.layer, t: m.t, pct: m.pct, px: m.px, maxCh: m.maxCh })) }); r.row.unstableFirstCapture = true; log(`  slide ${i + 1}: recaptura idêntica → captura instável (não atribuível ao candidato)`); }
+      if (!r.mism.length) { unstable++; report.unstable.push({ i, it: tag.it, first: first.mism.map((m) => ({ layer: m.layer, t: m.t, pct: m.pct, px: m.px, maxCh: m.maxCh, bbox: m.bbox })) }); r.row.unstableFirstCapture = true; log(`  slide ${i + 1}: recaptura idêntica → captura instável (não atribuível ao candidato)`); }
       else { r.row.retried = true; log(`  slide ${i + 1}: divergência REPRODUZIDA na recaptura`); }
     }
     for (const [name, buf] of r.files) wr(name, buf);
     report.mismatches.push(...r.mism); report.noise.push(...r.noise); report.slides.push(r.row);
-    lastProgress = Date.now();
-    fs.appendFileSync(PROG, JSON.stringify({ i, deckSha: sha(deckJson).slice(0, 16), row: r.row, mism: r.mism, noise: r.noise, n: r.n, unstable: r.row.unstableFirstCapture ? report.unstable[report.unstable.length - 1] : null }) + '\n');   /* cada slide fica gravado: uma interrupção não perde o trabalho (--resume) */
-    domSame += r.n.dom; rasterSame += r.n.raster; framesSame += r.n.frames; framesTotal += r.n.framesTotal; trSame += r.n.tr; trTotal += r.n.trTotal; idOnly += r.n.idOnly; barChecks += r.n.barChecks; barAntialias += r.n.barAntialias; framesNoise += r.n.framesNoise; trNoise += r.n.trNoise;
-    if (k % 25 === 0 || k === idx.length - 1) log(`slide ${i + 1}/${N}${ONLY ? ' (' + (k + 1) + '/' + idx.length + ')' : ''} · dom ${domSame} · raster ${rasterSame} · quadros ${framesSame}/${framesTotal} · transições ${trSame}/${trTotal} · divergências ${report.mismatches.length} · recapturas ${retried} (instáveis ${unstable})`);
+    lastProgress = Date.now(); const ts = new Date().toISOString(); stamps.push(ts);
+    fs.appendFileSync(PROG, JSON.stringify({ i, ts, identity, deckSha: identity.deckSha, row: r.row, mism: r.mism, noise: r.noise, n: r.n, unstable: r.row.unstableFirstCapture ? report.unstable[report.unstable.length - 1] : null }) + '\n');   /* cada slide fica gravado: uma interrupção não perde o trabalho (--resume) */
+    addN(r.n);
+    if (k % 25 === 0 || k === idx.length - 1) log(`slide ${i + 1}/${N}${ONLY ? ' (' + (k + 1) + '/' + idx.length + ')' : ''} · dom ${domSame} · raster ${rasterSame} · quadros ${framesSame}/${framesTotal} · transições ${trSame}/${trTotal} · hover ${hoverSame}/${hoverTotal} · animações ${animsSame}/${animsTotal} · divergências ${report.mismatches.length} · recapturas ${retried} (instáveis ${unstable})`);
   }
   const NC = idx.length;   /* slides comparados (todos, salvo --only) */
+  /* segmentos de execução (retomadas): lacunas > 10 min entre carimbos separam trechos; duração total = soma dos trechos */
+  const segs = []; for (const t of stamps.map((x) => Date.parse(x)).sort((a, b) => a - b)) { const last = segs[segs.length - 1]; if (last && t - last.toMs <= 600000) { last.toMs = t; last.count++; } else segs.push({ fromMs: t, toMs: t, count: 1 }); }
+  report.segments = segs.map((g) => ({ from: new Date(g.fromMs).toISOString(), to: new Date(g.toMs).toISOString(), slides: g.count, minutes: Math.round((g.toMs - g.fromMs) / 60000) }));
 
   /* 5. exportações: HTML, PPTX */
   const exA = await A.p.evaluate(() => AMStudio.exportHTML()), exB = await B.p.evaluate(() => AMStudio.exportHTML());
   report.exportHtml = { same: exA === exB, shaA: sha(exA).slice(0, 16), shaB: sha(exB).slice(0, 16), bytes: exA.length }; if (!report.exportHtml.same) { report.mismatches.push({ layer: 'export-html' }); fs.writeFileSync(path.join(OUT, 'diff', 'export-a.html'), exA); fs.writeFileSync(path.join(OUT, 'diff', 'export-b.html'), exB); }
-  async function pptx(p) { return p.evaluate(async () => { const b = await AMExport.pptxBuild(AMStudio.deck, { includeHidden: true, mode: 'editable' }); if (!b) return null; const ab = await b.arrayBuffer(); let s = ''; const u = new Uint8Array(ab); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }); }
-  try {
-    const [pA, pB] = [await pptx(A.p), await pptx(B.p)];
-    if (pA && pB) {
-      fs.writeFileSync(path.join(OUT, 'a.pptx'), Buffer.from(pA, 'base64')); fs.writeFileSync(path.join(OUT, 'b.pptx'), Buffer.from(pB, 'base64'));
-      const py = `import zipfile,hashlib,sys,json\nout={}\nfor t in ('a','b'):\n  z=zipfile.ZipFile(sys.argv[1]+'/'+t+'.pptx'); out[t]={n:hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n!='docProps/core.xml'}\nsame=out['a']==out['b']\ndiff=[n for n in set(out['a'])|set(out['b']) if out['a'].get(n)!=out['b'].get(n)]\nprint(json.dumps({'same':same,'entries':len(out['a']),'diff':sorted(diff)[:30]}))`;
-      const r = JSON.parse(execFileSync('python3', ['-I', '-c', py, OUT]).toString()); report.exportPptx = r; if (!r.same) report.mismatches.push({ layer: 'export-pptx', diff: r.diff });
-    } else report.exportPptx = { same: null, note: 'pptxBuild devolveu null em A ou B' };
-  } catch (e) { report.exportPptx = { same: null, error: String(e.message).slice(0, 200) }; }
+  /* PowerPoint nos DOIS modos do editor: 'edit' (formas e textos editáveis — o caminho que mais exercita o conversor) e 'image' (uma imagem por slide) */
+  async function pptx(p, mode) { return p.evaluate(async (mode) => { const b = await AMExport.pptxBuild(AMStudio.deck, { includeHidden: true, mode }); if (!b) return null; const ab = await b.arrayBuffer(); let s = ''; const u = new Uint8Array(ab); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }, mode); }
+  report.exportPptx = {};
+  for (const mode of ['edit', 'image']) {
+    try {
+      const [pA, pB] = [await pptx(A.p, mode), await pptx(B.p, mode)];
+      if (pA && pB) {
+        fs.writeFileSync(path.join(OUT, `a-${mode}.pptx`), Buffer.from(pA, 'base64')); fs.writeFileSync(path.join(OUT, `b-${mode}.pptx`), Buffer.from(pB, 'base64'));
+        const py = `import zipfile,hashlib,sys,json\nout={}\nfor t in ('a','b'):\n  z=zipfile.ZipFile(sys.argv[1]+'/'+t+'-'+sys.argv[2]+'.pptx'); out[t]={n:hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n!='docProps/core.xml'}\nsame=out['a']==out['b']\ndiff=[n for n in set(out['a'])|set(out['b']) if out['a'].get(n)!=out['b'].get(n)]\nprint(json.dumps({'same':same,'entries':len(out['a']),'diff':sorted(diff)[:30]}))`;
+        const r = JSON.parse(execFileSync('python3', ['-I', '-c', py, OUT, mode]).toString()); report.exportPptx[mode] = r; if (!r.same) report.mismatches.push({ layer: 'export-pptx-' + mode, diff: r.diff });
+      } else report.exportPptx[mode] = { same: null, note: 'pptxBuild devolveu null em A ou B' };
+    } catch (e) { report.exportPptx[mode] = { same: null, error: String(e.message).slice(0, 200) }; }
+  }
+  const pptxAllSame = Object.values(report.exportPptx).every((r) => r && r.same === true);
 
   report.errors = A.errs.concat(B.errs).concat((await A.p.evaluate(() => window.__amErrors)).map((e) => 'A: ' + e), (await B.p.evaluate(() => window.__amErrors)).map((e) => 'B: ' + e));
-  report.summary = { slides: N, compared: NC, retriedSlides: retried, unstableCaptures: unstable, framesNoiseClass: framesNoise, transitionsNoiseClass: trNoise, playerBarAntialiasOnly: barAntialias, domIdenticalExceptCounterIds: idOnly, domIdentical: domSame, rasterIdentical: rasterSame, framesIdentical: framesSame, framesTotal, transitionsIdentical: trSame, transitionsTotal: trTotal, mismatches: report.mismatches.length, durationS: Math.round((Date.now() - t0) / 1000), identical: report.mismatches.length === 0 && catSame && report.runtime.cssSame && report.runtime.jsSame && report.deckNormalizedSame && report.exportHtml.same };
+  report.summary = { slides: N, compared: NC, retriedSlides: retried, unstableCaptures: unstable, unstableShots, clockWarnings, framesNoiseClass: framesNoise, transitionsNoiseClass: trNoise, hoverNoiseClass: hoverNoise, playerBarAntialiasOnly: barAntialias, domIdenticalExceptCounterIds: idOnly, domIdentical: domSame, rasterIdentical: rasterSame, framesIdentical: framesSame, framesTotal, transitionsIdentical: trSame, transitionsTotal: trTotal, hoverIdentical: hoverSame, hoverTotal, animInventoryIdentical: animsSame, animInventoryTotal: animsTotal, mismatches: report.mismatches.length, durationS: Math.round((Date.now() - t0) / 1000), totalMinutes: report.segments.reduce((a, g) => a + g.minutes, 0), segments: report.segments.length, resumedFrom: report.resumedFrom || 0, identical: report.mismatches.length === 0 && catSame && report.runtime.cssSame && report.runtime.jsSame && report.deckNormalizedSame && report.exportHtml.same && pptxAllSame };
   fs.writeFileSync(path.join(OUT, 'relatorio.json'), JSON.stringify(report, null, 1));
   const md = [`# Prova de paridade — ${path.basename(A_PATH)} × ${path.basename(B_PATH)}`, '', `Gerado em ${new Date().toISOString()} por \`platform/tools/parity.cjs\` (duração ${report.summary.durationS} s). **Resultado: ${report.summary.identical ? 'IDÊNTICO' : 'DIVERGÊNCIAS ENCONTRADAS'}**`, '',
     `| Camada | Resultado |`, `|---|---|`,
@@ -434,14 +504,18 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     `| DOM renderizado por slide | ${domSame}/${NC} idênticos${idOnly ? ' (' + idOnly + ' só com ids internos de contador diferentes, sem efeito visual)' : ''} |`, `| Raster 1280×720 por slide (caminho do PDF) | ${rasterSame}/${NC} idênticos |`,
     FRAMES ? `| Quadros do player — palco do slide (t = ${FRAME_T.join(', ')} ms) | ${framesSame}/${framesTotal} idênticos pixel a pixel${framesNoise ? ' + ' + framesNoise + ' dentro do envelope de ruído do Chromium (bordas de máscara: ≤ ' + NOISE.px + ' px, ≤ ' + NOISE.pct + ' %, ≤ ' + NOISE.maxCh + '/255), listados abaixo' : ''} |` : '| Quadros do player | não medidos (--no-frames) |',
     FRAMES ? `| Barra de controles do player | ${barAntialias ? barAntialias + ' quadros só com antialias de texto (≤ 16/255 por canal, ≤ 0,05 % dos pixels); ' : ''}${report.mismatches.filter((m) => m.layer === 'player-bar').length} divergências reais |` : '',
-    FRAMES ? `| Quadros de transição (t = ${TR_T.join(', ')} ms após avançar) | ${trSame}/${trTotal} idênticos${trNoise ? ' + ' + trNoise + ' no envelope de ruído' : ''} |` : '',
+    FRAMES ? `| Quadros de transição (t = ${TR_T.join(', ')} ms após avançar; cada instante numa sequência nova, lâminas em camada própria) | ${trSame}/${trTotal} idênticos${trNoise ? ' + ' + trNoise + ' no envelope de ruído' : ''} |` : '',
+    FRAMES ? `| Quadros com o mouse sobre os elementos (.am-hov; t = ${HOVER_T.join(', ')} ms) | ${hoverSame}/${hoverTotal} idênticos${hoverNoise ? ' + ' + hoverNoise + ' no envelope de ruído' : ''} |` : '',
+    FRAMES ? `| Inventário de animações por slide (alvo, tipo, nome, duração, atraso, iterações, easing, fill) | ${animsSame}/${animsTotal} idênticos |` : '',
+    FRAMES ? `| Capturas que não estabilizaram em 6 fotos / avisos de relógio | ${unstableShots} / ${clockWarnings} |` : '',
     `| HTML exportado (${Math.round(report.exportHtml.bytes / 1024)} KB) | ${report.exportHtml.same ? 'idêntico (sha ' + report.exportHtml.shaA + ')' : 'DIFERENTE'} |`,
-    `| PowerPoint exportado | ${report.exportPptx && report.exportPptx.same === true ? 'idêntico (' + report.exportPptx.entries + ' entradas, exceto a data em docProps/core.xml)' : report.exportPptx && report.exportPptx.same === false ? 'DIFERENTE: ' + report.exportPptx.diff.join(', ') : 'não medido (' + ((report.exportPptx || {}).note || (report.exportPptx || {}).error || '') + ')'} |`,
+    ...['edit', 'image'].map((mode) => { const r = report.exportPptx[mode]; return `| PowerPoint exportado — modo ${mode === 'edit' ? 'editável' : 'imagem'} | ${r && r.same === true ? 'idêntico (' + r.entries + ' entradas, exceto a data em docProps/core.xml)' : r && r.same === false ? 'DIFERENTE: ' + r.diff.join(', ') : 'não medido (' + ((r || {}).note || (r || {}).error || '') + ')'} |`; }),
     `| Recapturas | ${retried} slide(s) recapturados após divergência na 1ª captura; ${unstable} com recaptura idêntica (captura instável, listados abaixo; imagens em diff/*-t1-*); ${retried - unstable} com divergência reproduzida |`,
     `| Erros de console/página | ${report.errors.length} |`, '',
     `Itens não aplicados/inseridos na construção: ${report.deck.notApplied} animações sem alvo compatível (esperado para transições/alvos específicos), ${report.deck.notInserted} caixas sem inserção, ${report.deck.buildErrors.length} erros.`, '',
+    report.segments.length > 1 ? `Execução em ${report.segments.length} trechos (retomadas com --resume, mesma identidade de medição): ${report.segments.map((g) => g.from.slice(11, 16) + '–' + g.to.slice(11, 16) + ' UTC (' + g.slides + ' slides)').join('; ')}.\n` : '',
     report.unstable.length ? '## Capturas instáveis (divergência só na 1ª captura; recaptura imediata idêntica — não atribuível ao candidato)\n\n' + report.unstable.map((u) => `- slide ${u.i + 1} · ${u.it} · 1ª captura: ${u.first.map((m) => m.layer + (m.t != null ? ' t=' + m.t + ' ms' : '') + (m.px != null ? ' (' + m.px + ' px, máx ' + m.maxCh + '/255)' : '')).join('; ')}`).join('\n') + '\n' : '',
-    report.noise.length ? '## Quadros dentro do envelope de ruído (não atribuíveis ao candidato; imagens em diff/*-ruido-diff.png)\n\n' + report.noise.map((m) => `- ${m.layer}${m.kind === 'costura' ? ' (costura de 1 px na borda da lâmina em movimento' + (m.bbox ? ': coluna x=' + m.bbox.x + ', ' + m.bbox.h + ' linhas' : '') + ')' : ''} · slide ${m.i + 1} · ${m.it} · t=${m.t} ms · ${m.px} px (${m.pct} %), máx ${m.maxCh}/255`).join('\n') + '\n' : '',
+    report.noise.length ? '## Quadros dentro do envelope de ruído (não atribuíveis ao candidato; imagens em diff/*-ruido-diff.png)\n\n' + report.noise.map((m) => `- ${m.layer} · slide ${m.i + 1} · ${m.it} · t=${m.t} ms · ${m.px} px (${m.pct} %), máx ${m.maxCh}/255${m.bbox ? ' · caixa ' + m.bbox.w + '×' + m.bbox.h + ' em (' + m.bbox.x + ', ' + m.bbox.y + ')' : ''}`).join('\n') + '\n' : '',
     report.mismatches.length ? '## Divergências\n\n' + report.mismatches.slice(0, 200).map((m) => `- ${m.layer} · slide ${m.i != null ? m.i + 1 : '-'} · ${m.it || m.detail || ''}${m.t != null ? ' · t=' + m.t + ' ms' : ''}${m.pct != null ? ' · ' + m.pct + '% dos pixels' : ''}`).join('\n') : '## Divergências\n\nNenhuma.',
     '', '## Itens por categoria', '', ...Object.entries(report.slides.reduce((o, r) => (o[r.kind] = (o[r.kind] || 0) + 1, o), {})).map(([k, v]) => `- ${k}: ${v} slides`)].filter((l) => l !== '').join('\n');
   fs.writeFileSync(path.join(OUT, 'relatorio.md'), md);

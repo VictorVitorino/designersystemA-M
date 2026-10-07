@@ -29,7 +29,7 @@ Escalonamento: alerta chega → 1º nível confirma em **15 min** (horário come
 1. Abra o resumo da execução **Manutenção** de domingo (Actions → Manutenção): convites expirados, versões podadas, auditoria apagada, **estatísticas** e **relatório de arquivos órfãos** (GC em modo relatório). **(automático)**
 2. Convites pendentes antigos: Admin → Usuários → revogar os que não serão usados.
 3. Falhas de login e bloqueios (consultas em `docs/MONITORAMENTO.md` §Consultas): picos de `auth.login_failed`, `security.rate_limited`, `security.csrf_blocked`.
-4. Atualizações: Pull Requests de dependências pendentes; `npm audit --omit=dev` (relatório do CI) — **corrigir alertas "high" em até 7 dias** (o relatório atual aponta o pacote `sharp`: atualize e rode os testes).
+4. Atualizações: Pull Requests de dependências pendentes; `npm audit --omit=dev` (relatório do CI) — **corrigir alertas "high" em até 7 dias** (em 2026-10-07 o relatório estava limpo; `sharp` fixado em 0.35.5).
 5. Custos e cotas: painéis de uso da Vercel e do Supabase (banco, arquivos, tráfego) — comparar com `docs/pesquisa/recomendacao-e-custos.md`.
 
 ### Mensal (1 hora)

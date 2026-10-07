@@ -693,7 +693,8 @@ describe('segredos em logs, auditoria e cliente', () => {
     for (const [patch, re] of [[{ DATABASE_ADMIN_URL: 'postgres://postgres:x@h/db' }, /DATABASE_ADMIN_URL/], [{ DATABASE_OPS_URL: 'postgres://x' }, /DATABASE_OPS_URL|ADMIN_URL/], [{ GOTRUE_FAKE: '1' }, /GOTRUE_FAKE/], [{ APP_ORIGIN: 'http://x.com' }, /https/], [{ CSRF_SECRET: 'curto' }, /CSRF|inválida/], [{ STORAGE_DRIVER: 'local' }, /STORAGE_DRIVER/], [{ DATABASE_SSL: 'disable' }, /DATABASE_SSL/], [{ SUPABASE_JWKS_URL: undefined, SUPABASE_JWT_SECRET: undefined }, /JWKS|JWT_SECRET/]]) {
       assert.throws(() => loadConfig({ ...PROD, ...patch }), re, JSON.stringify(patch));
     }
-    // NOTA (docs/API.md §9 × src/config.js): a doc fala em ALLOW_SERVICE_KEY_IN_API para a chave de serviço; o código EXIGE a chave e não lê a flag (drift de documentação, não de segurança).
+    // NOTA: a antiga flag ALLOW_SERVICE_KEY_IN_API foi removida (era documentada mas nunca lida); a chave de serviço é OBRIGATÓRIA no processo da API em staging/produção e nunca vai ao navegador (teste do build). Variável desconhecida no ambiente não derruba a partida:
+    // (texto original da nota: a doc fala em ALLOW_SERVICE_KEY_IN_API para a chave de serviço; o código EXIGE a chave e não lê a flag (drift de documentação, não de segurança).
     assert.doesNotThrow(() => loadConfig({ ...PROD, ALLOW_SERVICE_KEY_IN_API: '0' }));
   });
 });
