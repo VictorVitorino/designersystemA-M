@@ -6,20 +6,21 @@ Objetivo: **saber antes dos usuários** que algo está errado, com o mínimo de 
 
 | # | O quê | Como medir | Alerta quando | Gravidade | Quem recebe | Onde está configurado |
 |---|---|---|---|---|---|---|
-| 1 | **Disponibilidade** do site e da API | `GET /api/health` (sem dependências) e `GET /api/ready` (banco, arquivos, login, migrações) | 2 falhas seguidas (≈ 10 min) em qualquer um | crítica | TI 1º nível + substituto | monitor externo **e** `uptime.yml` (a cada 5 min) |
+| 1 | **Disponibilidade** do site e da API | `GET /api/health` (sem dependências) e `GET /api/ready` (banco, arquivos, login, migrações) | 2 falhas seguidas (≈ 6 min) em qualquer um | crítica | TI 1º nível + substituto | monitor externo (**a cada 3 min**) e `uptime.yml` (de hora em hora, segunda opinião) |
 | 2 | **Taxa de erros 5xx** | logs da Vercel (filtro `status:5xx`) / Observability | > 2% das requisições por 5 min, ou ≥ 20 erros em 5 min | alta | TI + desenvolvedor | Vercel → Observability (alerta) ou Sentry |
 | 3 | **Latência p95** da API | Vercel → Observability → Functions (duration) | p95 > **1,5 s** por 15 min (leitura/salvar); uploads podem ser mais lentos | média | desenvolvedor | Vercel / Sentry |
 | 4 | **Conexões do banco** | Supabase → Reports → Database (connections) | > **80%** do limite do pooler/direto | alta | TI | Supabase (alerta de uso) / revisão semanal |
-| 5 | **Tamanho do banco** | `node tools/maintenance.js stats` | > **70%** do disco contratado (aviso) / > 85% (crítico) | média/alta | TI | `maintenance.yml` (semanal, `WARN_DB_GB`) |
-| 6 | **Tamanho do bucket** (arquivos) | `stats` (soma de `app.assets`) e painel do Storage | > **80%** do orçamento (ex.: 800 GB de 1 TB) | média | TI + gestor | `maintenance.yml` (`WARN_STORAGE_GB`) |
+| 5 | **Tamanho do banco** | `node tools/maintenance.js stats` | > **70%** do disco contratado (aviso) / > 85% (crítico) | média/alta | TI | `maintenance.yml` (semanal, `WARN_DB_GB`): issue **"Alerta de capacidade"** |
+| 6 | **Tamanho do bucket** (arquivos) | `stats` (soma de `app.assets`) e painel do Storage | > **80%** do orçamento (ex.: 800 GB de 1 TB) | média | TI + gestor | `maintenance.yml` (`WARN_STORAGE_GB`): issue **"Alerta de capacidade"** |
 | 7 | **Falhas de login** e **429** | `app.audit_log` (`auth.login_failed`, `security.rate_limited`) | > 50 falhas de login em 10 min, ou > 10 IPs bloqueados na hora | alta (suspeita de ataque) | TI | consulta semanal (§3) / log drain opcional |
-| 8 | **Backup fresco** | `node tools/maintenance.js backup-freshness` | último backup do banco **ou** espelho de arquivos > **26 h**, MAC inválido ou terminou com falhas | alta | TI | `uptime.yml` (a cada 4 h) + `backup.yml` |
+| 8 | **Backup fresco** | `node tools/maintenance.js backup-freshness` | último backup do banco **ou** espelho de arquivos > **26 h**, MAC inválido ou terminou com falhas | alta | TI | `uptime.yml` (a cada 4 h, ambiente `monitoring`, token só de leitura) + `backup.yml` |
 | 9 | **Backup que falha** | status do workflow *Backup* | qualquer falha | alta | TI | `backup.yml` abre a issue "Falha no backup" |
+| 9b | **Backup que não restaura** | *Ensaio de restauração* mensal (restaura o último backup num Postgres descartável e confere) | reprovado | alta | TI | `ensaio-restauracao.yml` abre a issue "Falha no ensaio de restauração" |
 | 10 | **Certificado/domínio** | monitor externo (expiração do TLS) | < 14 dias para vencer | média | TI | UptimeRobot/Better Stack |
 | 11 | **E-mail** (convites) | bounce/complaint no painel do provedor SMTP | taxa de rejeição > 5% | média | TI | provedor de e-mail |
 | 12 | **Usuários admin** | `stats` | menos de 2 administradores ativos | média | TI | aviso no `stats` |
 | 13 | **Custos/cotas** | painéis Vercel e Supabase | > 80% da cota do mês | média | TI + gestor | alertas de cobrança dos provedores |
-| 14 | **Inchaço de `app.presentations`** (o autosave reescreve o deck inteiro) | `stats` → `bloat` (tuplas vivas × mortas, último autovacuum) | mortas > vivas e > 10 000 (aviso do `stats`), ou `last_autovacuum` > 1 dia com uso | média | TI | `maintenance.yml` (semanal); limiares de autovacuum já reduzidos na migração 0005 |
+| 14 | **Inchaço de `app.presentations`** (o autosave reescreve o deck inteiro) | `stats` → `bloat` (tuplas vivas × mortas, último autovacuum) | mortas > vivas e > 10 000 (aviso do `stats`), ou `last_autovacuum` > 1 dia com uso | média | TI | `maintenance.yml` (semanal, issue "Alerta de capacidade"); limiares de autovacuum já reduzidos na migração 0005 |
 
 Gravidade → resposta: **crítica** (§1 do OPERACAO: 15 min), **alta** (mesmo dia útil), **média** (esta semana).
 
@@ -35,7 +36,7 @@ Use o **Better Stack** (plano gratuito: 10 monitores, checagem a cada 3 min, ale
 5. **Certificado SSL** (expiração) para o domínio de produção.
 - **Contatos de alerta:** 2 e-mails (a TI e o substituto) + opcional canal Teams/Slack. Teste o alerta uma vez (pause o monitor de staging).
 - **Página de status** (opcional): mostra "operacional" para a equipe.
-- Regra de ouro: **monitor externo é a fonte primária**; o `uptime.yml` do GitHub é a segunda opinião, **de hora em hora** (em repositório privado cada execução gasta minutos do plano: de 5 em 5 min seriam ~8.600 min/mês), pode atrasar alguns minutos e **para** depois de 60 dias sem atividade no repositório — ligue os alertas por e-mail de Actions: GitHub → Settings → Notifications → Actions. O frescor do backup (a cada 4 h) só roda com `BACKUP_ENABLED=true`.
+- Regra de ouro: **monitor externo é a fonte primária**; o `uptime.yml` do GitHub é a segunda opinião, **de hora em hora** (em repositório privado cada execução gasta minutos do plano: de 5 em 5 min seriam ~8.600 min/mês), pode atrasar alguns minutos e **para** depois de 60 dias sem atividade no repositório — ligue os alertas por e-mail de Actions: GitHub → Settings → Notifications → Actions. Cada endereço só é sondado depois de ligado (`PRODUCTION_ENABLED=true`, `STAGING_ENABLED=true`); o frescor do backup (a cada 4 h) só roda com `BACKUP_ENABLED=true`. Antes disso, nada roda nem abre alerta.
 
 ## 3. Logs e consultas
 
@@ -88,15 +89,18 @@ A auditoria **nunca** grava senha, token nem conteúdo de slides; o e-mail de te
 
 ## 4. Alertas automáticos do repositório (já configurados)
 
-| Workflow | Frequência | Falha → |
-|---|---|---|
-| `uptime.yml` → *disponibilidade* | a cada 5 min | issue **"Indisponibilidade"** (abre/atualiza; **fecha sozinha** quando volta) + e-mail do GitHub |
-| `uptime.yml` → *backup-fresco* | a cada 4 h | issue **"Backup desatualizado"** + e-mail |
-| `backup.yml` | diário 05:15 UTC | issue **"Falha no backup"** + e-mail |
-| `maintenance.yml` | domingo 04:30 UTC | resumo da execução com `stats` e avisos de tamanho (e-mail em caso de falha) |
-| `codeql.yml` | semanal e em PRs | alertas na aba Security (exige GitHub Advanced Security em repositório privado) |
+Cada alerta é uma **issue** do GitHub com título fixo: abre na primeira falha, recebe um comentário a cada nova falha (sem duplicar) e **fecha sozinha** quando o problema some. Quem "observa" o repositório recebe o e-mail (`docs/CONFIGURACAO.md` §3.4).
 
-Variáveis necessárias: `PRODUCTION_URL`, `STAGING_URL` (e o ambiente `monitoring` com credencial **somente leitura** do bucket de backup) — `docs/CONFIGURACAO.md` §15.
+| Workflow | Frequência | Liga com | Falha → |
+|---|---|---|---|
+| `uptime.yml` → *disponibilidade* | de hora em hora | `PRODUCTION_ENABLED` / `STAGING_ENABLED` | issue **"Indisponibilidade"** |
+| `uptime.yml` → *backup-fresco* | a cada 4 h | `BACKUP_ENABLED` | issue **"Backup desatualizado"** |
+| `backup.yml` | diário 05:15 UTC (02:15 em Brasília) | `BACKUP_ENABLED` | issue **"Falha no backup"** |
+| `maintenance.yml` | domingo 04:30 UTC | `PRODUCTION_ENABLED` | issue **"Alerta de capacidade"** (banco > `WARN_DB_GB`, arquivos > `WARN_STORAGE_GB` ou tuplas mortas demais), com os números no resumo; menos de 2 administradores aparece como aviso no resumo |
+| `ensaio-restauracao.yml` | dia 3 de cada mês, 06:40 UTC | `BACKUP_ENABLED` | issue **"Falha no ensaio de restauração"** + relatório (artefato de 90 dias) |
+| `codeql.yml` | semanal e em PRs | público ou `CODEQL_ENABLED` | alertas na aba Security; no privado sem a licença, só um aviso "CodeQL pulado" |
+
+Chaves necessárias: só as de `docs/CHAVES.md` (o ambiente `monitoring` tem o token **somente leitura** do backup).
 
 ## 5. Erros de aplicação (Sentry) — **opcional, dependência externa**
 

@@ -1,6 +1,6 @@
 # Operação — runbook da TI
 
-Para quem **opera** o Canteiro no dia a dia. Todos os comandos rodam na pasta `platform/` de um computador com Node 22 e as variáveis necessárias (os mesmos nomes de `docs/CONFIGURACAO.md`; segredos ficam no cofre de senhas, **nunca** em mensagem/e-mail/chat).
+Para quem **opera** o Canteiro no dia a dia. O caminho normal é pelos **workflows do GitHub** (aba Actions), que montam as conexões a partir das chaves de `docs/CHAVES.md`. Os comandos de terminal abaixo são o **plano B** e rodam na pasta `platform/` com Node 22 e as variáveis necessárias (segredos ficam no cofre de senhas, **nunca** em mensagem/e-mail/chat; `node tools/chaves.js exec --ambiente production --precisa banco -- <comando>` monta as variáveis a partir das chaves mínimas).
 Convenção: o que o GitHub Actions já faz sozinho aparece como **(automático)**.
 
 ## 1. Contatos e escalonamento (PREENCHER antes de entrar no ar)
@@ -21,7 +21,7 @@ Escalonamento: alerta chega → 1º nível confirma em **15 min** (horário come
 ## 2. Rotina
 
 ### Diária (5 minutos, de preferência todo dia útil de manhã)
-1. **E-mails de alerta** do GitHub (issues "Indisponibilidade", "Backup desatualizado", "Falha no backup") e do monitor externo. Issue aberta = tratar hoje.
+1. **E-mails de alerta** do GitHub (issues "Indisponibilidade", "Backup desatualizado", "Falha no backup", "Alerta de capacidade", "Falha no ensaio de restauração") e do monitor externo. Issue aberta = tratar hoje (cada uma fecha sozinha quando o problema some).
 2. GitHub → Actions: os workflows **Backup** (rodou às 05:15 UTC), **Uptime** e **CI** da `main` estão verdes? **(automático)** o backup é verificado ao terminar.
 3. Se estiver desconfiado de algo: `node tools/maintenance.js stats` (usuários, apresentações, tamanho do banco e dos arquivos, avisos).
 
@@ -33,13 +33,13 @@ Escalonamento: alerta chega → 1º nível confirma em **15 min** (horário come
 5. Custos e cotas: painéis de uso da Vercel e do Supabase (banco, arquivos, tráfego) — comparar com `docs/pesquisa/recomendacao-e-custos.md`.
 
 ### Mensal (1 hora)
-1. **Verificação de backup**: `node tools/backup.js verify` (baixa o mais recente, decifra e confere SHA-256 + índice do dump) e `node tools/backup.js list` (retenção conforme política).
+1. **Ensaio de restauração** (automático, todo dia 3): Actions → *Ensaio de restauração* → a execução do mês terminou **APROVADO**? O relatório fica no resumo e como artefato por 90 dias. Reprovado = issue "Falha no ensaio de restauração" (§6.10). Plano B manual: `node tools/backup.js verify` e `node tools/backup.js list`.
 2. Revisão de **acessos**: usuários ativos × quem ainda trabalha na empresa (suspender os que saíram); administradores (≥ 2); membros da organização no GitHub, Vercel e Supabase.
 3. Revisar issues abertas de segurança (CodeQL, secret scanning) e atualizar a Vercel CLI/ações do GitHub fixadas (SHAs) se houver versões novas relevantes.
 4. Rodar o GC **em relatório** e decidir se apaga (veja §5.7).
 
 ### Trimestral (meio dia)
-1. **Ensaio completo de restauração em staging** (`docs/BACKUP-E-RESTAURACAO.md` §Testar): registrar data, tempo e resultado ali.
+1. **Ensaio completo com troca de conexão** num projeto Supabase descartável (`docs/BACKUP-E-RESTAURACAO.md` §6): registrar data, tempo e resultado ali. O ensaio mensal automático prova o backup; este prova o **procedimento de corte** (variáveis, domínio, login).
 2. **Rotação de segredos** (§3) — no mínimo: senhas de banco, chave S3, chave de serviço, `CSRF_SECRET`, token da Vercel.
 3. Revisar este runbook e os contatos; simular um incidente (ex.: "login fora do ar") com a equipe.
 4. Revisar `docs/AMBIENTES.md` (quem tem acesso a quê) e as regras do Supabase/Vercel (`infra/supabase/auth-settings.md`).
@@ -50,18 +50,20 @@ Princípio: **troque sem derrubar** — crie o novo valor, ponha em uso, confirm
 
 | Segredo | Onde fica | Como rotacionar |
 |---|---|---|
-| Senha do `postgres` (Supabase) | cofre; `DATABASE_ADMIN_URL` (GitHub: staging, production, production-ops) | Supabase → Database → *Reset database password*; atualizar `DATABASE_ADMIN_URL` nos 3 ambientes do GitHub; rodar `verify-deploy` |
-| `APP_API_DB_PASSWORD` (`app_api`) | Vercel (`DATABASE_URL`) + GitHub (`production`, `staging`) | gerar nova senha; atualizar o secret; rodar `node tools/migrate.js` (ele aplica `ALTER ROLE app_api … PASSWORD`); atualizar `DATABASE_URL` na Vercel; **redeploy**; conferir `/api/ready` |
-| `APP_OPS_DB_PASSWORD` (`app_ops`) | GitHub (`DATABASE_OPS_URL`) | idem; atualizar `DATABASE_OPS_URL` em `production` e `production-ops` |
-| Chave de serviço do Supabase (`SUPABASE_SERVICE_ROLE_KEY`) | Vercel | criar a nova chave no painel (chaves secretas permitem várias ativas); atualizar na Vercel + redeploy; testar **convidar** um usuário; revogar a antiga |
-| Chave anônima (`SUPABASE_ANON_KEY`) | Vercel + GitHub | idem |
+| Senha do `postgres` (Supabase) — `SUPABASE_DB_PASSWORD` | cofre + GitHub (`staging` ou `production-ops`) | Supabase → Project Settings → Database → *Reset database password* (gere no cofre) → cole no GitHub → rode *Deploy* do ambiente (ou o *Backup*) para conferir |
+| `APP_API_DB_PASSWORD` (`app_api`) | GitHub + Vercel (dentro de `DATABASE_URL`) | gere nova no cofre → cole no GitHub → rode o *Deploy* do ambiente (o `migrate.js` aplica `ALTER ROLE app_api … PASSWORD`; a API antiga perde a conexão até o passo seguinte) → **na mesma hora** rode *Configurar Vercel* (regrava `DATABASE_URL`) e o *Deploy* de novo → `/api/ready`. Faça fora do horário de uso |
+| `APP_OPS_DB_PASSWORD` (`app_ops`) | GitHub | gere nova → cole → rode o *Deploy* do ambiente (aplica a senha) → rode *Manutenção* para conferir |
+| Chave secreta do Supabase (`SUPABASE_SERVICE_ROLE_KEY`, `sb_secret_…`) | GitHub + Vercel | Project Settings → API Keys → *New secret key* (várias podem coexistir) → cole no GitHub → *Configurar Vercel* → *Deploy* → convide alguém de teste → apague a antiga no Supabase |
+| Chave publicável (`SUPABASE_ANON_KEY`, `sb_publishable_…`) | GitHub + Vercel | idem (é pública por natureza; rotacione se o projeto for recriado) |
 | Chaves JWT do Supabase | painel do Supabase (*JWT Keys*) | criar nova chave de assinatura (standby) → *Rotate* → aguardar 1 h (tokens antigos expiram) → revogar a antiga. A API lê o JWKS: **sem redeploy** |
-| Chave S3 do bucket principal | Vercel + GitHub (`S3_*`) | criar a nova chave em Storage → S3; atualizar Vercel e GitHub; redeploy; testar upload/abrir imagem; apagar a antiga |
-| `CSRF_SECRET` | Vercel | gerar novo e fazer redeploy. Efeito: tokens CSRF abertos deixam de valer (as pessoas só precisam recarregar a página) e os identificadores de e-mail na **auditoria** (HMAC) mudam dali em diante (correlação com registros antigos é perdida) |
-| **`BACKUP_ENCRYPTION_KEY`** | cofre + GitHub (`production`, `production-ops`) | **nunca apague a chave antiga**: ponha a **antiga** em `BACKUP_ENCRYPTION_KEYS_OLD` (separadas por vírgula) e a **nova** em `BACKUP_ENCRYPTION_KEY`. Backups novos usam a nova; os antigos continuam abríveis. Faça `node tools/backup.js verify` e um restore de teste. Só retire uma chave antiga quando todos os backups feitos com ela estiverem fora da retenção |
-| Credenciais do bucket de backup | GitHub (`BACKUP_S3_*`) | criar nova chave no provedor; atualizar os 3 ambientes; rodar o workflow Backup; apagar a antiga |
-| `VERCEL_TOKEN` | GitHub (`staging`, `production`) | criar novo token → atualizar → revogar o antigo |
-| Contas pessoais (GitHub, Vercel, Supabase, cofre) | cada pessoa | MFA obrigatório; ao desligar alguém, **remover o acesso no mesmo dia** |
+| Chave S3 do bucket principal (`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`) | GitHub + Vercel | Storage → S3 Configuration → *New access key* → cole os dois no GitHub → *Configurar Vercel* → *Deploy* → teste enviar/abrir imagem → apague a antiga |
+| `CSRF_SECRET` | Vercel (gerado pelo *Configurar Vercel*) | *Configurar Vercel* com **rotacionar_csrf** marcado → *Deploy*. Efeito: tokens CSRF abertos deixam de valer (as pessoas só recarregam a página) e os identificadores de e-mail na **auditoria** (HMAC) mudam dali em diante |
+| `RESEND_API_KEY` | GitHub + Supabase (senha do SMTP) | Resend → *Create API Key* → cole no GitHub (dois ambientes) → *Configurar Supabase* nos dois → convite de teste → apague a antiga no Resend |
+| **`BACKUP_ENCRYPTION_KEY`** | cofre + GitHub (`production-ops`) | **nunca apague a chave antiga**: crie o segredo `BACKUP_ENCRYPTION_KEYS_OLD` com a **antiga** (várias separadas por vírgula) e ponha a **nova** em `BACKUP_ENCRYPTION_KEY`. Backups novos usam a nova; os antigos continuam abríveis. Rode *Backup* e *Ensaio de restauração*. Só retire uma chave antiga quando todos os backups feitos com ela estiverem fora da retenção |
+| Tokens do R2 (`BACKUP_S3_*`) | GitHub (`production-ops` escrita; `monitoring` leitura) | Cloudflare → R2 → Manage API tokens → novo token → cole → rode *Backup* (escrita) e *Uptime* (leitura) → apague o antigo |
+| `VERCEL_TOKEN` | GitHub (`staging`, `production-ops`) | Vercel → Account Settings → Tokens → novo → cole nos dois → *Configurar Vercel* (simular) → revogue o antigo. Validade de 1 ano: anote a data |
+| `SUPABASE_ACCESS_TOKEN` | **não deve existir** fora da configuração | crie só para rodar *Configurar Supabase*; apague em seguida (GitHub e Supabase) |
+| Contas pessoais (GitHub, Vercel, Supabase, Cloudflare, Resend, cofre) | cada pessoa | MFA obrigatório; ao desligar alguém, **remover o acesso no mesmo dia** |
 
 **Se um segredo vazou** (apareceu em log, chat, repositório): considere-o comprometido, **rotacione na hora** (não espere a rotina) e siga §6.4.
 
@@ -104,15 +106,17 @@ Não existe "apagar tudo" de um clique: as apresentações são do **acervo** da
 ## 5. Publicação, rollback e restauração
 
 ### 5.1 Publicar
-- **Staging:** merge na `main` → automático.
-- **Produção:** Actions → *Deploy produção* → **Run workflow** → digite `PRODUCAO` (ou crie a tag `v1.2.3`) → os **revisores aprovam** → o fluxo faz backup verificado → `migrate --check` → migrações → verificação → Vercel → verificação do site → smoke. Qualquer falha **interrompe**.
-- Antes de publicar: o último CI da `main` está verde; staging foi testado com o **mesmo** commit; leia as migrações novas (`platform/db/migrations`): devem ser **aditivas** (criar/ampliar; nunca apagar/renomear de uma vez).
+- **Staging:** merge na `main` → automático (com `STAGING_ENABLED=true`).
+- **Produção = criar uma versão:** GitHub → Releases → *Draft a new release* → tag nova `v1.2.3` sobre a `main` → *Publish release*. Só administradores do repositório criam tags `v*` (ruleset), e **criar a versão é a aprovação** (não existem revisores obrigatórios no plano). O *Deploy produção* começa sozinho: espera o CI do commit → portão (ambiente `production`, só tags `v*`) → chaves → **backup obrigatório** verificado → `migrate --check` → migrações → verificação do banco e do login → Vercel `--prod` → verificação do site (HTML idêntico ao gerado, CSP igual à do `vercel.json`) → smoke. Qualquer falha **interrompe**.
+- Republicar uma versão (ex.: depois de corrigir uma chave): Actions → *Deploy produção* → **Run workflow** → em *Use workflow from* escolha **Tags → v1.2.3** → digite `PRODUCAO`.
+- Antes de publicar: o CI da `main` está verde; o staging foi testado com o **mesmo** commit; leia as migrações novas (`platform/db/migrations`): devem ser **aditivas** (criar/ampliar; nunca apagar/renomear de uma vez).
 
 ### 5.2 Rollback de deploy (o site voltou a ter problema depois de publicar)
-1. **Vercel**: Deployments → versão anterior estável → **Instant Rollback** (segundos; não mexe no banco). Ou `npx vercel@62.5.0 rollback` (volta ao deploy de produção anterior).
-2. Confirme: `curl https://canteiro.<seu-dominio>/api/ready` e um login.
-3. **Banco**: **não** restaure por reflexo. As migrações são aditivas, então o código anterior funciona com o banco novo. Só restaure o banco se houve **corrupção de dados** (§5.3).
-4. Corrija no código, publique de novo pelo fluxo normal. Registre o incidente (§8).
+1. **Mais rápido (segundos):** Vercel → Deployments → versão anterior estável → **Instant Rollback** (não mexe no banco). Ou `npx vercel@62.5.0 rollback`.
+2. **Pelo GitHub (refaz tudo com as verificações):** Actions → *Deploy produção* → **Run workflow** → *Use workflow from* → **Tags → a versão anterior** (ex.: `v1.2.2`) → digite `PRODUCAO`. Faz backup, confere e publica o código daquela versão.
+3. Confirme: `curl https://canteiro.<seu-dominio>/api/ready` e um login.
+4. **Banco**: **não** restaure por reflexo. As migrações são aditivas, então o código anterior funciona com o banco novo. Só restaure o banco se houve **corrupção de dados** (§5.3).
+5. Corrija no código e publique uma versão nova (`v1.2.4`) pelo fluxo normal. Registre o incidente (§8).
 
 ### 5.3 Restaurar o banco ou os arquivos
 Siga `docs/BACKUP-E-RESTAURACAO.md` (passo a passo numerado, com verificação). Em resumo: restaure em **banco novo**, valide, troque a conexão. Nunca sobre o banco em uso.
@@ -124,7 +128,7 @@ O `migrate.js` aplica cada arquivo em **uma transação**: se falhar, nada é ap
 Avise com antecedência; publique fora do horário; para operações pesadas (ex.: ligar *Enforce SSL*, trocar chaves JWT) faça antes em staging.
 
 ### 5.6 Coleta de lixo de arquivos (GC)
-Roda **em relatório** toda semana. Para apagar de verdade: Actions → *Manutenção* → Run workflow → marque `gc_apply` e digite `APAGAR` → aprovação dos revisores. Regras de proteção: só arquivos **sem nenhuma referência** (nem em versões antigas, nem miniaturas) há mais de 14 dias, sem upload recente (48 h), marcados antes e só apagados depois de 24 h; o job exige backup recente. Local: `node tools/gc-assets.js` (relatório) e `--apply`.
+Roda **em relatório** toda semana. Para apagar de verdade: Actions → *Manutenção* → Run workflow → marque `gc_apply` e digite `APAGAR` (essa confirmação é a aprovação; o job usa o ambiente `production-ops`). Regras de proteção: só arquivos **sem nenhuma referência** (nem em versões antigas, nem miniaturas) há mais de 14 dias, sem upload recente (48 h), marcados antes e só apagados depois de 24 h; o job exige backup recente. Local: `node tools/gc-assets.js` (relatório) e `--apply`.
 
 ## 6. Incidentes
 
@@ -173,10 +177,10 @@ Para cada um: **sintoma → verificar → agir → depois**. Em qualquer inciden
 `curl -I https://canteiro.<seu-dominio>` e `/api/health`. Se `health` falha: Vercel (vercel-status.com) ou deploy ruim → **rollback (§5.2)**. Se só `ready` falha: dependência (§6.1/6.2). Logs: Vercel → Logs (filtrar status 5xx; retenção de 1 dia no Pro: exporte o que precisar).
 
 ### 6.6 Backup falhou / desatualizado
-Issue "Falha no backup" ou "Backup desatualizado". (1) Abra a execução do workflow **Backup** e leia o passo que falhou (mensagens em português). Causas comuns: senha do `postgres` trocada e secret não atualizado; credencial do bucket revogada; `pg_dump` com versão errada (`PG_CLIENT_MAJOR`); bucket cheio/sem permissão; IPv6 (§CONFIGURACAO 16). (2) Corrija e rode **Run workflow** do Backup; confirme `backup-freshness` verde. (3) **Enquanto não houver backup novo, evite mudanças arriscadas (deploy com migração, GC)**. Nada é apagado numa falha: o último backup bom continua lá.
+Issue "Falha no backup" ou "Backup desatualizado". (1) Abra a execução do workflow **Backup** e leia o passo que falhou (mensagens em português). Causas comuns: senha do banco trocada e `SUPABASE_DB_PASSWORD` não atualizado; token do R2 revogado (`BACKUP_S3_*`); `pg_dump` com versão errada (`PG_CLIENT_MAJOR`); bucket inexistente ou token sem permissão de escrita nele. O primeiro passo do workflow ("Conferir as chaves") diz qual nome falta ou está errado. (2) Corrija e rode **Run workflow** do Backup; confirme `backup-freshness` verde. (3) **Enquanto não houver backup novo, evite mudanças arriscadas (deploy com migração, GC)**. Nada é apagado numa falha: o último backup bom continua lá.
 
 ### 6.7 Convites/recuperação de senha não chegam
-SMTP: Supabase → Auth → Logs (erro de envio?); limite de e-mails por hora; credencial SMTP vencida; SPF/DKIM/DMARC (`CONFIGURACAO` §7); caixa de spam; remetente bloqueado. Teste com outro provedor de caixa (Gmail/Outlook). Reenvie pelo Admin.
+Rode *Configurar Supabase* do ambiente (modo **simular** basta): a linha "E-mail: domínio … no Resend" diz se o domínio está verificado e lista o DNS. Depois: Resend → *Emails* (o envio aparece? foi recusado?); Supabase → Auth → Logs (erro de SMTP? chave do Resend revogada → `RESEND_API_KEY` nova + *Configurar Supabase*); limite do plano gratuito do Resend (100 e-mails/dia); SPF/DKIM/DMARC (`docs/CONFIGURACAO.md` §6); caixa de spam. Teste com Gmail e Outlook. Reenvie pelo Admin.
 
 ### 6.8 Gasto/cota estourando (Vercel ou Supabase)
 Veja o painel de uso. Causas típicas: tráfego de arquivos (cache `immutable` em `/api/assets` deve reduzir), loop de requisições de um cliente (consulte os logs por IP/usuário e suspenda), arquivos muito grandes. Ações: GC, reduzir retenção, aumentar plano, Firewall da Vercel (rate limit por IP). Cuidado com *Spend cap* do Supabase (bloqueia o serviço ao estourar; veja `auth-settings.md` item 22).
@@ -184,21 +188,29 @@ Veja o painel de uso. Causas típicas: tráfego de arquivos (cache `immutable` e
 ### 6.9 Pessoa sem acesso (não consegue editar a apresentação)
 Por regra do produto, **só o dono (ou admin) edita**. A pessoa deve **Criar cópia** (fica dela). Se for dono e não consegue: sessão expirada (relogar), conta suspensa (§4.1) ou conflito de edição (outra aba salvou; o editor mostra a tela de conflito).
 
+### 6.10 Ensaio de restauração reprovado
+Issue "Falha no ensaio de restauração". Abra o resumo da execução: o relatório diz **em que fase** parou. (1) "não achei backup" / "chave" → mesmo diagnóstico do §6.6 (o ensaio usa o mesmo bucket e a mesma chave); (2) "corrompido" num arquivo → rode *Backup* de novo (o espelho repõe o objeto) e repita o ensaio; se persistir, **pare deploys com migração** e acione o desenvolvedor; (3) `migrate --check` ou contagens divergentes → o backup não bate com o código atual: acione o desenvolvedor. Enquanto não houver ensaio aprovado, trate os backups como **não comprovados**. Rode de novo: Actions → *Ensaio de restauração* → Run workflow.
+
+### 6.11 Alerta de capacidade
+Issue "Alerta de capacidade" (aberta pela *Manutenção* de domingo): banco acima de `WARN_DB_GB` (padrão 6 GB), arquivos acima de `WARN_STORAGE_GB` (padrão 800 GB) ou tuplas mortas demais. Banco/tuplas → §6.2. Arquivos → GC (§5.6) e decida com o gestor: aumentar a cota (custo em `docs/CONFIGURACAO.md` §2) ou ligar a cota por pessoa (`STORAGE_QUOTA_USER_MB`, `docs/CHAVES.md`). A issue fecha sozinha na próxima manutenção dentro dos limites; para conferir antes, rode *Manutenção* manualmente.
+
 ## 7. Referências rápidas
 
 | Preciso… | Comando / lugar |
 |---|---|
 | ver se está tudo bem | `curl https://canteiro.<seu-dominio>/api/ready` |
-| verificar configuração de segurança | `node tools/verify-deploy.js [--url https://…]` |
-| números de uso | `node tools/maintenance.js stats` |
-| listar backups | `node tools/backup.js list` |
-| verificar o último backup | `node tools/backup.js verify` |
-| backup manual agora | Actions → Backup → Run workflow (ou `node tools/backup.js all`) |
+| publicar em produção | Releases → nova versão `v*` (§5.1) |
+| voltar uma versão | Vercel *Instant Rollback* ou *Deploy produção* na tag anterior (§5.2) |
+| verificar configuração de segurança | Actions → *Deploy* do ambiente (resumo) ou `node tools/verify-deploy.js [--url https://…]` |
+| conferir as chaves de um ambiente | `node tools/chaves.js conferir --ambiente production --precisa banco,ops,backup` (diz o que falta, sem mostrar valores) |
+| números de uso | resumo da *Manutenção* ou `node tools/maintenance.js stats` |
+| backup manual agora | Actions → *Backup* → Run workflow |
+| provar que o backup restaura | Actions → *Ensaio de restauração* → Run workflow |
 | restaurar | `docs/BACKUP-E-RESTAURACAO.md` |
 | arquivos órfãos | `node tools/gc-assets.js` |
-| criar admin | `node tools/create-first-admin.js --email … --name …` |
+| criar administrador | Actions → *Criar primeiro administrador* |
 | segredos no repositório | `node tools/secret-scan.js` |
-| onde está cada variável | `docs/CONFIGURACAO.md` §15 |
+| onde está cada chave | `docs/CHAVES.md` |
 
 ## 8. Modelo de relatório de incidente (copie e preencha)
 
