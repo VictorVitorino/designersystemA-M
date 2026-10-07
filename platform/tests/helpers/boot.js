@@ -16,8 +16,8 @@
      });
 
    O que vem em `t`: app (Hono), deps, config, fake (GoTrue falso: fake.outbox(), fake.addUser, fake.mintToken…), db (papel app_api), ops (app_system),
-   makeClient({ip}), anon(), as(user), createUser(opts), clearIdentityCache(), stop().
-   Opções de boot(): mode:'jwks'|'hs256', inviteDomains:'a.com,b.com', authTiming:{failMinMs,forgotMinMs}, identityTtlMs, accessTtl, latency, env:{...}, withStatic:true (+ publicDir).
+   makeClient({ip}), anon(), as(user), createUser(opts), clearIdentityCache(), awayFromWindowEdge(janelaS, folgaMs), stop().
+   Opções de boot(): mode:'jwks'|'hs256', keyFormat:'legacy'|'opaque' (chaves novas sb_… do Supabase), inviteDomains:'a.com,b.com', authTiming:{failMinMs,forgotMinMs}, identityTtlMs, accessTtl, latency, env:{...}, withStatic:true (+ publicDir).
    Cada cliente tem seu próprio cookie jar e um IP único (X-Forwarded-For), então limites de taxa de um teste não afetam os outros.
    `t.app.request` não abre porta de rede: chama o app em memória. */
 import fs from 'node:fs';
@@ -68,10 +68,19 @@ function parseSetCookie(line) {
   return { name: pair.slice(0, i), value: pair.slice(i + 1), attrs: a, raw: line };
 }
 
+/** Limites de taxa usam janela FIXA alinhada à época (app.hit_rate). Se faltar menos de `needMs` para a próxima virada, espera a nova
+    janela começar (+200 ms): uma rajada que cruzasse a virada teria o contador zerado no meio e o teste ficaria instável.
+    Lê o relógio do BANCO, que é o que decide a janela. */
+export async function awayFromWindowEdge(ops, windowS, needMs) {
+  const [{ ms }] = await ops.asSystem((tx) => tx`select (extract(epoch from clock_timestamp()) * 1000)::float8 as ms`);
+  const w = windowS * 1000, left = w - (Number(ms) % w);
+  if (left < needMs) await new Promise((r) => setTimeout(r, left + 200));
+}
+
 export async function boot(opts = {}) {
   const { mode = 'jwks', appOrigin = 'http://localhost:3000' } = opts;
   const { db, ops } = await setup();
-  const fake = await startFakeGoTrue({ mode, appOrigin, accessTtl: opts.accessTtl, latency: opts.latency });
+  const fake = await startFakeGoTrue({ mode, keyFormat: opts.keyFormat, appOrigin, accessTtl: opts.accessTtl, latency: opts.latency });
   const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canteiro-test-'));
   const config = loadConfig({
     APP_ENV: 'test', APP_ORIGIN: appOrigin, DATABASE_URL: API_URL, LOG_LEVEL: opts.logLevel || 'silent',
@@ -127,6 +136,7 @@ export async function boot(opts = {}) {
   const t = {
     app, api, deps, config, fake, db, ops, storage, storageDir, fullApp: full, kit, names, DEFAULT_PASSWORD,
     makeClient, anon: (o) => makeClient(o),
+    awayFromWindowEdge: (windowS, needMs) => awayFromWindowEdge(ops, windowS, needMs),
     /** Cria um usuário no banco (status/papel à escolha) e a conta correspondente no GoTrue falso (com senha). */
     async createUser({ role = 'member', status = 'active', displayName, email, password = DEFAULT_PASSWORD, inGoTrue = true } = {}) {
       n++;

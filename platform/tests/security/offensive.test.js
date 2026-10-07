@@ -43,6 +43,8 @@ const SECRETS = new Set();
 /** Zera os contadores de taxa (testes que não são sobre taxa não devem esbarrar neles). */
 const resetRates = () => t.ops.asSystem((tx) => tx`delete from app.rate_limits`);
 before(async () => {
+  // estas verificações leem o site GERADO (CSP por página, editor publicado, pdf.js, varredura de segredos): sem ele, uma falha só e clara
+  assert.ok(fs.existsSync(path.join(PLATFORM, 'dist', 'public', 'editor', 'index.html')), 'dist/public ausente: rode "npm run build:web" antes de "npm run test:security"');
   t = await boot({ withStatic: true, publicDir: path.join(PLATFORM, 'dist', 'public'), deps: { logger }, authTiming: { failMinMs: 250, forgotMinMs: 250 } });
   A = await t.createUser({ displayName: 'Ana Dona' }); B = await t.createUser({ displayName: 'Bruno Membro' }); C = await t.createUser({ displayName: 'Carla Terceira' }); ADM = await t.createUser({ role: 'admin', displayName: 'Admin Geral' });
   cA = await t.as(A); cB = await t.as(B); cC = await t.as(C); cAdm = await t.as(ADM);
@@ -62,15 +64,18 @@ after(async () => { await t.stop(); });
 describe('autenticação e sessão', () => {
   test('enumeração de contas: login (mensagem + tempo), forgot (sempre 202) e verify (sempre 410) não distinguem e-mail existente de inexistente', async () => {
     t.fake.state.latency.existingUserMs = 120;   // simula o bcrypt do GoTrue: e-mail existente demora mais no provedor
+    // piso de PRODUÇÃO (src/auth/kit.js: 700 ms). Com o piso artificial de 250 ms deste arquivo, uma máquina carregada faz o caminho do
+    // e-mail existente (latência simulada + scrypt do GoTrue falso) passar do piso e o teste mediria a carga, não a equalização.
+    const floor0 = t.kit.timing.failMinMs; t.kit.timing.failMinMs = 700;
     try {
       const timed = async (email) => { const c = t.anon(); await c.ensureCsrf(); const t0 = Date.now(); const r = await c.post('/api/auth/login', { email, password: 'Senha-Errada-Qualquer-123' }); return { r, ms: Date.now() - t0 }; };
       const ex = [], ne = [];
       for (let i = 0; i < 4; i++) { ex.push(await timed(A.email)); ne.push(await timed(`inexistente${i}@am.test`)); }
       for (const x of [...ex, ...ne]) { assert.equal(x.r.status, 401); assert.equal(errCode(x.r), 'invalid_credentials'); assert.equal(x.r.json.error.message, 'E-mail ou senha incorretos.'); }
       const med = (a) => a.map((x) => x.ms).sort((p, q) => p - q)[Math.floor(a.length / 2)];
-      assert.ok(med(ex) >= 240 && med(ne) >= 240, `piso de tempo aplicado (${med(ex)} / ${med(ne)} ms)`);
+      assert.ok(med(ex) >= 690 && med(ne) >= 690, `piso de tempo aplicado (${med(ex)} / ${med(ne)} ms)`);
       assert.ok(Math.abs(med(ex) - med(ne)) < 80, `tempos equalizados: existente ${med(ex)} ms × inexistente ${med(ne)} ms`);
-    } finally { t.fake.state.latency.existingUserMs = 0; }
+    } finally { t.fake.state.latency.existingUserMs = 0; t.kit.timing.failMinMs = floor0; }
     const f = t.anon(); await f.ensureCsrf();
     const f1 = await f.post('/api/auth/forgot', { email: A.email }), f2 = await f.post('/api/auth/forgot', { email: 'ninguem@am.test' });
     assert.equal(f1.status, 202); assert.equal(f2.status, 202); assert.equal(f1.text, f2.text);
@@ -79,6 +84,7 @@ describe('autenticação e sessão', () => {
     assert.equal(v1.status, 410); assert.equal(v2.status, 410); assert.equal(v1.json.error.message, v2.json.error.message);
   });
   test('força bruta: 8 erros por e-mail+IP → 429 antes do GoTrue; e-mail correto + senha certa também fica barrado; outro IP segue', async () => {
+    await t.awayFromWindowEdge(600, 15000);   // janela fixa de 10 min: a rajada não pode cruzar a virada
     const victim = await t.createUser(); const c = t.anon(); await c.ensureCsrf();
     for (let i = 0; i < 8; i++) assert.equal((await c.post('/api/auth/login', { email: victim.email, password: 'errada-errada-' + i })).status, 401);
     const calls = t.fake.calls.filter((x) => x.path === '/auth/v1/token').length;
@@ -651,6 +657,7 @@ describe('abuso: custo do lint, tetos e limites de taxa', () => {
     assert.equal((await t.ops.asSystem((tx) => tx`select count(*)::int n from app.comments where presentation_id = ${p.id} and deleted_at is null`))[0].n, 1000);
   });
   test('limites de taxa reais: comentários 30/min por usuário → 429 com Retry-After; escrita 120/min; auditoria security.rate_limited', async () => {
+    await t.awayFromWindowEdge(60, 20000);    // janela fixa de 1 min: a rajada não pode cruzar a virada (já derrubou o CI uma vez)
     await resetRates(); const u = await t.createUser(); const c = await t.as(u); const p = (await c.post('/api/presentations', { title: 'Rate' })).json;
     let status = []; for (let i = 0; i < 31; i++) status.push((await c.post(`/api/presentations/${p.id}/comments`, { body: 'spam ' + i })).status);
     assert.equal(status.filter((s) => s === 201).length, 30); assert.equal(status[30], 429);

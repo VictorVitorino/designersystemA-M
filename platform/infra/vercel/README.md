@@ -25,7 +25,7 @@ Um **projeto** na Vercel (plano **Pro**) serve o site estático (CDN) e **uma** 
 
 - Cadastre cada variável **apenas no ambiente certo** (a Vercel permite escolher por variável). Marque como **Sensitive** os segredos (não podem ser lidos depois no painel).
 - **Proibido** na Vercel: `DATABASE_ADMIN_URL`, `DATABASE_OPS_URL`, `APP_API_DB_PASSWORD`, `APP_OPS_DB_PASSWORD`, `BACKUP_*`, `GOTRUE_FAKE`, `TEST_DATABASE_ADMIN_URL` e qualquer variável com prefixo público (`NEXT_PUBLIC_`, `VITE_`…) contendo segredo. A API recusa iniciar se achar as duas primeiras, e `verify-deploy.js --api-env-file` confere a lista.
-- A chave de serviço do Supabase (`SUPABASE_SERVICE_ROLE_KEY`) **precisa** existir na Vercel (convidar usuários) e exige `ALLOW_SERVICE_KEY_IN_API=1`; ela é *Sensitive* e nunca vai ao navegador.
+- A chave de serviço do Supabase (`SUPABASE_SERVICE_ROLE_KEY`) **precisa** existir na Vercel (convidar usuários); ela é *Sensitive* e nunca vai ao navegador. Projetos novos do Supabase (a partir de nov/2025) só têm as chaves novas: use a **secret key** (`sb_secret_…`) em `SUPABASE_SERVICE_ROLE_KEY` e a **publishable key** (`sb_publishable_…`) em `SUPABASE_ANON_KEY` — a API as envia só no cabeçalho `apikey`, como o Supabase exige (`src/auth/gotrue.js`, teste `tests/api/supabase-keys.test.js`).
 - `RELEASE`: a Vercel expõe `VERCEL_GIT_COMMIT_SHA`; para marcar a versão no `/api/health`, defina `RELEASE` no deploy (opcional).
 
 ## 3. Proteção de deployments (previews e staging)

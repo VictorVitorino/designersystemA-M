@@ -24,6 +24,8 @@ concurrency:
 jobs:
   backup:
     name: Backup do banco e dos arquivos
+    # agendado só depois que o backup estiver configurado (variável BACKUP_ENABLED=true); a execução manual sempre tenta (para testar a configuração)
+    if: vars.BACKUP_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 345          # limite do GitHub é 360; a 1ª cópia de ~1 TB pode precisar de mais de uma noite (é incremental e retoma de onde parou)
     environment: production-ops   # segredos de operação (sem revisores: precisa rodar de madrugada)

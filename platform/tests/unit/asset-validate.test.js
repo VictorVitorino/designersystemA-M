@@ -248,7 +248,10 @@ describe('CSV', () => {
 describe('PPTX / ZIP', () => {
   test('PPTX real gerado pelo python-pptx (tests/fixtures/generate.py)', async (t) => {
     const real = fx.realPptx();
-    if (!real) return t.skip('python3 com python-pptx indisponível neste ambiente');
+    if (!real) {
+      if (process.env.CI) assert.fail('python-pptx ausente no CI: instale "python-pptx==1.0.2" (o PPTX real não pode ser pulado em silêncio)');
+      return t.skip('python3 com python-pptx indisponível neste ambiente');
+    }
     const r = await validateUpload(real, { kind: 'attachment' });
     assert.deepEqual(r, { mime: MIME.pptx, size: real.length });
   });

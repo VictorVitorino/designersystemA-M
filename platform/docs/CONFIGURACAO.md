@@ -25,7 +25,7 @@ GitHub (código + CI + backup/manutenção agendados)
 | Provedor de e-mail (SMTP) | convites e senha esquecida | Resend, Amazon SES, Postmark… | domínio próprio com SPF/DKIM/DMARC |
 | Provedor do bucket de backup | cópia cifrada do banco e dos arquivos | Cloudflare R2 ou Backblaze B2 (conta **diferente** do armazenamento principal) | veja `docs/pesquisa/monitoramento-backup-seguranca.md` |
 | Cofre de senhas | guardar chaves e senhas | 1Password/Bitwarden… | **obrigatório** para a `BACKUP_ENCRYPTION_KEY` |
-| Monitor externo | avisar quando cair | UptimeRobot ou Better Stack (grátis) | `docs/MONITORAMENTO.md` |
+| Monitor externo | avisar quando cair | **Better Stack** (plano gratuito: 10 monitores, checagem a cada 3 min, uso comercial permitido) | o UptimeRobot gratuito é só para uso pessoal/não comercial desde out/2024; `docs/MONITORAMENTO.md` |
 | DNS do domínio | `canteiro.<seu-dominio>` | — | quem administra o domínio da empresa |
 
 Custos e comparação de alternativas: `docs/pesquisa/recomendacao-e-custos.md`.
@@ -60,7 +60,7 @@ Faça primeiro **staging**; só depois repita para produção.
 1. supabase.com → New project: nome `canteiro-staging`, região **South America (São Paulo)**, senha forte do banco (cofre). Anote o **`ref`** (aparece na URL do painel).
 2. Aplique **cada item** de `infra/supabase/auth-settings.md` (cadastro desligado, senha ≥ 12, SMTP próprio, URLs, chaves JWT assimétricas…) e cole os modelos de e-mail de `infra/supabase/templates/`.
 3. Storage → crie o bucket **privado** `canteiro-arquivos-staging` e uma **chave S3** (anote `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`).
-4. Anote as chaves da API: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` e a URL das chaves públicas `SUPABASE_JWKS_URL`.
+4. Anote as chaves da API: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` e a URL das chaves públicas `SUPABASE_JWKS_URL` (`https://<ref>.supabase.co/auth/v1/.well-known/jwks.json`). Projetos criados a partir de nov/2025 **não têm** as chaves legadas `anon`/`service_role`: use a **publishable key** (`sb_publishable_…`) como `SUPABASE_ANON_KEY` e uma **secret key** (`sb_secret_…`) como `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API Keys). A API aceita os dois formatos.
 5. Escolha a conexão administrativa (leia o aviso de IPv6 em `infra/supabase/README.md`) e monte `DATABASE_ADMIN_URL`:
    `postgres://postgres:<SENHA>@db.<ref>.supabase.co:5432/postgres?sslmode=require` (conexão direta) **ou** a do pooler em modo sessão.
 6. ✔ Confirmado quando: o teste de "cadastro bloqueado" do item 1 de `auth-settings.md` responde "Signups not allowed".
@@ -151,7 +151,7 @@ Admin → Usuários → **Convidar** (e-mail + nome + papel `membro` ou `adminis
 
 ## 12. Monitoramento mínimo
 
-1. Crie 2 monitores no UptimeRobot/Better Stack: `https://canteiro.<seu-dominio>/api/health` e `/api/ready` (alerta por e-mail de 2 pessoas). `docs/MONITORAMENTO.md` detalha limiares e consultas de log.
+1. Crie 2 monitores no **Better Stack** (plano gratuito): `https://canteiro.<seu-dominio>/api/health` e `/api/ready` (alerta por e-mail de 2 pessoas). `docs/MONITORAMENTO.md` detalha limiares e consultas de log. O `uptime.yml` do GitHub é só a segunda opinião (de hora em hora, para não gastar os minutos do plano em repositório privado).
 2. Cadastre as variáveis `PRODUCTION_URL` e `STAGING_URL` no GitHub para `uptime.yml`.
 3. Opcional: Sentry pela integração da Vercel (**dependência externa**; preencha `SENTRY_DSN`).
 
@@ -212,6 +212,7 @@ Admin → Usuários → **Convidar** (e-mail + nome + papel `membro` ou `adminis
 | `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | (Project Settings → General) | deploy-staging, deploy-production |
 | `PG_CLIENT_MAJOR` | `17` (versão do Postgres do Supabase) | deploy-*, backup |
 | `WARN_DB_GB`, `WARN_STORAGE_GB` | `6`, `800` | maintenance (alerta de tamanho) |
+| `BACKUP_ENABLED` | `true` | backup.yml (agendamento diário) e uptime.yml (frescor do backup): enquanto não for `true`, os agendamentos não rodam (evita falha diária e issue "Backup desatualizado" antes de o backup existir). Ligue **depois** de cadastrar os segredos `BACKUP_*` e ver o primeiro backup manual verde |
 | `BACKUP_INCLUDE_AUTH` | `1` | backup e deploy-production: inclui o esquema `auth` do Supabase (contas e identidades) no dump cifrado — recomendado `1` em produção |
 
 **Variáveis da Vercel (API)** — modelos completos em `infra/env/api.*.env.example`; contrato em `docs/API.md` §9. Opcional: `RATE_IP_MULTIPLIER` (padrão 25) — quantas vezes o limite por usuário cabe no mesmo IP antes do 429; aumente se mais de ~200 pessoas usarem a plataforma atrás de um único NAT.

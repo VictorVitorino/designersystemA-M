@@ -11,6 +11,7 @@ const tokenCalls = () => t.fake.calls.filter((x) => x.path === '/auth/v1/token')
 const attempt = async (c, email, password = 'senha-errada-qualquer-9') => { await c.ensureCsrf(); return c.request('POST', '/api/auth/login', { json: { email, password } }); };
 
 test('login: 8 tentativas por e-mail+IP em 10 min; a 9ª → 429 com Retry-After, SEM chamar o GoTrue', async () => {
+  await t.awayFromWindowEdge(600, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const c = t.anon(); await c.ensureCsrf();
   for (let i = 1; i <= 8; i++) { const r = await attempt(c, u.email); assert.equal(r.status, 401, `tentativa ${i}`); }
   const n = tokenCalls();
@@ -21,29 +22,34 @@ test('login: 8 tentativas por e-mail+IP em 10 min; a 9ª → 429 com Retry-After
   assert.equal((await attempt(c, u.email, u.password)).status, 429);
 });
 test('o limite por e-mail+IP não pune outro IP nem outro e-mail', async () => {
+  await t.awayFromWindowEdge(600, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const blocked = t.anon(); for (let i = 0; i < 9; i++) await attempt(blocked, 'alvo@am.test');
   assert.equal((await attempt(blocked, 'alvo@am.test')).status, 429);
   assert.equal((await attempt(t.anon(), 'alvo@am.test')).status, 401, 'outro IP, mesmo e-mail');
   assert.equal((await attempt(blocked, 'outro-alvo@am.test')).status, 401, 'mesmo IP, outro e-mail');
 });
 test('e-mail em maiúsculas/espaços conta no MESMO balde (não dá para contornar variando a grafia)', async () => {
+  await t.awayFromWindowEdge(600, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const c = t.anon(); await c.ensureCsrf();
   for (let i = 0; i < 8; i++) await attempt(c, i % 2 ? '  Variante@AM.test ' : 'variante@am.test');
   assert.equal((await attempt(c, 'VARIANTE@am.test')).status, 429);
 });
 test('login: 30 por IP em 10 min com e-mails diferentes (password spraying); depois 429', async () => {
+  await t.awayFromWindowEdge(600, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const c = t.anon(); await c.ensureCsrf();
   for (let i = 1; i <= 30; i++) assert.equal((await attempt(c, `spray${i}@am.test`)).status, 401, `tentativa ${i}`);
   const n = tokenCalls(); const r = await attempt(c, 'spray31@am.test'); assert.equal(r.status, 429); assert.equal(tokenCalls(), n);
   assert.equal((await t.anon().login(u.email, u.password)).status, 200, 'outro IP não é afetado');
 });
 test('IP vem do proxy (X-Forwarded-For, entrada mais à direita) e a entrada do cliente à esquerda não escapa do limite', async () => {
+  await t.awayFromWindowEdge(600, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const c = t.anon({ ip: '203.0.113.9' }); await c.ensureCsrf();
   for (let i = 0; i < 8; i++) await c.request('POST', '/api/auth/login', { json: { email: 'xff@am.test', password: 'senha-errada-qualquer-9' }, headers: { 'x-forwarded-for': `1.2.3.${i}, 203.0.113.9` } });
   const r = await c.request('POST', '/api/auth/login', { json: { email: 'xff@am.test', password: 'senha-errada-qualquer-9' }, headers: { 'x-forwarded-for': '9.9.9.9, 203.0.113.9' } });
   assert.equal(r.status, 429, 'forjar a parte esquerda do cabeçalho não renova o limite');
 });
 test('forgot: 5 por IP em 15 min (e-mails diferentes) → 429; sem enviar e-mail depois', async () => {
+  await t.awayFromWindowEdge(900, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const c = t.anon(); await c.ensureCsrf();
   for (let i = 1; i <= 5; i++) assert.equal((await c.post('/api/auth/forgot', { email: `f${i}@am.test` })).status, 202, `pedido ${i}`);
   const mails = t.fake.outbox().length;
@@ -51,12 +57,14 @@ test('forgot: 5 por IP em 15 min (e-mails diferentes) → 429; sem enviar e-mail
   assert.equal(t.fake.outbox().length, mails);
 });
 test('forgot: 5 por e-mail em 15 min mesmo vindo de IPs diferentes (não dá para inundar a caixa de alguém)', async () => {
+  await t.awayFromWindowEdge(900, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const email = u.email;
   for (let i = 1; i <= 5; i++) { const c = t.anon(); await c.ensureCsrf(); assert.equal((await c.post('/api/auth/forgot', { email })).status, 202, `pedido ${i}`); }
   const c = t.anon(); await c.ensureCsrf(); const r = await c.post('/api/auth/forgot', { email: `  ${email.toUpperCase()} ` }); assert.equal(r.status, 429);
   assert.equal(t.fake.outbox(email).filter((m) => m.type === 'recovery').length, 5);
 });
 test('verify: 10 tentativas por LINK em 15 min → 429; links diferentes do mesmo IP não se bloqueiam (teto por IP 100: uma equipe abre os convites do mesmo escritório)', async () => {
+  await t.awayFromWindowEdge(900, 15000);   // janela fixa: a rajada não pode cruzar a virada
   const c = t.anon(); await c.ensureCsrf(); const link = 'a'.repeat(20) + 'x';
   for (let i = 1; i <= 10; i++) assert.equal((await c.post('/api/auth/verify', { tokenHash: link, type: 'invite' })).status, 410, 'tentativa ' + i);
   assert.equal((await c.post('/api/auth/verify', { tokenHash: link, type: 'invite' })).status, 429, '11ª tentativa do MESMO link');

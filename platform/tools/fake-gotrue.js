@@ -15,11 +15,15 @@ const json = (res, status, body, extra = {}) => { const s = JSON.stringify(body)
 const err = (res, status, error_code, msg) => json(res, status, { code: status, error_code, msg });
 const scrypt = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString('hex');
 
-/** @param {{port?:number, mode?:'jwks'|'hs256', appOrigin?:string, anonKey?:string, serviceKey?:string, jwtSecret?:string, accessTtl?:number, latency?:{existingUserMs?:number}}} [opts] */
+/** keyFormat 'opaque' imita as chaves novas do Supabase (sb_publishable_…/sb_secret_…): a chave de serviço vale SÓ no cabeçalho apikey e
+    é recusada se vier como Authorization: Bearer (não é JWT), como no Supabase real.
+    @param {{port?:number, mode?:'jwks'|'hs256', keyFormat?:'legacy'|'opaque', appOrigin?:string, anonKey?:string, serviceKey?:string, jwtSecret?:string, accessTtl?:number, latency?:{existingUserMs?:number}}} [opts] */
 export async function startFakeGoTrue(opts = {}) {
   if (process.env.APP_ENV === 'production') throw new Error('fake-gotrue é só para teste/desenvolvimento: recusado com APP_ENV=production');
   const mode = opts.mode || 'jwks';
-  const anonKey = opts.anonKey || 'fake-anon-key-0000000000', serviceKey = opts.serviceKey || 'fake-service-role-key-000000';
+  const opaque = opts.keyFormat === 'opaque';
+  const anonKey = opts.anonKey || (opaque ? 'sb_publishable_fake' + crypto.randomBytes(12).toString('hex') : 'fake-anon-key-0000000000');
+  const serviceKey = opts.serviceKey || (opaque ? 'sb_secret_fake' + crypto.randomBytes(12).toString('hex') : 'fake-service-role-key-000000');
   const jwtSecret = opts.jwtSecret || crypto.randomBytes(32).toString('hex');
   const appOrigin = opts.appOrigin || 'http://localhost:3000';
   // state.fail = { invite: 500, recover: 500, login: 500, refresh: 500, verify: 500, logout: 500, admin: 500 } → a operação responde com esse status (testes de falha do provedor)
@@ -63,7 +67,10 @@ export async function startFakeGoTrue(opts = {}) {
   }
   const readBody = (req) => new Promise((resolve) => { const ch = []; req.on('data', (c) => ch.push(c)); req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(ch).toString() || '{}')); } catch { resolve({}); } }); });
   const apikeyOk = (req) => [anonKey, serviceKey].includes(req.headers.apikey);
-  const isService = (req) => req.headers.apikey === serviceKey && req.headers.authorization === `Bearer ${serviceKey}`;
+  // legado: service_role no apikey E como Bearer (padrão do GoTrue); chaves novas: sb_secret_ só no apikey (o gateway deriva o papel)
+  const isService = (req) => req.headers.apikey === serviceKey && (opaque ? !req.headers.authorization : req.headers.authorization === `Bearer ${serviceKey}`);
+  // o Supabase real recusa chave nova (não-JWT) no Authorization: imita isso para o teste pegar um cliente que ainda a mande como Bearer
+  const opaqueInBearer = (req) => opaque && /^Bearer sb_(publishable|secret)_/.test(req.headers.authorization || '');
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const byEmail = (email) => [...users.values()].find((u) => u.email === String(email || '').trim().toLowerCase());
   function mail(u, type) {
@@ -88,6 +95,7 @@ export async function startFakeGoTrue(opts = {}) {
       }
       if (p === '/auth/v1/.well-known/jwks.json') return json(res, 200, { keys: mode === 'jwks' ? [publicJwk] : [] });
       if (!apikeyOk(req)) return err(res, 401, 'no_authorization', 'No API key found in request');
+      if (opaqueInBearer(req)) return err(res, 401, 'bad_jwt', 'invalid JWT: unable to parse or verify signature, token is malformed');
       if (p === '/auth/v1/health' && method === 'GET') return json(res, 200, { version: 'fake', name: 'GoTrue' });
       const body = ['POST', 'PUT'].includes(method) ? await readBody(req) : {};
       const grantType = url.searchParams.get('grant_type');
@@ -175,7 +183,7 @@ export async function startFakeGoTrue(opts = {}) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(opts.port ?? 0, '127.0.0.1', resolve); });
   const port = server.address().port; const url = `http://127.0.0.1:${port}`; issuer = `${url}/auth/v1`;
   return {
-    url, port, mode, anonKey, serviceKey, jwtSecret, issuer, appOrigin,
+    url, port, mode, keyFormat: opaque ? 'opaque' : 'legacy', anonKey, serviceKey, jwtSecret, issuer, appOrigin,
     jwksUrl: mode === 'jwks' ? `${url}/auth/v1/.well-known/jwks.json` : undefined,
     publicJwk,
     outbox: (to) => outbox.filter((m) => !to || m.to === String(to).toLowerCase()),

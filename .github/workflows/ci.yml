@@ -61,9 +61,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Instalar ferramentas de teste (moto e cliente PostgreSQL 16)
+      - name: Instalar ferramentas de teste (moto, python-pptx e cliente PostgreSQL 16)
         run: |
-          python -m pip install --disable-pip-version-check "moto[server]==5.2.3"
+          python -m pip install --disable-pip-version-check "moto[server]==5.2.3" "python-pptx==1.0.2"
           sudo apt-get update -q
           sudo apt-get install -y -q postgresql-client-16
           echo "PG_BIN_DIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
@@ -93,6 +93,17 @@ jobs:
           node tools/migrate.js
           node tools/migrate.js --check
 
+      # O vercel.json VERSIONADO precisa conferir com o build ANTES de gerar o site (o build regrava o arquivo; depois dele o --check não pegaria nada).
+      - name: Conferir que o vercel.json versionado está em dia com o build (CSP por hash)
+        run: node tools/build-web.js --check
+
+      # Os testes de segurança leem o site gerado (dist/public: CSP por página, editor publicado, pdf.js, varredura de segredos): gerar ANTES dos testes.
+      - name: Gerar o site (build:web)
+        run: npm run build:web
+
+      - name: O build não alterou arquivos versionados
+        run: git diff --exit-code -- vercel.json
+
       - name: Testes unitários, de banco e da API
         run: npm test
 
@@ -101,12 +112,6 @@ jobs:
 
       - name: Testes de operação (backup, restauração, GC, manutenção, verify-deploy, secret-scan)
         run: node --test --test-concurrency=1 "tests/ops/*.test.js"
-
-      - name: Gerar o site (build:web)
-        run: npm run build:web
-
-      - name: Conferir que o vercel.json está em dia com o build (CSP por hash)
-        run: node tools/build-web.js --check
 
       - name: Conferir que o site não carrega segredos para o navegador
         env:

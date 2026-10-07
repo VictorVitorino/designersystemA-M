@@ -25,17 +25,17 @@ Gravidade → resposta: **crítica** (§1 do OPERACAO: 15 min), **alta** (mesmo 
 
 ## 2. Configurar o monitor externo (grátis)
 
-Use **um** dos dois (veja custos e limites em `docs/pesquisa/monitoramento-backup-seguranca.md` §2; a pesquisa **não confirmou** se o plano gratuito do UptimeRobot permite uso comercial — leia os termos antes; o Better Stack Free não tem essa dúvida registrada, mas só 10 monitores).
+Use o **Better Stack** (plano gratuito: 10 monitores, checagem a cada 3 min, alertas por e-mail, uso comercial permitido). O plano gratuito do **UptimeRobot** é restrito a uso pessoal/não comercial desde out/2024 — não serve para a A&M sem plano pago (custos e limites em `docs/pesquisa/monitoramento-backup-seguranca.md` §2).
 
-**UptimeRobot (ou Better Stack) — 5 monitores:**
-1. `HTTPS` → `https://canteiro.<seu-dominio>/api/health` — procurar a palavra-chave `"ok":true` — intervalo 5 min.
-2. `HTTPS` → `https://canteiro.<seu-dominio>/api/ready` — **código 200** — 5 min. (`503` = alguma dependência fora; o corpo diz qual: `db`, `storage`, `auth`, `migrations`.)
+**Better Stack — 5 monitores:**
+1. `HTTPS` → `https://canteiro.<seu-dominio>/api/health` — procurar a palavra-chave `"ok":true` — intervalo 3 min.
+2. `HTTPS` → `https://canteiro.<seu-dominio>/api/ready` — **código 200** — 3 min. (`503` = alguma dependência fora; o corpo diz qual: `db`, `storage`, `auth`, `migrations`.)
 3. `HTTPS` → `https://canteiro.<seu-dominio>/` — código 200 (página inicial).
 4. `HTTPS` → `https://staging.canteiro.<seu-dominio>/api/ready` — 200 (staging; alerta só por e-mail).
 5. **Certificado SSL** (expiração) para o domínio de produção.
 - **Contatos de alerta:** 2 e-mails (a TI e o substituto) + opcional canal Teams/Slack. Teste o alerta uma vez (pause o monitor de staging).
 - **Página de status** (opcional): mostra "operacional" para a equipe.
-- Regra de ouro: **monitor externo é a fonte primária**; o `uptime.yml` do GitHub é a segunda opinião (pode atrasar alguns minutos e **para** depois de 60 dias sem atividade no repositório — ligue os alertas por e-mail de Actions: GitHub → Settings → Notifications → Actions).
+- Regra de ouro: **monitor externo é a fonte primária**; o `uptime.yml` do GitHub é a segunda opinião, **de hora em hora** (em repositório privado cada execução gasta minutos do plano: de 5 em 5 min seriam ~8.600 min/mês), pode atrasar alguns minutos e **para** depois de 60 dias sem atividade no repositório — ligue os alertas por e-mail de Actions: GitHub → Settings → Notifications → Actions. O frescor do backup (a cada 4 h) só roda com `BACKUP_ENABLED=true`.
 
 ## 3. Logs e consultas
 

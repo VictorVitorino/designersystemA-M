@@ -38,6 +38,7 @@ Tudo o que é de produção (Supabase, Vercel, domínio, e-mail) está em [`docs
 
 ```bash
 npm test                 # unit + banco + API (Postgres local)
+npm run build:web        # gera dist/public (o test:security lê o site gerado: rode antes)
 npm run test:security    # suíte ofensiva, CSRF, cabeçalhos, sessões e limites
 npm run test:e2e         # ponta a ponta com a pilha real (Playwright)
 npm run test:load        # 50 usuários simultâneos

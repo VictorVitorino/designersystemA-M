@@ -1,11 +1,14 @@
-# Disponibilidade e frescor do backup. COMPLEMENTA (não substitui) um monitor externo gratuito (UptimeRobot/Better Stack: docs/MONITORAMENTO.md),
-# porque o agendamento do GitHub pode atrasar alguns minutos e pausa em repositórios sem atividade por 60 dias.
+# Disponibilidade e frescor do backup. COMPLEMENTA (não substitui) o monitor externo (Better Stack, plano gratuito, checagem a cada 3 min:
+# docs/MONITORAMENTO.md), porque o agendamento do GitHub pode atrasar alguns minutos e pausa em repositórios sem atividade por 60 dias.
+# Sonda de hora em hora (e não a cada 5 min): em repositório PRIVADO cada execução consome minutos do plano (GitHub Pro: 3.000/mês);
+# de 5 em 5 min seriam ~8.600 minutos/mês só nesta sonda. A checagem frequente é papel do monitor externo.
+# O frescor do backup só roda quando o backup estiver configurado (variável do repositório BACKUP_ENABLED=true).
 # Falha → abre (ou atualiza) uma issue "Indisponibilidade" e termina com erro (o GitHub avisa por e-mail quem acompanha o repositório).
 name: Uptime
 
 on:
   schedule:
-    - cron: '*/5 * * * *'     # a cada 5 minutos: /api/health e /api/ready
+    - cron: '7 * * * *'       # de hora em hora: /api/health e /api/ready (a checagem a cada 3 min é do monitor externo)
     - cron: '17 */4 * * *'    # a cada 4 horas: frescor do último backup
   workflow_dispatch:
 
@@ -76,7 +79,7 @@ jobs:
 
   backup-fresco:
     name: O último backup tem menos de 26 horas?
-    if: github.event.schedule == '17 */4 * * *' || github.event_name == 'workflow_dispatch'
+    if: vars.BACKUP_ENABLED == 'true' && (github.event.schedule == '17 */4 * * *' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: monitoring        # ambiente só com credencial de LEITURA do bucket de backup

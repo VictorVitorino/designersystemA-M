@@ -8,6 +8,10 @@ import { createLogger } from '../lib/log.js';
 
 const TIMEOUT_MS = 8000;
 const BAN_FOREVER = '876000h';   // ~100 anos; `none` remove o bloqueio (GoTrue: ban_duration)
+/* Chaves novas do Supabase (sb_publishable_… no lugar de anon, sb_secret_… no lugar de service_role; projetos criados a partir de
+   nov/2025 só têm estas) NÃO são JWT: vão só no cabeçalho `apikey` e o gateway do Supabase deriva o papel delas. Mandá-las como
+   `Authorization: Bearer` faz o Supabase recusar a chamada. As legadas (JWT) seguem também como Bearer, como o GoTrue espera. */
+export const isOpaqueKey = (k) => /^sb_(publishable|secret)_/.test(String(k || ''));
 
 export function createGoTrue(config, { fetchImpl } = {}) {
   const log = createLogger(config);
@@ -20,8 +24,9 @@ export function createGoTrue(config, { fetchImpl } = {}) {
     const apikey = key === 'service' ? config.supabase.serviceKey : config.supabase.anonKey;
     if (!apikey) throw E.notConfigured('Autenticação ainda não configurada.');
     const headers = { apikey, Accept: 'application/json' };
-    // chamadas administrativas: o segredo de serviço vai também como Bearer (padrão do GoTrue); chamadas de usuário usam o token do usuário
-    headers.Authorization = `Bearer ${bearer || apikey}`;
+    // chamadas de usuário levam o token do usuário; sem ele, a chave legada (JWT) vai também como Bearer (padrão do GoTrue) e a nova (sb_…) só no apikey
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    else if (!isOpaqueKey(apikey)) headers.Authorization = `Bearer ${apikey}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     let res;
     try {
