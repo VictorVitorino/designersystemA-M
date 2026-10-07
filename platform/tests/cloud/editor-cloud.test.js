@@ -60,7 +60,7 @@ async function newPage(ctx, tag) {
 }
 async function openEditor(ctx, id, tag, { mode = 'editor', wait = true } = {}) {
   const p = await newPage(ctx, tag);
-  await p.addInitScript(() => { window.__states = []; document.addEventListener('DOMContentLoaded', () => { const mo = new MutationObserver(() => { const el = document.getElementById('cloudPill'); if (el && window.__states.at(-1) !== el.dataset.state) window.__states.push(el.dataset.state); }); mo.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-state'], childList: true }); }); });
+  await p.addInitScript(() => { window.__states = []; window.__toasts = []; document.addEventListener('DOMContentLoaded', () => { const mo = new MutationObserver(() => { const el = document.getElementById('cloudPill'); if (el && window.__states.at(-1) !== el.dataset.state) window.__states.push(el.dataset.state); }); mo.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-state'], childList: true }); const t = document.getElementById('toast'); if (t) new MutationObserver(() => { if (t.textContent && window.__toasts.at(-1) !== t.textContent) window.__toasts.push(t.textContent); }).observe(t, { childList: true, characterData: true, subtree: true }); }); });
   await p.goto(BASE + '/' + mode + '/' + id);
   if (wait) await p.waitForFunction(() => window.AMCloud && (AMCloud.status === 'saved' || document.documentElement.classList.contains('am-cloud-view')) && !document.getElementById('cloudLoad'), null, { timeout: 20000 });
   return p;
@@ -74,6 +74,11 @@ async function typeNewText(p, text) { await p.click('[data-menu=mText]'); await 
 const pngBuf = (w, h, seed) => { const raw = Buffer.alloc(w * h * 3); let s = seed >>> 0; for (let i = 0; i < raw.length; i++) { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; raw[i] = (s >>> 24) & 0xff; } return sharp(raw, { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel: 1 }).toBuffer(); };
 const dataUrl = (buf, mime = 'image/png') => 'data:' + mime + ';base64,' + buf.toString('base64');
 const sha = (b) => createHash('sha256').update(b).digest('hex');
+/* BMP 24 bits e ICO (com PNG dentro): formatos que o editor aceita e o servidor não guarda */
+const bmpBuf = (w, h) => { const row = Math.ceil(w * 3 / 4) * 4, size = 54 + row * h, b = Buffer.alloc(size); b.write('BM'); b.writeUInt32LE(size, 2); b.writeUInt32LE(54, 10); b.writeUInt32LE(40, 14); b.writeInt32LE(w, 18); b.writeInt32LE(h, 22); b.writeUInt16LE(1, 26); b.writeUInt16LE(24, 28); b.writeUInt32LE(row * h, 34); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = 54 + y * row + x * 3; b[o] = 30; b[o + 1] = (x * 4) & 255; b[o + 2] = 200; } return b; };
+const icoBuf = (pngBytes) => { const hd = Buffer.alloc(22); hd.writeUInt16LE(0, 0); hd.writeUInt16LE(1, 2); hd.writeUInt16LE(1, 4); hd[6] = 32; hd[7] = 32; hd.writeUInt16LE(1, 10); hd.writeUInt16LE(32, 12); hd.writeUInt32LE(pngBytes.length, 14); hd.writeUInt32LE(22, 18); return Buffer.concat([hd, pngBytes]); };
+const toastsOf = (p) => p.evaluate(() => window.__toasts.slice());
+const keyOn = (p, init) => p.evaluate((o) => { const ev = new KeyboardEvent('keydown', Object.assign({ bubbles: true, cancelable: true }, o)); (document.activeElement || document.body).dispatchEvent(ev); return ev.defaultPrevented; }, init);
 const el = (o) => Object.assign({ id: 'e' + Math.random().toString(36).slice(2, 8), anim: { in: 'none' } }, o);
 const textEl = (html, over) => el(Object.assign({ type: 'text', x: 80, y: 80, w: 700, h: 100, html, font: 'Inter', size: 36, weight: 700, color: '#002A46', align: 'left', valign: 'top', lh: 1.2, ls: 0 }, over || {}));
 const imgEl = (src, over) => el(Object.assign({ type: 'image', src, x: 700, y: 300, w: 300, h: 200, fit: 'cover', radius: 0 }, over || {}));
@@ -94,16 +99,21 @@ await scenario('01 · boot, modo inerte e CSP', async () => {
   const c = await p.evaluate(() => ({ cloud: window.AM_CLOUD, pdf: window.AM_PDFJS, cls: document.documentElement.className, cover: window.AMCover && AMCover.isOpen(), title: document.title }));
   check('CL-01 boot lê o caminho: /editor/<uuid> → AM_CLOUD {apiBase, presentationId, mode:edit, pdfjsBase}', c.cloud && c.cloud.mode === 'edit' && c.cloud.presentationId === s.id && c.cloud.apiBase === '/api' && c.cloud.pdfjsBase === '/vendor/pdfjs-4.10.38/' && c.pdf === '/vendor/pdfjs-4.10.38/', c);
   check('CL-02 a capa não abre na nuvem (o ponto de entrada é o acervo)', c.cover === false, c);
-  const inert = await openEditor(ana, 'nao-e-uuid', 'inerte', { wait: false }); await sleep(1500);
-  const ci = await inert.evaluate(() => ({ cloud: window.AM_CLOUD, api: window.AMCloud, cover: AMCover.isOpen(), pill: !!document.getElementById('cloudPill') }));
-  const apiCalls = (await reqLog(ana)).filter((r) => /nao-e-uuid/.test(r.path));
-  check('CL-03 modo inerte: fora de /editor/<uuid> o build cloud se comporta como o editor original (capa aberta, sem pílula, sem AM_CLOUD, sem chamadas à API)', !ci.cloud && !ci.api && ci.cover === true && !ci.pill && apiCalls.length === 0, ci);
-  await inert.close();
   /* hash de cada <script> inline do HTML servido = hash da CSP (calculado no navegador a partir do DOM real) */
   const hs = await p.evaluate(async () => { const out = []; for (const sc of document.scripts) { if (sc.src) continue; const t = sc.type; if (t && !/^(text\/javascript|module)$/i.test(t)) continue; const b = new TextEncoder().encode(sc.textContent); const d = await crypto.subtle.digest('SHA-256', b); out.push('sha256-' + btoa(String.fromCharCode(...new Uint8Array(d)))); } return out; });
   const policy = cspJson['/editor/'], inPolicy = hs.every((h) => policy.includes("'" + h + "'"));
   check('CL-04 CSP do editor: cada <script> inline do DOM real tem hash na política (' + hs.length + ' scripts) e há strict-dynamic, sem unsafe-inline/unsafe-eval em script-src', inPolicy && /script-src [^;]*'strict-dynamic'/.test(policy) && !/script-src[^;]*unsafe-(inline|eval)/.test(policy) && hs.length === inlineScriptHashes(readFileSync(path.join(PLATFORM, 'dist/public/editor/index.html'), 'utf8')).length, { n: hs.length });
   await p.close();
+  /* BE-ED-07: sem o UUID de uma apresentação, /editor e /visualizar levam ao acervo (nunca abrem o editor original fora da nuvem) */
+  const reds = [];
+  for (const u of ['/editor/nao-e-uuid', '/editor/', '/editor/index.html', '/visualizar/abc']) { const q = await newPage(ana, 'redir'); await q.goto(BASE + u); await q.waitForURL(/\/acervo$/, { timeout: 8000 }).catch(() => { }); reds.push(new URL(q.url()).pathname); await q.close(); }
+  check('CL-03 /editor/<não-UUID>, /editor/, /editor/index.html e /visualizar/<não-UUID> redirecionam para /acervo (o editor original não abre fora da nuvem) — BE-ED-07', reds.every((x) => x === '/acervo'), reds);
+  await reqLog(ana, true);
+  const inert = await newPage(ana, 'inerte'); await inert.goto(BASE + '/__test/inerte'); await sleep(1500);
+  const ci = await inert.evaluate(() => ({ cloud: window.AM_CLOUD, api: window.AMCloud, cover: AMCover.isOpen(), pill: !!document.getElementById('cloudPill') }));
+  const apiCalls = (await reqLog(ana)).filter((r) => r.path.startsWith('/api/'));
+  check('CL-03b modo inerte: o MESMO HTML fora de /editor/<uuid> se comporta como o editor original (capa aberta, sem pílula, sem AM_CLOUD, sem chamadas à API)', !ci.cloud && !ci.api && ci.cover === true && !ci.pill && apiCalls.length === 0, { ci, apiCalls: apiCalls.map((r) => r.path) });
+  await inert.close();
 });
 
 await scenario('02 · carregar e hidratar', async () => {
@@ -318,7 +328,7 @@ await scenario('09 · menu da pílula: criar cópia, compartilhar, voltar ao ace
   const s = await seed(ana, 'ana', 'Menu'); const p = await openEditor(ana, s.id, 'menu');
   await p.focus('#cloudPill'); await p.keyboard.press('Enter');
   const items = await p.$$eval('#cloudMenu .cl-mi', (l) => l.map((x) => x.querySelector('span').textContent));
-  check('CL-45 clicar/Enter na pílula abre o menu (role=menu) com: Salvar versão agora…, Histórico de versões…, Criar cópia, Compartilhar (copiar link), Voltar ao acervo', JSON.stringify(items) === JSON.stringify(['Salvar versão agora…', 'Histórico de versões…', 'Criar cópia', 'Compartilhar (copiar link)', 'Voltar ao acervo']) && (await p.getAttribute('#cloudPill', 'aria-expanded')) === 'true', items);
+  check('CL-45 clicar/Enter na pílula abre o menu (role=menu) com: Salvar versão agora…, Histórico de versões…, Comentários…, Criar cópia, Compartilhar (copiar link), Voltar ao acervo', JSON.stringify(items) === JSON.stringify(['Salvar versão agora…', 'Histórico de versões…', 'Comentários…', 'Criar cópia', 'Compartilhar (copiar link)', 'Voltar ao acervo']) && (await p.getAttribute('#cloudPill', 'aria-expanded')) === 'true', items);
   check('CL-45b o topo do menu mostra o estado por extenso e a versão na nuvem', /Salvo na nuvem às \d\d:\d\d/.test(await p.innerText('#cloudMenu .cl-mh')) && /Versão 1 na nuvem/.test(await p.innerText('#cloudMenu .cl-mh')));
   await p.keyboard.press('ArrowDown');
   const focused = await p.evaluate(() => document.activeElement.dataset.id);
@@ -343,14 +353,14 @@ await scenario('09 · menu da pílula: criar cópia, compartilhar, voltar ao ace
   const m1 = await openEditor(ana, s.id, 'home-menu'); await m1.click('#mbar button[data-m=file]'); await sleep(250);
   const firstItem = await m1.$eval('.xmenu .xi', (n) => n.textContent.trim());
   await Promise.all([m1.waitForURL(/\/acervo\?foco=/, { timeout: 10000 }), m1.click('.xmenu .xi')]);
-  check('CL-49b Arquivo › "' + firstItem.slice(0, 20) + '…" (Início/capa) leva ao acervo na nuvem', /^Início/.test(firstItem) && m1.url().endsWith('/acervo?foco=' + s.id), { firstItem, url: m1.url() });
+  check('CL-49b Arquivo › "Voltar ao acervo" (o antigo "Início (capa)", com o rótulo do que faz na nuvem) leva ao acervo', firstItem === 'Voltar ao acervo' && m1.url().endsWith('/acervo?foco=' + s.id), { firstItem, url: m1.url() });
   await m1.close();
   const m2 = await openEditor(ana, s.id, 'home-brand'); await Promise.all([m2.waitForURL(/\/acervo\?foco=/, { timeout: 10000 }), m2.click('#top .brand')]);
   check('CL-49c clicar na marca A&M também vai ao acervo', m2.url().endsWith('/acervo?foco=' + s.id)); await m2.close();
   const m3 = await openEditor(ana, s.id, 'obras'); await m3.click('#mbar button[data-m=file]'); await sleep(250);
-  const obras = await m3.$$('.xmenu .xi'); let clicked = false; for (const it of obras) { if (/Minhas obras/.test(await it.textContent())) { await it.click(); clicked = true; break; } }
-  await sleep(700); const coverOpen = await m3.evaluate(() => AMCover.isOpen());
-  check('CL-49d "Minhas obras…" (acervo local do navegador) continua abrindo, e Esc volta ao editor', clicked && coverOpen === true && (await (async () => { await m3.keyboard.press('Escape'); await sleep(900); return !(await m3.evaluate(() => AMCover.isOpen())) && m3.url().includes('/editor/'); })()));
+  const labs = await m3.$$eval('.xmenu .xi .xl', (l) => l.map((x) => x.textContent)), io = labs.indexOf('Acervo da nuvem…');
+  await Promise.all([m3.waitForURL(/\/acervo\?aba=minhas&foco=/, { timeout: 10000 }).catch(() => { }), io >= 0 ? (await m3.$$('.xmenu .xi'))[io].click() : null]);
+  check('CL-49d "Minhas obras…" na nuvem vira "Acervo da nuvem…" e leva a /acervo?aba=minhas (não abre o acervo local do navegador) — BE-ED-03', io >= 0 && !labs.includes('Minhas obras…') && m3.url().endsWith('/acervo?aba=minhas&foco=' + s.id), { labs, url: m3.url() });
   await m3.close();
   const r = await openEditor(ana, s.id, 'home2'); await r.keyboard.press('F1'); const hk = await r.waitForSelector('#modal.open', { timeout: 4000 }).catch(() => null);
   check('CL-50 atalho F1 (editor original) continua abrindo a ajuda; Esc fecha', !!hk && /Atalhos de teclado/.test(await r.innerText('#modal')) && (await r.innerText('#modal')).includes('Na nuvem: salva uma versão'), '');
@@ -518,10 +528,10 @@ await scenario('15 · Abrir…/Novo trocam o deck: o id da nuvem se mantém e o 
   const s = await seed(ana, 'ana', 'Trocar', deckWith('Trocar', [slideOf([textEl('Original da nuvem')])])); const p = await openEditor(ana, s.id, 'swap');
   const other = deckWith('Outro arquivo', [slideOf([textEl('Veio de um arquivo')])]); other.id = 'id-de-outro-arquivo';
   const f = path.join(TMP, 'outro.json'); writeFileSync(f, JSON.stringify(other));
-  await p.setInputFiles('#fOpen', f); await sleep(500);
+  await p.setInputFiles('#fOpen', f); await p.waitForSelector('.cl-dlg [data-act=replace]', { timeout: 8000 }); await p.click('.cl-dlg [data-act=replace]'); await sleep(500);
   await waitSaved(p, 20000);
   const d = await deckOf(p), sp = await serverPres(ana, s.id);
-  check('CL-79 Abrir… um arquivo: deck.id continua o da apresentação na nuvem e o conteúdo novo é salvo', d.id === s.id && JSON.stringify(sp.content).includes('Veio de um arquivo') && sp.content.id === s.id, { id: d.id, cid: sp.content.id });
+  check('CL-79 Abrir… um arquivo › "Substituir esta (a atual fica no histórico)": deck.id continua o da apresentação na nuvem e o conteúdo novo é salvo', d.id === s.id && JSON.stringify(sp.content).includes('Veio de um arquivo') && sp.content.id === s.id, { id: d.id, cid: sp.content.id });
   const vs = (await post(ana, '/presentation', { id: s.id })).versions;
   check('CL-80 antes de substituir, o que estava na nuvem ficou guardado no histórico ("Antes de substituir")', vs.some((v) => v.label === 'Antes de substituir'), vs);
   await p.close();
@@ -603,6 +613,381 @@ await scenario('20 · administrador edita apresentação de outra pessoa', async
   const sp = await serverPres(ana, s.id);
   check('CL-93 a edição do admin é salva (e o histórico registra o autor)', JSON.stringify(sp.content).includes('Moderado') && sp.rev === 2, sp.rev);
   await p.close(); await adm.close();
+});
+
+/* =========================================================================================================== */
+/* correções da auditoria (BE-ED-*, BTN-*, VIS-06, F5, F7, F13): cada cenário prova o comportamento novo */
+await scenario('21 · imagens SVG, BMP e ICO: a cópia que sobe leva PNG (asset:sha256) e a apresentação salva normalmente (BE-ED-01)', async () => {
+  const s = await seed(ana, 'ana', 'Formatos'); const p = await openEditor(ana, s.id, 'fmt'); await reqLog(ana, true);
+  const svg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40"><rect width="120" height="40" fill="#F78C16"/></svg>').toString('base64');
+  const bmp = dataUrl(bmpBuf(64, 32), 'image/bmp'), ico = dataUrl(icoBuf(await pngBuf(32, 32, 5)), 'image/x-icon');
+  await p.evaluate((srcs) => { const sl = AMStudio.deck.slides[0]; srcs.forEach((u, i) => { sl.els.push(AMStudio.mk.image(u, 240, 120, { x: 40 + i * 300, y: 200 })); }); sl.bgImg = srcs[0]; AMStudio.renderAll(); AMStudio.commit(); }, [svg, bmp, ico]);
+  await waitSaved(p, 25000);
+  const put = (await reqLog(ana)).filter((r) => r.method === 'PUT' && /\/content$/.test(r.path)).pop(), c = put && put.putBody.content;
+  const srcs = c ? c.slides[0].els.filter((e) => e.type === 'image').map((e) => e.src) : [];
+  check('CL-95 SVG, BMP e ICO inseridos (e um SVG de fundo): o PUT sai só com asset:sha256, sem nenhum data:image, e a pílula fica "Salvo na nuvem"', !!put && put.status === 200 && srcs.length === 3 && srcs.every((x) => /^asset:sha256:[0-9a-f]{64}$/.test(x)) && /^asset:sha256:/.test(c.slides[0].bgImg || '') && !/data:image/.test(JSON.stringify(c)) && (await pillState(p)) === 'saved', { st: put && put.status, srcs: srcs.map((x) => x.slice(0, 20)), pill: await pillState(p) });
+  const types = await p.evaluate(async (list) => Promise.all(list.map(async (u) => (await fetch('/api/assets/' + u.slice(13))).headers.get('content-type'))), srcs);
+  const local = (await deckOf(p)).slides[0].els.filter((e) => e.type === 'image').map((e) => e.src.slice(0, 15));
+  check('CL-96 os arquivos que subiram são PNG (desenhados no navegador) e o deck do editor segue com as imagens originais (SVG/BMP/ICO)', types.length === 3 && types.every((t) => t === 'image/png') && local[0] === 'data:image/svg+' && local[1] === 'data:image/bmp;' && local[2].startsWith('data:image/x-ic'), { types, local });
+  await p.reload(); await p.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved', null, { timeout: 20000 });
+  const back = (await deckOf(p)).slides[0].els.filter((e) => e.type === 'image').map((e) => e.src.slice(0, 22));
+  check('CL-96b ao reabrir, as três imagens voltam (como PNG) e nada pede recuperação', back.length === 3 && back.every((x) => x === 'data:image/png;base64,') && !(await p.$('.cl-dlg')), back);
+  await p.close();
+});
+
+await scenario('22 · Novo e Arquivo › Nova apresentação criam outra apresentação no acervo; a aberta fica intacta (BTN-01)', async () => {
+  const s = await seed(ana, 'ana', 'Proposta Cliente X', deckWith('Proposta Cliente X', [slideOf([textEl('Conteúdo da proposta')])]));
+  const p = await openEditor(ana, s.id, 'novo'); await reqLog(ana, true);
+  await Promise.all([p.waitForURL((u) => /\/editor\/[0-9a-f-]{36}$/.test(u.pathname) && !u.pathname.endsWith(s.id), { timeout: 15000 }), p.click('#bNew')]);
+  const nid = p.url().split('/').pop(); await p.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved', null, { timeout: 15000 });
+  const orig = await serverPres(ana, s.id), log = await reqLog(ana), np = await serverPres(ana, nid);
+  check('CL-97 botão Novo: POST /api/presentations {source:"new"} e abre /editor/<novo>; a aberta continua com o título, o conteúdo e a revisão', log.some((r) => r.method === 'POST' && r.path === '/api/presentations' && r.json && r.json.source === 'new') && nid !== s.id && orig.title === 'Proposta Cliente X' && JSON.stringify(orig.content).includes('Conteúdo da proposta') && orig.rev === 1 && !orig.versions.some((v) => v.label === 'Antes de substituir') && np.content.slides.length === 1, { nid, t: orig.title, rev: orig.rev });
+  const q = await openEditor(ana, s.id, 'novo2'); await q.click('#mbar button[data-m=file]'); await sleep(250);
+  const labs = await q.$$eval('.xmenu .xi .xl', (l) => l.map((x) => x.textContent)), i = labs.indexOf('Nova apresentação no acervo');
+  await Promise.all([q.waitForURL((u) => /\/editor\/[0-9a-f-]{36}$/.test(u.pathname) && !u.pathname.endsWith(s.id) && !u.pathname.endsWith(nid), { timeout: 15000 }).catch(() => { }), i >= 0 ? (await q.$$('.xmenu .xi'))[i].click() : null]);
+  const orig2 = await serverPres(ana, s.id);
+  check('CL-98 Arquivo › "Nova apresentação no acervo" também cria outra e abre; nada da aberta muda (sem a caixa "O que não foi salvo com Salvar apresentação…")', i >= 0 && !q.url().endsWith(s.id) && orig2.rev === 1 && orig2.title === 'Proposta Cliente X', { labs, url: q.url() });
+  await q.close(); await p.close();
+});
+
+await scenario('23 · Abrir…/arrastar arquivo e projeto pronto: criar nova no acervo × substituir esta; ?modelo=N (BE-ED-04)', async () => {
+  const s = await seed(ana, 'ana', 'Com conteúdo', deckWith('Com conteúdo', [slideOf([textEl('Original na nuvem')])])); const p = await openEditor(ana, s.id, 'abrir');
+  const other = deckWith('Arquivo aberto', [slideOf([textEl('Veio do arquivo'), imgEl(dataUrl(imgB))])]); other.id = 'outro-arquivo';
+  const f = path.join(TMP, 'abrir.json'); writeFileSync(f, JSON.stringify(other));
+  await p.setInputFiles('#fOpen', f); const dl = await p.waitForSelector('.cl-dlg', { timeout: 8000 }).catch(() => null);
+  const acts = await p.$$eval('.cl-dlg [data-act]', (l) => l.map((b) => b.dataset.act + ':' + b.textContent));
+  const shown = textsOf(await deckOf(p));
+  check('CL-99 Abrir… numa apresentação com conteúdo: a da nuvem continua no editor e a caixa oferece "Criar como nova apresentação no acervo" × "Substituir esta (a atual fica no histórico)" × Cancelar', !!dl && shown.includes('Original na nuvem') && !shown.includes('Veio do arquivo') && acts.some((a) => a === 'new:Criar como nova apresentação no acervo') && acts.some((a) => a === 'replace:Substituir esta (a atual fica no histórico)') && acts.some((a) => a.startsWith('cancel:')), { acts, shown });
+  await p.click('.cl-dlg [data-act=cancel]'); await sleep(3800);
+  check('CL-100 Cancelar: nada muda (sem PUT, conteúdo e título da nuvem iguais)', (await serverPres(ana, s.id)).rev === 1 && textsOf(await deckOf(p)).includes('Original na nuvem'));
+  await p.evaluate(() => { document.getElementById('fOpen').value = ''; }); await p.setInputFiles('#fOpen', f); await p.waitForSelector('.cl-dlg [data-act=new]', { timeout: 8000 });
+  await Promise.all([p.waitForURL((u) => /\/editor\/[0-9a-f-]{36}$/.test(u.pathname) && !u.pathname.endsWith(s.id), { timeout: 20000 }), p.click('.cl-dlg [data-act=new]')]);
+  const nid = p.url().split('/').pop(); await p.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved', null, { timeout: 20000 });
+  const np = await serverPres(ana, nid), op = await serverPres(ana, s.id);
+  check('CL-101 "Criar como nova": nova apresentação no acervo com o conteúdo do arquivo (imagem como asset:) e a original intacta', JSON.stringify(np.content).includes('Veio do arquivo') && /asset:sha256:/.test(JSON.stringify(np.content)) && !/data:image/.test(JSON.stringify(np.content)) && np.title === 'Arquivo aberto' && op.rev === 1 && JSON.stringify(op.content).includes('Original na nuvem'), { t: np.title, rev: op.rev });
+  /* soltar um .json no editor: mesma escolha, sem a caixa do editor ("O que não foi salvo com Salvar apresentação…") */
+  const q = await openEditor(ana, s.id, 'soltar');
+  await q.evaluate((txt) => { const dt = new DataTransfer(); dt.items.add(new File([txt], 'solto.json', { type: 'application/json' })); document.getElementById('wrap').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }, JSON.stringify(other));
+  const d2 = await q.waitForSelector('.cl-dlg [data-act=replace]', { timeout: 8000 }).catch(() => null);
+  check('CL-102 soltar um arquivo .json no slide: a mesma escolha da nuvem (e nenhum modal do editor com "Salvar apresentação")', !!d2 && !(await q.$('#modal.open')));
+  await q.click('.cl-dlg [data-act=cancel]'); await q.close();
+  /* projeto pronto pedido pelo acervo: /editor/<nova em branco>?modelo=2 */
+  const b = await seed(ana, 'ana', 'Nova apresentação'); const m = await openEditor(ana, b.id + '?modelo=2', 'modelo', { wait: false });
+  await m.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved' && AMStudio.deck.slides.length > 1, null, { timeout: 20000 }).catch(() => { });
+  const nm = await m.evaluate(() => AMCover.templates[2]), mp = await serverPres(ana, b.id);
+  check('CL-103 /editor/<id>?modelo=2 numa apresentação em branco aplica o projeto pronto "' + nm + '", salva na nuvem e limpa o parâmetro da URL', mp.content.slides.length > 1 && mp.rev >= 2 && new URL(m.url()).search === '' && (await deckOf(m)).slides.length === mp.content.slides.length, { slides: mp.content.slides.length, url: m.url() });
+  await m.close();
+  const m2 = await openEditor(ana, s.id + '?modelo=1', 'modelo2'); await sleep(800);
+  check('CL-104 ?modelo numa apresentação COM conteúdo é ignorado (aviso), nada é trocado', (await serverPres(ana, s.id)).rev === 1 && textsOf(await deckOf(m2)).includes('Original na nuvem') && (await toastsOf(m2)).some((t) => /só é aplicado a uma apresentação em branco/.test(t)), await toastsOf(m2));
+  await m2.close();
+});
+
+await scenario('24 · "Minhas obras", capa e manual na nuvem: nada local substitui a apresentação (BTN-02, BE-ED-03, BTN-06)', async () => {
+  const s = await seed(ana, 'ana', 'Capa', deckWith('Capa', [slideOf([textEl('Fica na nuvem')])]));
+  const p = await openEditor(ana, s.id, 'capa');
+  await Promise.all([p.waitForURL(/\/acervo\?aba=minhas&foco=/, { timeout: 10000 }).catch(() => { }), p.evaluate(() => AMStudio.openObras())]);
+  check('CL-105 AMStudio.openObras()/AMCover.openHist() (Minhas obras) levam ao acervo da nuvem (aba Minhas), não ao acervo local do navegador', p.url().endsWith('/acervo?aba=minhas&foco=' + s.id), p.url());
+  await p.goto(BASE + '/editor/' + s.id); await p.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved', null, { timeout: 15000 });
+  await Promise.all([p.waitForURL(/\/acervo\?foco=/, { timeout: 10000 }).catch(() => { }), p.evaluate(() => AMCover.open('tpl'))]);
+  check('CL-106 AMCover.open("tpl") (projetos prontos da capa local) também vai ao acervo, onde a nuvem cria a partir de projeto pronto', /\/acervo\?foco=/.test(p.url()), p.url());
+  await p.goto(BASE + '/editor/' + s.id); await p.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved', null, { timeout: 15000 });
+  await p.click('#mbar button[data-m=help]'); await sleep(250); const hl = await p.$$eval('.xmenu .xi .xl', (l) => l.map((x) => x.textContent)); await (await p.$$('.xmenu .xi'))[hl.indexOf('Manual da obra')].click(); await sleep(800);
+  const cv = await p.evaluate(() => ({ open: AMCover.isOpen(), view: document.getElementById('cover').dataset.view, hist: getComputedStyle(document.getElementById('cvHistBtn')).display, step: (document.querySelector('#cvHelpBody .cv-step p') || {}).textContent }));
+  check('CL-107 Ajuda › Manual da obra abre (vista "help"), sem o botão "Minhas obras" da capa e com os passos da nuvem ("Comece pelo acervo…")', cv.open && cv.view === 'help' && cv.hist === 'none' && /^Comece pelo acervo/.test(cv.step || ''), cv);
+  await reqLog(ana, true); let downloaded = false; p.on('download', () => { downloaded = true; });
+  await p.keyboard.press('Control+s'); await sleep(1200);
+  check('CL-108 Ctrl+S com a capa (manual) aberta não baixa .html nem salva versão escondida (BTN-06)', !downloaded && !(await reqLog(ana)).some((r) => r.method === 'PUT') && (await p.evaluate(() => AMCover.isOpen())));
+  await p.evaluate((txt) => { const dt = new DataTransfer(); dt.items.add(new File([txt], 'capa.json', { type: 'application/json' })); document.getElementById('cover').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }, JSON.stringify(deckWith('Solto na capa', [slideOf([textEl('Solto na capa')])]))); await sleep(1200);
+  check('CL-109 soltar um arquivo sobre a capa não troca a apresentação da nuvem', textsOf(await deckOf(p)).includes('Fica na nuvem') && !(await p.$('.cl-dlg')) && (await serverPres(ana, s.id)).rev === 1);
+  await p.keyboard.press('Escape'); await sleep(900);
+  check('CL-110 Esc fecha o manual e volta ao editor', !(await p.evaluate(() => AMCover.isOpen())) && p.url().includes('/editor/'));
+  await p.close();
+});
+
+await scenario('25 · links do acervo: ?historico=1 abre o histórico; ?exportar=html|pdf roda a exportação (só para quem edita) (BE-ED-08, F5)', async () => {
+  const s = await seed(ana, 'ana', 'Links do acervo', deckWith('Links do acervo', [slideOf([textEl('Exportar daqui')])]));
+  const p = await newPage(ana, 'hist-url'); await p.goto(BASE + '/editor/' + s.id + '?historico=1');
+  const h1 = await p.waitForSelector('.cl-dlg h2', { timeout: 15000 }).catch(() => null);
+  check('CL-111 /editor/<id>?historico=1 abre "Versões desta apresentação" e a URL volta a /editor/<id>', !!h1 && (await h1.textContent()) === 'Versões desta apresentação' && new URL(p.url()).search === '', p.url());
+  await p.close();
+  const x = await newPage(ana, 'exp-html');
+  const [dl] = await Promise.all([x.waitForEvent('download', { timeout: 20000 }).catch(() => null), x.goto(BASE + '/editor/' + s.id + '?exportar=html')]);
+  let html = ''; if (dl) { const f = path.join(TMP, 'exportar.html'); await dl.saveAs(f); html = readFileSync(f, 'utf8'); }
+  check('CL-112 /editor/<id>?exportar=html baixa o .html da apresentação (com o conteúdo) depois de carregar', !!dl && dl.suggestedFilename() === 'links-do-acervo.html' && /Exportar daqui/.test(html), dl && dl.suggestedFilename());
+  await x.close();
+  const y = await newPage(ana, 'exp-pdf'); await y.goto(BASE + '/editor/' + s.id + '?exportar=pdf');
+  const xp = await y.waitForFunction(() => document.documentElement.classList.contains('xp-open'), null, { timeout: 15000 }).then(() => true, () => false);
+  check('CL-113 /editor/<id>?exportar=pdf abre a caixa "Salvar como PDF" do editor', xp);
+  await y.close();
+  const z = await newPage(bia, 'exp-bia'); let bdl = false; z.on('download', () => { bdl = true; }); await z.goto(BASE + '/editor/' + s.id + '?exportar=html'); await z.waitForURL(/\/visualizar\//, { timeout: 15000 }); await sleep(1500);
+  check('CL-114 quem não é dono com ?exportar vai ao /visualizar e nada é exportado (continua tendo de criar cópia)', !bdl && new URL(z.url()).pathname === '/visualizar/' + s.id, z.url());
+  await z.close();
+});
+
+await scenario('26 · computador compartilhado: outra pessoa não vê nem envia o que ficou; Sair apaga os dados locais (BE-ED-06)', async () => {
+  const ctx = await newCtx('ana'); const s = await seed(ctx, 'ana', 'Compartilhado'), sb = await seed(ctx, 'bia', 'Da Bia');
+  const a = await openEditor(ctx, s.id, 'pc-ana');
+  await a.evaluate(async ({ id, ana }) => {
+    localStorage.setItem('amForm.' + id + '.f1', JSON.stringify({ v: 1, q: ['Q'], rows: [{ at: 'x', a: ['resposta da Ana'] }] })); localStorage.setItem('amPlayer.notes:' + id, '{"s":"nota da Ana"}');
+    await new Promise((res) => { const r = indexedDB.open('canteiro-cloud'); r.onsuccess = () => { const tx = r.result.transaction('outbox', 'readwrite'); tx.objectStore('outbox').add({ pid: id, ts: 1, kind: 'form_response', elementId: 'fAna', payload: { at: 'x', q: ['Q'], a: ['pendente da Ana'] }, uid: ana, cid: 'cid-ana-1' }); tx.oncomplete = () => res(); }; });
+  }, { id: s.id, ana: users.ana });
+  await a.close();
+  await ctx.request.post(BASE + '/__test/login', { data: { user: 'bia' } }); await reqLog(ctx, true);
+  const b = await openEditor(ctx, sb.id, 'pc-bia'); await sleep(2500);
+  const lsb = await b.evaluate((id) => ({ form: localStorage.getItem('amForm.' + id + '.f1'), note: localStorage.getItem('amPlayer.notes:' + id), user: localStorage.getItem('amCloud.user') }), s.id);
+  const sent = (await post(ctx, '/state')).interactions.filter((i) => JSON.stringify(i.payload).includes('pendente da Ana'));
+  const left = await b.evaluate(() => new Promise((res) => { const r = indexedDB.open('canteiro-cloud'); r.onsuccess = () => { const g = r.result.transaction('outbox').objectStore('outbox').getAll(); g.onsuccess = () => res(g.result.length); }; }));
+  check('CL-115 outra pessoa entra no mesmo navegador: respostas e notas da anterior somem do localStorage e a fila pendente dela NÃO é enviada com a identidade nova (é apagada)', lsb.form === null && lsb.note === null && lsb.user === users.bia && sent.length === 0 && left === 0, { lsb, sent: sent.length, left });
+  await b.close();
+  /* Sair (páginas web): avisa o que não foi enviado e apaga os dados locais */
+  const w = await newPage(ctx, 'sair'); await w.goto(BASE + '/importar'); await w.waitForSelector('#btn-sair', { timeout: 15000 });
+  await w.evaluate(async (id) => {
+    localStorage.setItem('amVote.' + id + '.v1', '{"rows":[]}'); localStorage.setItem('amStudio.brandKits', '[{"name":"Kit"}]'); sessionStorage.setItem('am.import.done', '{"a":1}');
+    await new Promise((res) => { const r = indexedDB.open('canteiro-cloud', 2); r.onupgradeneeded = () => { r.result.createObjectStore('pending', { keyPath: 'id' }); r.result.createObjectStore('outbox', { keyPath: 'seq', autoIncrement: true }); }; r.onsuccess = () => { const tx = r.result.transaction('pending', 'readwrite'); tx.objectStore('pending').put({ id, json: '{}', baseRev: 1, ts: 1, uid: 'x' }); tx.oncomplete = () => { r.result.close(); res(); }; }; });
+  }, s.id);
+  await w.click('#btn-sair'); const cd = await w.waitForSelector('dialog.dlg[open] [data-act=confirm]', { timeout: 8000 }).catch(() => null);
+  const ctext = cd ? await w.$eval('dialog.dlg[open]', (d) => d.textContent) : '';
+  if (cd) await Promise.all([w.waitForURL(/\/entrar/, { timeout: 15000 }), cd.click()]);
+  const after = await w.evaluate(async () => ({ keys: Object.keys(localStorage).filter((k) => /^(amForm|amBoard|amVote|amPlayer|amStudio|amCloud)\./.test(k)), ss: sessionStorage.getItem('am.import.done'), dbs: (await indexedDB.databases()).map((d) => d.name).filter((n) => /^canteiro/.test(n)) }));
+  check('CL-116 Sair: avisa que há algo não enviado ("Sair e apagar…"), apaga localStorage/sessionStorage da nuvem e os bancos canteiro-cloud/canteiro, e vai para /entrar', /ainda não chegaram à nuvem/.test(ctext) && new URL(w.url()).pathname === '/entrar' && after.keys.length === 0 && after.ss === null && after.dbs.length === 0, { ctext: ctext.slice(0, 80), url: w.url(), after });
+  await w.close(); await ctx.close();
+});
+
+await scenario('27 · conteúdo recusado (422): a mensagem diz o slide, não repete o PUT a cada edição e volta a salvar quando corrigido (BE-ED-09)', async () => {
+  const s = await seed(ana, 'ana', 'Recusa', deckWith('Recusa', [slideOf([textEl('Primeiro slide')]), slideOf([textEl('Texto ok', { id: 'eRuim' })])]));
+  const p = await openEditor(ana, s.id, 'recusa'); await reqLog(ana, true);
+  await p.evaluate(() => { const e = AMStudio.deck.slides[1].els.find((x) => x.id === 'eRuim'); e.html = 'Use a tag <form> aqui'; AMStudio.commit(); });
+  const d = await p.waitForSelector('.cl-dlg', { timeout: 15000 }).catch(() => null), txt = d ? await d.innerText() : '';
+  check('CL-117 422 rejected_content: caixa "A nuvem não aceitou parte desta apresentação" com "Slide 2 · texto: código HTML…", pílula "Conteúdo recusado"', /A nuvem não aceitou parte desta apresentação/.test(txt) && /Slide 2 · texto: código HTML não permitido/.test(txt) && (await pillState(p)) === 'rejected', { txt: txt.slice(0, 300), st: await pillState(p) });
+  const puts0 = (await reqLog(ana)).filter((r) => r.method === 'PUT' && /\/content$/.test(r.path)).length;
+  await p.click('.cl-dlg [data-act=goto]'); await sleep(400);
+  const at = await p.evaluate(() => ({ cur: AMStudio.cur, sel: AMStudio.selected() }));
+  check('CL-118 "Ir ao slide 2" leva ao slide e seleciona o elemento recusado', at.cur === 1 && at.sel.length === 1 && at.sel[0] === 'eRuim', at);
+  await p.evaluate(() => { AMStudio.deck.slides[0].els[0].html = 'Outra edição'; AMStudio.commit(); }); await sleep(3800);
+  await p.evaluate(() => { AMStudio.deck.slides[0].els[0].html = 'Mais uma edição'; AMStudio.commit(); }); await sleep(3800);
+  const puts1 = (await reqLog(ana)).filter((r) => r.method === 'PUT' && /\/content$/.test(r.path)).length;
+  check('CL-119 enquanto o trecho recusado não muda, outras edições NÃO repetem o PUT (' + puts0 + ' → ' + puts1 + ') e ficam na fila local', puts1 === puts0 && puts0 >= 1 && (await pillState(p)) === 'rejected' && (await p.evaluate(() => AMCloud.dirty)), { puts0, puts1 });
+  await p.evaluate(() => { const e = AMStudio.deck.slides[1].els.find((x) => x.id === 'eRuim'); e.html = 'Use a tag formulário aqui'; AMStudio.commit(); });
+  await waitSaved(p, 15000);
+  check('CL-120 corrigido o trecho, a apresentação volta a salvar sozinha (com as outras edições)', JSON.stringify((await serverPres(ana, s.id)).content).includes('Mais uma edição') && (await pillState(p)) === 'saved');
+  await p.close();
+});
+
+await scenario('28 · limite de envios (429): "Aguardando o servidor", sem "Sem conexão", respeita Retry-After e conclui (BE-ED-13)', async () => {
+  const s = await seed(ana, 'ana', 'Muitas imagens'); const p = await openEditor(ana, s.id, '429');
+  await faults(ana, { assetPut429: 2 }); await reqLog(ana, true);
+  const imgs = []; for (let i = 0; i < 4; i++) imgs.push(dataUrl(await pngBuf(60 + i, 40, 300 + i)));
+  await p.evaluate((srcs) => { const sl = AMStudio.deck.slides[0]; srcs.forEach((u, i) => sl.els.push(AMStudio.mk.image(u, 60, 40, { x: 40 + i * 80, y: 100 }))); AMStudio.renderAll(); AMStudio.commit(); }, imgs);
+  await waitSaved(p, 30000);
+  const st = await p.evaluate(() => window.__states), ts = await toastsOf(p), log = await reqLog(ana);
+  const r429 = log.filter((r) => r.status === 429), again = r429.length ? log.find((r) => r.method === 'POST' && r.path === '/api/assets/check' && r.t > r429[0].t) : null;
+  check('CL-121 429 nos envios de imagem: pílula "throttled" (Aguardando o servidor), nunca "offline", nenhum aviso "Sem conexão", e tudo salvo depois', st.includes('throttled') && !st.includes('offline') && !ts.some((t) => /Sem conexão/.test(t)) && r429.length === 2 && JSON.stringify((await serverPres(ana, s.id)).content).match(/asset:sha256/g).length === 4, { st, ts, n429: r429.length });
+  const gap = again ? again.t - (r429[0].t + (r429[0].ms || 0)) : -1;
+  check('CL-122 a nova tentativa respeita o Retry-After: a rodada seguinte começa ' + gap + ' ms depois da resposta 429 (Retry-After: 1 s)', gap >= 950, gap);
+  await faults(ana, { assetPut429: 0 }); await p.close();
+});
+
+await scenario('29 · interações: quadro acima de 256 KB avisa; envio repetido não duplica (clientId) (BE-ED-14, F13)', async () => {
+  const s = await seed(ana, 'ana', 'Quadro grande'); const p = await openEditor(ana, s.id, 'quadro'); await reqLog(ana, true);
+  const note = (n) => JSON.stringify({ v: 1, notes: Array.from({ length: n }, (_, i) => ({ c: 0, t: 'Nota ' + i + ' ' + 'x'.repeat(380), k: 'y' })) });
+  await p.evaluate(({ k, v }) => localStorage.setItem(k, v), { k: 'amBoard.' + s.id + '.eMedio', v: note(250) });
+  await p.evaluate(({ k, v }) => localStorage.setItem(k, v), { k: 'amBoard.' + s.id + '.eGrande', v: note(700) });
+  await sleep(1800); await p.evaluate(() => AMCloud.bridgeFlush()); await sleep(600);
+  const bs = (await post(ana, '/state')).interactions.filter((i) => i.kind === 'board_state' && i.presentationId === s.id), ts = await toastsOf(p);
+  check('CL-123 quadro de ~100 KB sincroniza (novo teto de 256 KB); acima de 256 KB não é enviado e a pessoa é avisada ("passou de 256 KB… Baixar CSV")', bs.some((i) => i.elementId === 'eMedio') && !bs.some((i) => i.elementId === 'eGrande') && ts.some((t) => /passou de 256 KB/.test(t)), { els: bs.map((i) => i.elementId), ts });
+  await faults(ana, { interactionsLoseResponse: 1 }); await reqLog(ana, true);
+  await p.evaluate((k) => localStorage.setItem(k, JSON.stringify({ v: 1, q: ['Pergunta'], rows: [{ at: '2026-10-07 10:00', a: ['Resposta única'] }] })), 'amForm.' + s.id + '.fUnico');
+  await until(async () => (await p.evaluate(() => AMCloud.outbox)) === 0, 20000, 300);
+  const posts = (await reqLog(ana)).filter((r) => r.method === 'POST' && /interactions$/.test(r.path)), stored = (await post(ana, '/state')).interactions.filter((i) => i.elementId === 'fUnico');
+  check('CL-124 resposta gravada mas com a resposta HTTP perdida (503): o reenvio leva o MESMO clientId e o servidor não duplica (1 linha)', posts.length >= 2 && posts.every((r) => r.json && r.json.clientId && r.json.clientId === posts[0].json.clientId) && stored.length === 1, { posts: posts.map((r) => r.status + ':' + (r.json && r.json.clientId)), stored: stored.length });
+  await faults(ana, { interactionsLoseResponse: 0 }); await p.close();
+});
+
+await scenario('30 · kits de marca e preferências do editor acompanham a pessoa em outro computador (BE-ED-12)', async () => {
+  const s = await seed(ana, 'ana', 'Preferências'); const p = await openEditor(ana, s.id, 'prefs'); await reqLog(ana, true);
+  await p.evaluate(() => { localStorage.setItem('amStudio.brandKits', JSON.stringify([{ name: 'Cliente X', colors: ['#112233', '#F78C16'], at: 1 }])); localStorage.setItem('amStudio.recentColors', JSON.stringify(['#123456'])); localStorage.setItem('amStudio.sideW', '250'); });
+  const saved = await until(async () => { const pr = (await post(ana, '/prefs')).ana; return pr && pr.brandKits && pr.brandKits.length ? pr : null; }, 8000, 300);
+  const putPrefs = (await reqLog(ana)).filter((r) => r.method === 'PUT' && r.path === '/api/me/prefs');
+  check('CL-125 salvar um kit de marca (e cores recentes, largura do painel) vai para PUT /api/me/prefs {prefs:{brandKits, editor}}', !!saved && saved.brandKits[0].name === 'Cliente X' && saved.editor && saved.editor.recentColors[0] === '#123456' && saved.editor.sideW === 250 && putPrefs.length >= 1, saved);
+  await p.close();
+  const c2 = await newCtx('ana'); const q = await openEditor(c2, s.id, 'prefs2'); await sleep(1200);
+  const got = await q.evaluate(() => ({ kits: JSON.parse(localStorage.getItem('amStudio.brandKits') || '[]'), rc: JSON.parse(localStorage.getItem('amStudio.recentColors') || '[]'), sw: localStorage.getItem('amStudio.sideW') }));
+  check('CL-126 em outro computador (navegador vazio) o kit "Cliente X", as cores recentes e a largura do painel voltam do servidor', got.kits.length === 1 && got.kits[0].name === 'Cliente X' && got.kits[0].colors[0] === '#112233' && got.rc[0] === '#123456' && got.sw === '250', got);
+  await q.close(); await c2.close();
+});
+
+await scenario('31 · formulário na nuvem: o texto diz que a resposta vai com o nome da pessoa; planilha fora do Google explica (BE-ED-11)', async () => {
+  const s = await seed(ana, 'ana', 'Textos do formulário'); const p = await openEditor(ana, s.id, 'form-txt');
+  await p.evaluate(() => { AMStudio.insertFx('form'); }); await sleep(400);
+  await p.evaluate(() => { const F = AMStudio.deck.slides[0].els.find((e) => e.kind === 'form'); F.x = 20; F.y = 20; F.w = 560; F.h = 560; AMStudio.renderAll(); AMStudio.commit(); }); await waitSaved(p);
+  await p.keyboard.press('F5'); await p.waitForSelector('#presenter.open .amf', { timeout: 6000 }); await sleep(600);
+  const fill = () => p.evaluate(() => { const ins = [...document.querySelectorAll('#presenter .amf-in')]; ins.forEach((x) => { x.focus(); document.execCommand('insertText', false, 'Ok'); }); [...document.querySelectorAll('#presenter .amf-rb')].slice(0, 1).forEach((b) => b.click()); [...document.querySelectorAll('#presenter .amf-o')].slice(0, 1).forEach((b) => b.click()); document.querySelector('#presenter .amf-send').click(); });
+  await fill(); await sleep(500);
+  const st1 = await p.$eval('#presenter .amf-st', (n) => n.textContent);
+  check('CL-127 depois de enviar: "Resposta enviada com o seu nome ao dono da apresentação." (nunca "Registrada neste dispositivo")', st1 === 'Resposta enviada com o seu nome ao dono da apresentação.', st1);
+  const leave = async () => { await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur(); }); await p.keyboard.press('Escape'); await p.waitForFunction(() => !document.getElementById('presenter').classList.contains('open'), null, { timeout: 5000 }); };
+  await leave();
+  const cv0 = cspViolations.length;
+  await p.evaluate(() => { const F = AMStudio.deck.slides[0].els.find((e) => e.kind === 'form'); F.data.sheet = 'https://planilha.example.com/coleta'; AMStudio.renderAll(); AMStudio.commit(); }); await waitSaved(p);
+  await p.keyboard.press('F5'); await p.waitForSelector('#presenter.open .amf', { timeout: 6000 }); await sleep(600);
+  await p.evaluate(() => { const again = document.querySelector('#presenter .amf-again'); if (again && again.offsetParent) again.click(); }); await fill();
+  const st2 = await until(async () => { const t = await p.$eval('#presenter .amf-st', (n) => n.textContent); return /planilha/.test(t) && !/Enviando/.test(t) ? t : null; }, 6000, 200);
+  const extra = cspViolations.splice(cv0);   /* esperado: a CSP bloqueia o endereço fora do Google (connect-src) — é exatamente o caso explicado */
+  for (let i = consoleErrors.length - 1; i >= 0; i--) if (/^form-txt: (Refused to connect to|Fetch API cannot load) 'https:\/\/planilha\.example\.com|^form-txt: Fetch API cannot load https:\/\/planilha\.example\.com/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+  hosts.delete('planilha.example.com');   /* bloqueado pela CSP: o pedido não sai do navegador */
+  check('CL-128 planilha com endereço fora do Google: a mensagem explica que na versão online só vale um app do Google (em vez de "sem internet")', /na versão online só vale o endereço de um app do Google/.test(st2 || '') && extra.length > 0 && extra.every((v) => /connect-src/.test(v.d) && /example\.com/.test(v.u)), { st2, extra });
+  await leave(); await p.close();
+});
+
+await scenario('32 · comentários da plataforma no editor e no visualizar: listar, criar no slide atual, resolver e excluir (BE-ED-10)', async () => {
+  const s = await seed(ana, 'ana', 'Comentários', deckWith('Comentários', [slideOf([textEl('Um')]), slideOf([textEl('Dois')])]));
+  await post(ana, '/comment', { id: s.id, by: 'bia', body: 'Ajustar o gráfico', slideIndex: 1 }); await post(ana, '/comment', { id: s.id, by: 'bia', body: 'Comentário geral' });
+  const p = await openEditor(ana, s.id, 'cmts'); await sleep(500);
+  await p.click('#cloudPill'); const mi = await p.$eval('.cl-mi[data-id=cmts] span', (n) => n.textContent); await p.click('.cl-mi[data-id=cmts]');
+  await p.waitForSelector('#cloudComments .cl-ci', { timeout: 8000 });
+  const l1 = await p.$$eval('#cloudComments .cl-ci p', (l) => l.map((x) => x.textContent)), t1 = await p.textContent('#cloudCmT');
+  check('CL-129 menu da pílula "Comentários (2)…" abre o painel do slide 1: mostra o comentário geral e não o do slide 2', mi === 'Comentários (2)…' && t1 === 'Slide 1' && l1.includes('Comentário geral') && !l1.includes('Ajustar o gráfico'), { mi, t1, l1 });
+  await p.check('#cloudCmAll'); const l2 = await p.$$eval('#cloudComments .cl-ci p', (l) => l.map((x) => x.textContent));
+  await p.click('#cloudComments .cl-ci button.cl-cs'); await sleep(300); const cur = await p.evaluate(() => AMStudio.cur);
+  check('CL-130 "Todos os slides" lista os dois; clicar em "Slide 2" leva o editor ao slide 2', l2.includes('Ajustar o gráfico') && l2.includes('Comentário geral') && cur === 1, { l2, cur });
+  await p.uncheck('#cloudCmAll'); await reqLog(ana, true);
+  await p.fill('#cloudCmIn', 'Revisar o título deste slide'); await p.click('#cloudCmSend');
+  await p.waitForFunction(() => [...document.querySelectorAll('#cloudComments .cl-ci p')].some((x) => x.textContent === 'Revisar o título deste slide'), null, { timeout: 8000 });
+  const cp = (await reqLog(ana)).find((r) => r.method === 'POST' && /\/comments$/.test(r.path));
+  check('CL-131 comentar no slide atual: POST /comments {body, slideIndex:1} e o comentário aparece no painel', cp && cp.json && cp.json.slideIndex === 1 && cp.json.body === 'Revisar o título deste slide', cp && cp.json);
+  const mine = await p.$('#cloudComments .cl-ci:has(p:text("Revisar o título deste slide"))');
+  await (await mine.$('button[data-a=res]')).click(); await p.waitForFunction(() => ![...document.querySelectorAll('#cloudComments .cl-ci p')].some((x) => x.textContent === 'Revisar o título deste slide'), null, { timeout: 8000 });
+  const resolved = (await post(ana, '/comments')).find((c) => c.body === 'Revisar o título deste slide');
+  check('CL-132 Resolver: PATCH {resolved:true}; some da lista (aparece com "Mostrar resolvidos")', !!(resolved && resolved.resolvedAt));
+  await p.check('#cloudCmRes'); await p.waitForSelector('#cloudComments .cl-ci.done', { timeout: 8000 });
+  const del = await p.$('#cloudComments .cl-ci.done button[data-a=del]'); await del.click(); await p.click('.cl-dlg [data-act=""].dng, .cl-dlg .cl-b.dng');
+  await until(async () => (await post(ana, '/comments')).find((c) => c.body === 'Revisar o título deste slide').deleted, 8000, 200);
+  check('CL-133 Excluir (com confirmação): DELETE /comments/:id', (await post(ana, '/comments')).find((c) => c.body === 'Revisar o título deste slide').deleted === true);
+  await p.keyboard.press('Escape'); await sleep(200);
+  check('CL-134 Esc fecha o painel', !(await p.$('#cloudComments')));
+  await p.close();
+  const v = await openEditor(bia, s.id, 'cmts-view', { mode: 'visualizar' }); await v.waitForSelector('#presenter.open'); await sleep(400);
+  await v.click('#cloudCmBtn'); await v.waitForSelector('#cloudComments', { timeout: 8000 }); await sleep(300);
+  const vis = await v.evaluate(() => { const r = document.getElementById('cloudComments').getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + 60); return { top: Math.round(r.top), onTop: !!(at && at.closest('#cloudComments')), title: document.getElementById('cloudCmT').textContent }; });
+  await v.fill('#cloudCmIn', 'Pergunta da Bia'); await v.press('#cloudCmIn', 'Control+Enter'); await v.waitForFunction(() => [...document.querySelectorAll('#cloudComments .cl-ci p')].some((x) => x.textContent === 'Pergunta da Bia'), null, { timeout: 8000 });
+  await v.keyboard.press('ArrowRight'); await sleep(300); const pos = await v.innerText('.amp-pos');
+  check('CL-135 visualizar: botão "Comentários" abre o painel POR CIMA da apresentação (abaixo da barra), a Bia comenta no slide 1, e setas digitadas no painel não trocam o slide', vis.onTop && vis.top === 44 && vis.title === 'Slide 1' && /^01/.test(pos) && (await post(ana, '/comments')).some((c) => c.body === 'Pergunta da Bia' && c.slideIndex === 0), { vis, pos });
+  await v.keyboard.press('Escape'); await sleep(200); await v.keyboard.press('ArrowRight'); await sleep(500);
+  await v.click('#cloudCmBtn'); await sleep(400); const t2 = await v.textContent('#cloudCmT');
+  check('CL-136 o painel acompanha o slide da apresentação (Slide 2 depois de avançar)', !!v.url().includes('/visualizar/') && t2 === 'Slide 2', t2);
+  await v.close();
+});
+
+await scenario('33 · teclado com menu, caixas e telas da nuvem (BTN-03, BTN-04, BTN-05, BTN-06, BTN-08, BTN-09)', async () => {
+  const s = await seed(ana, 'ana', 'Teclado'); const p = await openEditor(ana, s.id, 'teclado'); await typeNewText(p, 'Para versão'); await waitSaved(p);
+  let downloads = 0; p.on('download', () => { downloads++; });
+  await p.click('#cloudPill'); await p.waitForSelector('#cloudMenu.open'); await p.keyboard.press('Control+s');
+  await until(async () => (await serverPres(ana, s.id)).versions.some((v) => v.kind === 'manual'), 8000); await sleep(500);
+  check('CL-137 menu da pílula aberto + Ctrl+S: salva a versão na nuvem e não baixa .html (BTN-03)', (await serverPres(ana, s.id)).versions.some((v) => v.kind === 'manual') && downloads === 0 && !(await p.$('#cloudMenu.open')));
+  await p.click('#cloudPill'); await p.waitForSelector('#cloudMenu.open'); await p.keyboard.press('F5'); await p.waitForSelector('#presenter.open', { timeout: 5000 }).catch(() => { });
+  const pm = await p.evaluate(() => ({ pres: document.getElementById('presenter').classList.contains('open'), menu: !!document.querySelector('#cloudMenu.open') }));
+  await p.keyboard.press('Escape'); await sleep(400);
+  check('CL-138 menu aberto + F5: a apresentação começa SEM o menu por cima e o primeiro Esc sai dela (BTN-04)', pm.pres && !pm.menu && !(await p.$('#presenter.open')), pm);
+  await p.click('#cloudPill'); await p.click('.cl-mi[data-id=hist]'); await p.waitForSelector('.cl-dlg', { timeout: 5000 });
+  const prevented = { f5: await keyOn(p, { key: 'F5' }), s: await keyOn(p, { key: 's', ctrlKey: true }), o: await keyOn(p, { key: 'o', ctrlKey: true }), p: await keyOn(p, { key: 'p', ctrlKey: true }), f1: await keyOn(p, { key: 'F1' }) };
+  check('CL-139 com uma caixa da nuvem aberta, F5, F1, Ctrl+S, Ctrl+O e Ctrl+P são bloqueados (sem recarregar, "Salvar página como" ou abrir arquivo) e não chegam ao editor (BTN-05)', Object.values(prevented).every(Boolean) && !(await p.$('#presenter.open')) && !(await p.$('#modal.open')) && !!(await p.$('.cl-dlg')), prevented);
+  await p.keyboard.press('Escape'); await sleep(200);
+  const v0 = (await serverPres(ana, s.id)).versions.length; await p.evaluate(() => AMStudio.exportAs('pdf')); await p.waitForFunction(() => document.documentElement.classList.contains('xp-open'), null, { timeout: 5000 });
+  await p.keyboard.press('Control+s'); await sleep(1500);
+  check('CL-140 caixa do editor aberta (Salvar como PDF) + Ctrl+S: nenhuma versão é salva escondida atrás dela (BTN-06)', (await serverPres(ana, s.id)).versions.length === v0 && downloads === 0, { v0, v1: (await serverPres(ana, s.id)).versions.length });
+  await p.keyboard.press('Escape'); await sleep(300);
+  await ana.setOffline(true); await sleep(300); await typeNewText(p, 'Sem rede'); await p.keyboard.press('Control+s'); await sleep(1500);
+  const ts = await toastsOf(p); await ana.setOffline(false); await waitSaved(p, 20000);
+  check('CL-141 Ctrl+S sem conexão avisa ("Sem conexão: a versão não foi salva…") em vez de ficar em silêncio (BTN-08)', ts.some((t) => /^Sem conexão: a versão não foi salva/.test(t)), ts.slice(-3));
+  await post(ana, '/bump', { id: s.id, by: 'bia', title: 'Mexeram' }); await typeNewText(p, 'Gera conflito'); await p.waitForSelector('[data-act=later]', { timeout: 15000 }); await p.click('[data-act=later]');
+  await p.keyboard.press('Control+s'); await sleep(600);
+  check('CL-142 Ctrl+S com conflito pendente diz "Resolva o conflito antes de salvar uma versão" e reabre a escolha (BTN-08)', (await toastsOf(p)).some((t) => /Resolva o conflito antes de salvar uma versão/.test(t)) && !!(await p.$('[data-act=mine]')));
+  await p.close();
+  await faults(ana, { presDelayMs: 2500 }); const L = await openEditor(ana, s.id, 'abrindo', { wait: false }); await L.waitForSelector('#cloudLoad', { timeout: 8000 });
+  for (const k of ['F5', 'F1', 'Control+o', 'Delete']) await L.keyboard.press(k);
+  await L.waitForFunction(() => window.AMCloud && !document.getElementById('cloudLoad'), null, { timeout: 15000 }); await sleep(300);
+  const lk = await L.evaluate(() => ({ pres: document.getElementById('presenter').classList.contains('open'), modal: document.getElementById('modal').classList.contains('open') }));
+  await faults(ana, { presDelayMs: 0 }); await L.close();
+  const F = await newPage(ana, 'fatal'); await F.goto(BASE + '/editor/00000000-0000-4000-8000-000000000000'); await F.waitForSelector('#cloudFatal', { timeout: 15000 }); await sleep(200);
+  const fk = { f1: await keyOn(F, { key: 'F1' }), focus: await F.evaluate(() => document.activeElement && document.activeElement.textContent) }; await F.keyboard.press('F1'); await sleep(300);
+  check('CL-143 telas "Abrindo…" e "Apresentação não encontrada": F5, F1, Ctrl+O e Delete não agem no editor por trás; o foco vai para "Voltar ao acervo" (BTN-09)', !lk.pres && !lk.modal && fk.f1 && fk.focus === 'Voltar ao acervo' && !(await F.$('#modal.open')), { lk, fk });
+  await F.close();
+});
+
+await scenario('34 · rótulos da nuvem: Baixar arquivo (.html), Voltar ao acervo, menus sem Ctrl+S no download (BTN-07)', async () => {
+  const s = await seed(ana, 'ana', 'Rótulos'); const p = await openEditor(ana, s.id, 'rotulos');
+  const lb = await p.evaluate(() => ({ save: document.querySelector('#bSave .lbl').textContent, saveT: document.getElementById('bSave').title, home: document.getElementById('bHome').title, brand: document.querySelector('#top .brand').title, nw: document.getElementById('bNew').title, more: document.getElementById('bSaveMore').getAttribute('aria-label') }));
+  check('CL-144 barra: "Baixar arquivo (.html)" no botão laranja; Início e a marca dizem "Voltar ao acervo"; Novo diz que cria no acervo', lb.save === 'Baixar arquivo (.html)' && /^Baixar a apresentação como arquivo \.html/.test(lb.saveT) && lb.home === 'Voltar ao acervo' && lb.brand === 'Voltar ao acervo' && /no acervo/.test(lb.nw) && /^Baixar como/.test(lb.more), lb);
+  await p.click('#mbar button[data-m=file]'); await sleep(250);
+  const items = await p.$$eval('.xmenu .xi', (l) => l.map((b) => ({ t: b.querySelector('.xl').textContent, k: (b.querySelector('kbd') || {}).textContent || '' })));
+  const T = items.map((x) => x.t), dl = items.find((x) => x.t === 'Baixar arquivo (.html)');
+  check('CL-145 Arquivo: Voltar ao acervo · Nova apresentação no acervo · Abrir arquivo… · Acervo da nuvem… · Baixar arquivo (.html) SEM "Ctrl+S" · Baixar como PDF…/PowerPoint…; nenhum "Salvar apresentação"', T[0] === 'Voltar ao acervo' && T.includes('Nova apresentação no acervo') && T.includes('Abrir arquivo…') && T.includes('Acervo da nuvem…') && dl && dl.k === '' && T.includes('Baixar como PDF…') && T.includes('Baixar como PowerPoint…') && !T.includes('Salvar apresentação'), items);
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 10000 }).catch(() => null), (await p.$$('.xmenu .xi'))[T.indexOf('Baixar arquivo (.html)')].click()]); await sleep(300);
+  check('CL-146 "Baixar arquivo (.html)" baixa o arquivo e o aviso diz "Arquivo baixado" (não "Apresentação salva")', !!d && /\.html$/.test(d.suggestedFilename()) && (await toastsOf(p)).some((t) => /^Arquivo baixado: rotulos\.html/.test(t)), await toastsOf(p));
+  await p.click('#bSaveMore'); await sleep(250);
+  const sa = await p.evaluate(() => ({ hd: (document.querySelector('.xmenu .xhd') || {}).textContent, k: [...document.querySelectorAll('.xmenu .xi kbd')].map((x) => x.textContent) }));
+  check('CL-147 "Baixar como" (seta do botão laranja): sem Ctrl+S no item HTML (Ctrl+S na nuvem salva versão)', sa.hd === 'Baixar como' && !sa.k.includes('Ctrl+S'), sa);
+  await p.keyboard.press('Escape'); await p.keyboard.press('F1'); await p.waitForSelector('#modal.open', { timeout: 4000 });
+  check('CL-148 ajuda (F1): "Salvar versão na nuvem — Ctrl+S" e Abrir explica a escolha da nuvem', /Salvar versão na nuvem/.test(await p.innerText('#modal')) && /vira uma apresentação nova no acervo ou substitui esta/.test(await p.innerText('#modal')));
+  await p.keyboard.press('Escape'); await p.close();
+});
+
+await scenario('35 · imagens https:// externas: a CSP continua estrita e a pessoa é orientada a baixar e inserir do computador (BTN-10)', async () => {
+  const cv0 = cspViolations.length;
+  const s = await seed(ana, 'ana', 'Externa', deckWith('Externa', [slideOf([textEl('Com imagem de fora'), imgEl('https://imagens.example.com/foto.png'), imgEl('https://imagens.example.com/outra.png', { x: 100 })])]));
+  const p = await openEditor(ana, s.id, 'externa'); const d = await p.waitForSelector('.cl-dlg', { timeout: 8000 }).catch(() => null), txt = d ? await d.innerText() : '';
+  const csp = (await p.request.get(BASE + '/editor/' + s.id)).headers()['content-security-policy'] || '';
+  check('CL-149 imagens com endereço https:// geram o aviso "2 imagens… não aparecem na versão online" com "baixe cada imagem… insira de novo pelo botão Imagem"; img-src segue sem https:', /2 imagens desta apresentação não aparecem na versão online/.test(txt) && /baixe cada imagem para o computador e insira de novo pelo botão Imagem/.test(txt) && /img-src 'self' data: blob:;/.test(csp) && !/img-src[^;]*https:/.test(csp), { txt: txt.slice(0, 200), csp: (csp.match(/img-src[^;]*/) || [''])[0] });
+  await p.click('.cl-dlg .cl-b'); await p.close();
+  const extra = cspViolations.splice(cv0);   /* esperado: as duas imagens externas bloqueadas (img-src) — o aviso acima explica por quê */
+  for (let i = consoleErrors.length - 1; i >= 0; i--) if (/^externa: Refused to load the image 'https:\/\/imagens\.example\.com/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+  hosts.delete('imagens.example.com');   /* bloqueadas pela CSP: nada sai do navegador */
+  check('CL-150 as únicas violações de CSP desta apresentação são as imagens externas bloqueadas (img-src), como esperado', extra.length > 0 && extra.every((v) => /img-src/.test(v.d) && /imagens\.example\.com/.test(v.u)), extra.slice(0, 3));
+});
+
+await scenario('36 · visual das caixas, do menu e da abertura da nuvem = padrão do editor (.mdl/.mb/.menu e fundo da capa) (VIS-06)', async () => {
+  const s = await seed(ana, 'ana', 'Visual'); const p = await openEditor(ana, s.id, 'visual');
+  await p.evaluate(() => { AMStudio.confirm({ eyebrow: 'Teste', title: 'Modal do editor', msg: 'Comparar', ok: 'Ok' }); }); await p.waitForSelector('#modal.open .mdl');
+  const ed = await p.evaluate(() => { const m = document.querySelector('#modal .mdl'), b = getComputedStyle(m, '::before'), ey = getComputedStyle(document.querySelector('#modal .mdl-ey')), mb = getComputedStyle(document.querySelector('#modal .mb')), pri = getComputedStyle(document.querySelector('#modal .mb.pri')), ov = getComputedStyle(document.getElementById('modal')), cs = getComputedStyle(m); return { radius: cs.borderRadius, shadow: cs.boxShadow, width: cs.width, bar: b.backgroundImage, barH: b.height, eyF: ey.fontFamily, eyS: ey.fontSize, eyL: ey.letterSpacing, mbH: mb.height, mbB: mb.borderTopColor, mbW: mb.fontWeight, pri: pri.backgroundColor, priC: pri.color, blur: ov.backdropFilter, bg: ov.backgroundColor }; });
+  await p.keyboard.press('Escape'); await sleep(200);
+  await p.click('#cloudPill'); const menu = await p.evaluate(() => { const c = getComputedStyle(document.getElementById('cloudMenu')), k = getComputedStyle(document.querySelector('#cloudMenu kbd')); return { shadow: c.boxShadow, radius: c.borderRadius, kbdF: k.fontFamily, kbdS: k.fontSize }; });
+  await p.click('.cl-mi[data-id=snap]'); await p.waitForSelector('.cl-dlg');
+  const cl = await p.evaluate(() => { const m = document.querySelector('.cl-dlg'), b = getComputedStyle(m, '::before'), ey = getComputedStyle(document.querySelector('.cl-dlg .cl-ey')), mb = getComputedStyle(document.querySelector('.cl-dlg .cl-b:not(.pri)')), pri = getComputedStyle(document.querySelector('.cl-dlg .cl-b.pri')), ov = getComputedStyle(document.querySelector('.cl-ov')), cs = getComputedStyle(m); return { radius: cs.borderRadius, shadow: cs.boxShadow, width: cs.width, bar: b.backgroundImage, barH: b.height, eyF: ey.fontFamily, eyS: ey.fontSize, eyL: ey.letterSpacing, mbH: mb.height, mbB: mb.borderTopColor, mbW: mb.fontWeight, pri: pri.backgroundColor, priC: pri.color, blur: ov.backdropFilter, bg: ov.backgroundColor, icon: !!document.querySelector('.cl-dlg .cl-dic svg') }; });
+  const same = ['radius', 'shadow', 'width', 'bar', 'barH', 'eyF', 'eyS', 'eyL', 'mbH', 'mbB', 'mbW', 'pri', 'priC', 'blur', 'bg'].filter((k) => ed[k] !== cl[k]);
+  check('CL-151 caixa da nuvem = modal do editor: faixa laranja/navy de 3 px, raio, sombra, largura, sobretítulo em JetBrains Mono, botões .mb (38 px, borda, laranja no principal), fundo com desfoque e ícone', same.length === 0 && cl.icon, { diff: same.map((k) => k + ': editor=' + ed[k] + ' nuvem=' + cl[k]) });
+  check('CL-152 menu da nuvem com a sombra e o raio do menu do editor e atalhos em JetBrains Mono', /0\.18/.test(menu.shadow) && menu.radius === '12px' && /JetBrains Mono/.test(menu.kbdF) && menu.kbdS === '10.5px', menu);
+  await p.keyboard.press('Escape'); await p.close();
+  await faults(ana, { presDelayMs: 1500 }); const L = await openEditor(ana, s.id, 'abertura', { wait: false }); await L.waitForSelector('#cloudLoad', { timeout: 8000 });
+  const ld = await L.evaluate(() => { const c = getComputedStyle(document.getElementById('cloudLoad')), g = getComputedStyle(document.getElementById('cloudLoad'), '::before'), t = document.querySelector('#cloudLoad .cl-lt'); return { bg: c.backgroundImage, grid: g.backgroundImage, title: t && t.textContent, dot: t && getComputedStyle(t.querySelector('i')).backgroundColor }; });
+  await faults(ana, { presDelayMs: 0 }); await L.waitForFunction(() => !document.getElementById('cloudLoad'), null, { timeout: 15000 }).catch(() => { }); await L.close();
+  check('CL-153 tela "Abrindo…" com o fundo da capa (gradiente navy + grade) e a marca "Canteiro" com o quadrado laranja', /radial-gradient/.test(ld.bg) && /linear-gradient/.test(ld.grid) && ld.title === 'Canteiro' && ld.dot === 'rgb(247, 140, 22)', ld);
+});
+
+await scenario('37 · recuperação de alterações não decide pelo relógio do computador (relógio 1 h atrasado) (F7)', async () => {
+  const c = await newCtx('ana'); await c.addInitScript(() => { const real = Date.now.bind(Date), off = -3600 * 1000; Date.now = () => real() + off; });
+  const s = await seed(c, 'ana', 'Relógio atrasado'); const p = await openEditor(c, s.id, 'relogio');
+  await c.setOffline(true); await sleep(200); await typeNewText(p, 'Feito com relógio errado');
+  await until(async () => p.evaluate(() => new Promise((res) => { const r = indexedDB.open('canteiro-cloud'); r.onsuccess = () => { const g = r.result.transaction('pending').objectStore('pending').getAll(); g.onsuccess = () => res(g.result.some((x) => String(x.json).includes('Feito com relógio errado'))); }; })), 6000, 200);
+  await p.close({ runBeforeUnload: false }); await c.setOffline(false);
+  const q = await openEditor(c, s.id, 'relogio2', { wait: false }); const d = await q.waitForSelector('.cl-b[data-act=recover]', { timeout: 15000 }).catch(() => null);
+  check('CL-154 com o relógio 1 h atrás do servidor, a alteração pendente ainda é oferecida para recuperar (decisão por revisão/conteúdo, não por hora)', !!d);
+  if (d) { await d.click(); await q.waitForFunction(() => window.AMCloud && AMCloud.status === 'saved' && !AMCloud.dirty, null, { timeout: 20000 }); }
+  check('CL-155 e "Recuperar" salva a alteração na nuvem', JSON.stringify((await serverPres(c, s.id)).content).includes('Feito com relógio errado'));
+  await q.close(); await c.close();
+});
+
+await scenario('38 · limite de 4 MB medido em bytes UTF-8: texto acentuado acima de 4 MiB em bytes (abaixo em caracteres) é barrado antes do envio (PUB-08)', async () => {
+  const s = await seed(ana, 'ana', 'Acentos', deckWith('Acentos', [slideOf([textEl('Capa')]), slideOf([textEl('Notas')])]));
+  const p = await openEditor(ana, s.id, 'bytes'); await reqLog(ana, true);
+  const m = await p.evaluate(() => { const big = 'ã'.repeat(4000); AMStudio.deck.comments = Array.from({ length: 550 }, (_, i) => ({ id: 'c' + i, text: big, ts: 1 })); const t = JSON.stringify(AMStudio.deck); AMStudio.commit(); return { chars: t.length, bytes: new Blob([t]).size }; });
+  const dlg = await p.waitForSelector('.cl-dlg', { timeout: 25000 }).catch(() => null), txt = dlg ? await dlg.innerText() : '';
+  const puts = (await reqLog(ana)).filter((r) => r.method === 'PUT' && /\/content$/.test(r.path));
+  check('CL-156 deck com ' + (m.chars / 1048576).toFixed(2) + ' Mi caracteres e ' + (m.bytes / 1048576).toFixed(2) + ' MiB em UTF-8: barrado ANTES do envio (nenhum PUT), com a caixa "grande demais para salvar de uma vez (4,x MB; limite 4 MB por salvamento)…"', m.chars < 4 * 1048576 && m.bytes > 4 * 1048576 && puts.length === 0 && /grande demais para salvar de uma vez \(4,\d MB; limite 4 MB por salvamento\)/.test(txt) && (await pillState(p)) === 'error', { m, puts: puts.length, txt: txt.slice(0, 220), st: await pillState(p) });
+  if (dlg) await p.click('.cl-dlg [data-act=ok]');
+  await p.evaluate(() => { delete AMStudio.deck.comments; AMStudio.deck.slides[0].els[0].html = 'Capa revisada'; AMStudio.commit(); }); await waitSaved(p, 20000);
+  const sv = await serverPres(ana, s.id);
+  check('CL-157 reduzido o conteúdo, a próxima edição volta a salvar normalmente', (await pillState(p)) === 'saved' && sv.rev >= 2 && JSON.stringify(sv.content).includes('Capa revisada') && !sv.content.comments, { st: await pillState(p), rev: sv.rev });
+  await p.close();
 });
 
 /* ---------- fim: CSP e erros globais ---------- */
