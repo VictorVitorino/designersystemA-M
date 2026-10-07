@@ -1,6 +1,9 @@
-# Backup diário: banco (pg_dump → AES-256-GCM → destino externo, relido e verificado) + espelho incremental dos arquivos.
-# O destino é um bucket de OUTRA conta/provedor, com credenciais próprias; a chave de criptografia é um segredo separado das credenciais do bucket.
-# Falha → issue "Falha no backup" + erro (e-mail do GitHub). O frescor também é vigiado por uptime.yml.
+# Backup diário: banco (pg_dump → AES-256-GCM → Cloudflare R2, relido e verificado; com as contas do Supabase Auth) + espelho incremental dos arquivos.
+# O destino é o bucket canteiro-backup do R2 (OUTRO provedor, credenciais próprias, prefixo "producao"); a chave de criptografia é separada das credenciais.
+# Agendado só com o backup LIGADO (variável do repositório BACKUP_ENABLED=true); "Run workflow" manual sempre tenta (é assim que se testa a configuração).
+# Falha → issue "Falha no backup" + erro (e-mail do GitHub); a issue fecha sozinha no próximo backup bom. O frescor também é vigiado por uptime.yml.
+# Acervo grande (500 GB–1 TB): a cópia dos arquivos para às 5 h de execução (--max-minutos 300; o GitHub corta em 6 h) e continua na noite
+# seguinte — só o que falta é copiado. Poda do ESPELHO de arquivos: nunca automática; só manual (entrada "espelho"), simulada antes.
 name: Backup
 
 on:
@@ -12,6 +15,11 @@ on:
         description: 'Aplicar a poda de retenção (14 diários, 8 semanais, 12 mensais) depois do backup?'
         type: boolean
         default: true
+      espelho:
+        description: 'Poda do espelho de arquivos (só o que nenhum backup retido nem o banco usam, há mais de 30 dias)'
+        type: choice
+        options: [nao, simular, podar]
+        default: nao
 
 permissions:
   contents: read
@@ -28,8 +36,16 @@ jobs:
     if: vars.BACKUP_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 345          # limite do GitHub é 360; a 1ª cópia de ~1 TB pode precisar de mais de uma noite (é incremental e retoma de onde parou)
-    environment: production-ops   # segredos de operação (sem revisores: precisa rodar de madrugada)
+    environment: production-ops   # segredos de produção (sem revisores: precisa rodar de madrugada)
     env:
+      AMBIENTE: production
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      SUPABASE_POOLER_HOST: ${{ vars.SUPABASE_POOLER_HOST }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+      BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '1' }}   # contas do Supabase Auth no backup (padrão: sim; achado F8)
       PG_CLIENT_MAJOR: ${{ vars.PG_CLIENT_MAJOR || '17' }}
     steps:
       - name: Baixar o código
@@ -57,72 +73,98 @@ jobs:
         working-directory: platform
         run: npm ci --omit=dev
 
-      - name: Fazer o backup (banco + arquivos)
-        id: backup
+      - name: Conferir as chaves (banco, arquivos e backup) e achar o servidor do banco
+        id: chaves
         continue-on-error: true
         working-directory: platform
         env:
-          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
-          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
-          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
-          STORAGE_DRIVER: s3
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_REGION: ${{ secrets.S3_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}      # nome antigo (compatibilidade)
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          BACKUP_ENV_NAME: production
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js conferir --precisa banco,arquivos,backup --resumo "$GITHUB_STEP_SUMMARY" --github-env "$GITHUB_ENV"
+
+      - name: Fazer o backup (banco + arquivos)
+        id: backup
+        if: steps.chaves.outcome == 'success'
+        continue-on-error: true
+        working-directory: platform
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
-          node tools/backup.js check
+          node tools/chaves.js exec --precisa banco,arquivos,backup -- node tools/backup.js check
           set +e
-          node tools/backup.js all --json | tee "$RUNNER_TEMP/backup.json"
+          node tools/chaves.js exec --precisa banco,arquivos,backup -- node tools/backup.js all --max-minutos 300 --concurrency 8 --json | tee "$RUNNER_TEMP/backup.json"
           codigo="${PIPESTATUS[0]}"
-          [ -s "$RUNNER_TEMP/backup.json" ] && node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8").trim().split("\n").pop());const d=r.db||{},o=r.objects||{};console.log("## Backup\n\n- banco: "+(d.name||"FALHOU")+" ("+(d.rows??"?")+" linhas, verificado: "+d.verified+")\n- arquivos: "+(o.copied??"?")+" copiados, "+(o.alreadyInDestination??"?")+" já no destino, "+((o.failed||[]).length)+" falhas")' "$RUNNER_TEMP/backup.json" >> "$GITHUB_STEP_SUMMARY"
+          [ -s "$RUNNER_TEMP/backup.json" ] && node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8").trim().split("\n").pop());const d=r.db||{},o=r.objects||{};console.log("## Backup\n\n- banco: "+(d.name||"FALHOU")+" ("+(d.rows??"?")+" linhas, verificado: "+d.verified+")\n- arquivos: "+(o.copied??"?")+" copiados, "+(o.alreadyInDestination??"?")+" já no destino, "+((o.failed||[]).length)+" falhas"+(o.partial?"\n- **cópia PARCIAL** (horário-limite; "+o.shardsDone+"/"+o.shardsTotal+" fatias): continua na próxima execução, sem perder o que já foi copiado":""))' "$RUNNER_TEMP/backup.json" >> "$GITHUB_STEP_SUMMARY"
           exit "$codigo"
 
       - name: Poda de retenção (só depois de um backup verificado)
         if: steps.backup.outcome == 'success' && (github.event_name == 'schedule' || inputs.podar)
         working-directory: platform
         env:
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
-        run: node tools/backup.js prune --apply
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js exec --precisa backup -- node tools/backup.js prune --apply
+
+      - name: Poda do espelho de arquivos (manual; simulada ou aplicada)
+        if: steps.backup.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.espelho != 'nao'
+        working-directory: platform
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          ESPELHO: ${{ inputs.espelho }}
+        run: |
+          args=(prune-objects); if [ "$ESPELHO" = "podar" ]; then args+=(--apply); fi
+          node tools/chaves.js exec --precisa banco,arquivos,backup -- node tools/backup.js "${args[@]}"
 
       - name: Conferir o frescor (o backup recém-feito aparece no destino?)
         if: steps.backup.outcome == 'success'
         working-directory: platform
         env:
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
-        run: node tools/maintenance.js backup-freshness --max-hours 2
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js exec --precisa backup -- node tools/maintenance.js backup-freshness --max-hours 2
 
       - name: Abrir ou atualizar a issue "Falha no backup"
-        if: steps.backup.outcome == 'failure'
+        if: steps.chaves.outcome == 'failure' || steps.backup.outcome == 'failure'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const titulo = 'Falha no backup';
-            const corpo = `O backup diário FALHOU em ${new Date().toISOString()}. Execução: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRoteiro: docs/OPERACAO.md → "Backup falhou". Enquanto isso o último backup bom continua no destino (nada é apagado numa falha).`;
+            const corpo = `O backup FALHOU em ${new Date().toISOString()}. Execução: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRoteiro: docs/OPERACAO.md → "Backup falhou" (chaves que faltam aparecem no resumo da execução, com onde copiar e onde colar). Enquanto isso o último backup bom continua no destino (nada é apagado numa falha).`;
             const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
             const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
             if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
             else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
 
+      - name: Fechar a issue "Falha no backup" quando voltar ao normal
+        if: steps.backup.outcome == 'success'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            for (const i of abertas.filter((x) => x.title === 'Falha no backup' && !x.pull_request)) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, body: `Backup verificado em ${new Date().toISOString()}. Fechando automaticamente.` });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, state: 'closed', state_reason: 'completed' });
+            }
+
       - name: Terminar com erro se o backup falhou
-        if: steps.backup.outcome == 'failure'
+        if: steps.chaves.outcome == 'failure' || steps.backup.outcome == 'failure'
         run: exit 1

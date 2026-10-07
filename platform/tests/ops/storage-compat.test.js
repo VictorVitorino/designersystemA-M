@@ -9,7 +9,7 @@ import { parseKey } from '../../tools/lib/backup-crypto.js';
 
 // Compatibilidade entre o driver de armazenamento da API (src/storage) e as ferramentas de operação (tools/lib): mesma chave a/xx/yy/<sha>.
 const KEY = parseKey(crypto.randomBytes(32).toString('base64')); let moto;
-before(async () => { moto = await startMoto(4301); if (moto) await makeBucket(moto.endpoint, 'compat'); });
+before(async () => { moto = await startMoto(); if (moto) await makeBucket(moto.endpoint, 'compat'); });
 after(async () => { if (moto) await moto.stop(); });
 const files = (n) => Array.from({ length: n }, (_, i) => { const b = crypto.randomBytes(800 + i * 91); return { b, h: sha(b) }; });
 

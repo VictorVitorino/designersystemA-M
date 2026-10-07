@@ -1,25 +1,29 @@
-# Publicação em PRODUÇÃO. Só acontece com aprovação manual: o ambiente "production" do GitHub tem REVISORES OBRIGATÓRIOS.
-# Gatilhos: execução manual (workflow_dispatch, digitando PRODUCAO) ou tag de versão (v1.2.3).
-# Ordem (qualquer passo que falhar interrompe tudo): CI verde → BACKUP OBRIGATÓRIO (verificado) → migrate --check → migrate → verify-deploy do banco →
-#   deploy --prod → verify-deploy do site → smoke de /api/ready. Se algo falhar depois do deploy, veja "Rollback" no resumo e em docs/OPERACAO.md.
+# Publicação em PRODUÇÃO — só de uma VERSÃO (tag v*). No GitHub Pro com repositório privado NÃO existem "Required reviewers":
+# a APROVAÇÃO é a criação da versão pela pessoa responsável (GitHub → Releases → Draft a new release → tag v1.2.3 → Publish release).
+# Gatilhos: tag v* (automático) ou "Run workflow" escolhendo a TAG em "Use workflow from" e digitando PRODUCAO (republicar ou voltar a uma versão).
+# Ambientes do GitHub: "production" (Deployment branches and tags = só tags v*) é o PORTÃO e não guarda segredos;
+#   "production-ops" (main e tags v*) guarda TODOS os segredos de produção, num lugar só (docs/AMBIENTES.md explica por quê).
+# Ordem (qualquer passo que falhar interrompe tudo): versão e CI verde → portão → chaves → BACKUP OBRIGATÓRIO (verificado, com as contas do login) →
+#   migrate --check → migrações → verify-deploy do banco e do login → Vercel --prod → verify-deploy do site (HTML publicado = build por SHA-256,
+#   CSP publicada = vercel.json) → smoke de /api/ready. Se algo falhar depois do deploy, veja "Rollback" no resumo e em docs/OPERACAO.md.
 name: Deploy produção
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       confirmacao:
-        description: 'Digite PRODUCAO para confirmar a publicação em produção'
+        description: 'Digite PRODUCAO para confirmar (e escolha a VERSÃO em "Use workflow from" → Tags)'
         required: true
         type: string
-  push:
-    tags: ['v*']
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: deploy-production
+  group: deploy-production     # o mesmo grupo do "Configurar Vercel" em produção
   cancel-in-progress: false
 
 env:
@@ -27,11 +31,27 @@ env:
 
 jobs:
   esperar-ci:
-    name: Esperar o CI deste commit
-    if: github.event_name == 'push' || inputs.confirmacao == 'PRODUCAO'
+    name: Conferir a versão e esperar o CI deste commit
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
+      - name: Só versões (tags v*) e com a confirmação digitada
+        env:
+          TIPO_REF: ${{ github.ref_type }}
+          NOME_REF: ${{ github.ref_name }}
+          EVENTO: ${{ github.event_name }}
+          CONFIRMACAO: ${{ inputs.confirmacao }}
+        run: |
+          if [ "$TIPO_REF" != "tag" ] || [[ "$NOME_REF" != v* ]]; then
+            echo "::error::Produção só publica VERSÕES (tags v*). Crie a versão em Releases ou, em Run workflow, escolha a tag em 'Use workflow from' → Tags."
+            exit 1
+          fi
+          if [ "$EVENTO" = "workflow_dispatch" ] && [ "$CONFIRMACAO" != "PRODUCAO" ]; then
+            echo "::error::Confirmação diferente de PRODUCAO: nada foi publicado."
+            exit 1
+          fi
+          echo "Versão $NOME_REF (commit $GITHUB_SHA)" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Aguardar CI verde
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -49,17 +69,44 @@ jobs:
               await new Promise((r) => setTimeout(r, 20000));
             }
 
-  publicar:
-    name: Backup, migrar e publicar em produção
+  portao:
+    name: Portão de produção (somente versões v*)
     needs: esperar-ci
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 5
     environment:
-      name: production            # revisores obrigatórios configurados em Settings → Environments → production
+      name: production             # Settings → Environments → production → Deployment branches and tags: SOMENTE a regra de tag "v*"
       url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Versão autorizada
+        env:
+          NOME_REF: ${{ github.ref_name }}
+          QUEM: ${{ github.actor }}
+        run: |
+          {
+            echo "## Publicação da versão $NOME_REF"
+            echo
+            echo "A aprovação é a própria versão: $NOME_REF foi criada ou escolhida por **$QUEM**. O ambiente *production* só aceita tags v*."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publicar:
+    name: Backup, migrar e publicar em produção
+    needs: portao
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: production-ops      # todos os segredos de produção (Deployment branches and tags: main e v*)
     env:
-      PG_CLIENT_MAJOR: ${{ vars.PG_CLIENT_MAJOR || '17' }}
+      AMBIENTE: production
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      SUPABASE_POOLER_HOST: ${{ vars.SUPABASE_POOLER_HOST }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+      BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '1' }}   # contas do Supabase Auth no backup (padrão: sim)
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
       SITE: ${{ vars.PRODUCTION_URL }}
+      PG_CLIENT_MAJOR: ${{ vars.PG_CLIENT_MAJOR || '17' }}
     steps:
       - name: Baixar o código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,47 +133,55 @@ jobs:
         working-directory: platform
         run: npm ci --omit=dev
 
+      - name: Conferir as chaves de produção e achar o servidor do banco
+        working-directory: platform
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}      # nome antigo (compatibilidade): se existir, é usado como está
+          APP_API_DB_PASSWORD: ${{ secrets.APP_API_DB_PASSWORD }}
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node tools/chaves.js conferir --precisa banco,papeis,supabase,arquivos,backup,site,vercel --resumo "$GITHUB_STEP_SUMMARY" --github-env "$GITHUB_ENV"
+
       - name: Conferir a configuração do backup (chave, destino separado do armazenamento principal)
         working-directory: platform
         env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
-          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
-          STORAGE_DRIVER: s3
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-        run: node tools/backup.js check
-
-      - name: BACKUP OBRIGATÓRIO do banco (cifrado, relido e verificado)
-        working-directory: platform
-        env:
-          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-          BACKUP_INCLUDE_AUTH: ${{ vars.BACKUP_INCLUDE_AUTH || '0' }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
-          BACKUP_ENV_NAME: production
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js exec --precisa banco,arquivos,backup -- node tools/backup.js check
+
+      - name: BACKUP OBRIGATÓRIO do banco (cifrado, relido e verificado; inclui as contas do login)
+        working-directory: platform
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
-          node tools/backup.js db --json | tee "$RUNNER_TEMP/backup.json"
+          node tools/chaves.js exec --precisa banco,backup -- node tools/backup.js db --json | tee "$RUNNER_TEMP/backup.json"
           echo "### Backup antes do deploy" >> "$GITHUB_STEP_SUMMARY"
-          node -e 'const r=require(process.argv[1]).db;console.log("- "+r.name+" ("+r.rows+" linhas, verificado: "+r.verified+")")' "$RUNNER_TEMP/backup.json" >> "$GITHUB_STEP_SUMMARY"
+          node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8").trim().split("\n").pop()).db;console.log("- "+r.name+" ("+r.rows+" linhas, verificado: "+r.verified+")")' "$RUNNER_TEMP/backup.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Migrações pendentes? (migrate --check)
         working-directory: platform
         env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
         run: |
           set +e
-          out="$(node tools/migrate.js --check 2>&1)"; code=$?
+          out="$(node tools/chaves.js exec --precisa banco -- node tools/migrate.js --check 2>&1)"; code=$?
           echo "$out"
           if echo "$out" | grep -q "o arquivo mudou depois de aplicado"; then
             echo "::error::Uma migração já aplicada foi ALTERADA (checksum diferente). Publicação interrompida: crie uma migração nova."; exit 1
@@ -137,33 +192,37 @@ jobs:
       - name: Aplicar migrações
         working-directory: platform
         env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
           APP_API_DB_PASSWORD: ${{ secrets.APP_API_DB_PASSWORD }}
           APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
-        run: node tools/migrate.js
+        run: node tools/chaves.js exec --precisa banco,papeis -- node tools/migrate.js
 
-      - name: Verificar o banco (RLS, permissões, papéis, migrações, arquivos privados)
+      - name: Verificar o banco e o login (RLS, permissões, papéis, migrações, arquivos privados, cadastro aberto desligado)
         working-directory: platform
         env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          STORAGE_DRIVER: s3
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_REGION: ${{ secrets.S3_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-        run: node tools/verify-deploy.js
+        run: node tools/chaves.js exec --precisa banco,supabase,arquivos -- node tools/verify-deploy.js --resumo "$GITHUB_STEP_SUMMARY" --titulo-resumo "Banco e login de produção"
+
+      - name: Descobrir o time e o projeto na Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM: ${{ vars.VERCEL_TEAM }}
+          VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT }}
+        run: node platform/tools/vercel-setup.js ids --github-env "$GITHUB_ENV"
 
       - name: Publicar na Vercel (produção)
         id: vercel
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: |
-          # o projeto Vercel tem Root Directory = platform; a CLI roda na raiz do repositório
+          # o projeto Vercel tem Root Directory = platform; a CLI roda na raiz do repositório (VERCEL_ORG_ID/VERCEL_PROJECT_ID vêm do passo anterior)
           npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production
           npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod
           url="$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --prod)"
@@ -174,20 +233,25 @@ jobs:
         continue-on-error: true
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: npx --yes "vercel@${VERCEL_CLI_VERSION}" env ls production 2>/dev/null | awk '$1 ~ /^[A-Z][A-Z0-9_]+$/ {print $1}' > "$RUNNER_TEMP/api-env-names.txt"
 
-      - name: Verificar o site publicado (HTTPS, HSTS, cabeçalhos, rotas protegidas, cookies, CORS)
+      - name: Verificar o site publicado (HTTPS, HSTS, cabeçalhos, páginas, HTML publicado = build por SHA-256, CSP = vercel.json)
         working-directory: platform
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           [ -n "$SITE" ] || { echo "::error::defina a variável PRODUCTION_URL (ex.: https://canteiro.exemplo.com.br)"; exit 1; }
-          args=(--url "$SITE" --expect-env production)
+          # o que foi publicado: .vercel/output/static (saída do "vercel build") e dist/public (mesmo conteúdo) precisam ser idênticos ao que o site serve
+          args=(--url "$SITE" --expect-env production --expect-build "../.vercel/output/static,.vercel/output/static,dist/public" --resumo "$GITHUB_STEP_SUMMARY" --titulo-resumo "Site de produção publicado")
           if [ -s "$RUNNER_TEMP/api-env-names.txt" ]; then args+=(--api-env-file "$RUNNER_TEMP/api-env-names.txt"); fi
           node tools/verify-deploy.js "${args[@]}"
 
       - name: Smoke test (/api/ready)
-        run: curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "${SITE%/}/api/ready"
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          extra=(); if [ -n "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then extra=(-H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET"); fi
+          curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "${extra[@]}" "${SITE%/}/api/ready"
 
       - name: Se algo falhou — ROLLBACK (instruções)
         if: failure()
@@ -195,9 +259,9 @@ jobs:
           {
             echo "## A publicação em produção FALHOU"
             echo
-            echo "1. O backup feito antes do deploy está no destino de backup (veja o passo \"BACKUP OBRIGATÓRIO\")."
-            echo "2. **Voltar o site** para a versão anterior (não mexe no banco): no painel da Vercel → Deployments → versão anterior → *Instant Rollback*, ou na sua máquina:"
-            echo "   \`npx vercel@${VERCEL_CLI_VERSION} rollback\` (volta para o deploy de produção anterior)."
+            echo "1. O backup feito antes do deploy está no bucket de backup (veja o passo \"BACKUP OBRIGATÓRIO\"); se a falha foi antes dele, nada mudou."
+            echo "2. **Voltar o site** para a versão anterior (não mexe no banco): Actions → Deploy produção → Run workflow → em 'Use workflow from' escolha a **tag anterior** → digite PRODUCAO."
+            echo "   Mais rápido (segundos): painel da Vercel → Deployments → versão anterior → *Instant Rollback*, ou \`npx vercel@${VERCEL_CLI_VERSION} rollback\`."
             echo "3. As migrações são sempre **aditivas** (só acrescentam), então o código anterior continua funcionando com o banco novo. NÃO restaure o banco por reflexo."
             echo "4. Só restaure o banco se houve corrupção de dados: siga docs/BACKUP-E-RESTAURACAO.md (restaurar em banco NOVO, validar e só então trocar a conexão)."
             echo "5. Registre o incidente (docs/OPERACAO.md → Incidentes)."

@@ -36,7 +36,7 @@ export const MAX_CHUNK = 64 * 1024 * 1024;
 const NONCE_LEN = 12, TAG_LEN = 16, LAST_FLAG = 0x80000000;
 export const RECORD_OVERHEAD = 4 + NONCE_LEN + TAG_LEN;
 
-export const KEY_HELP = 'gere uma chave com:  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"  e guarde-a em um cofre de senhas (sem ela o backup não abre)';
+export const KEY_HELP = 'gere no cofre de senhas uma senha de EXATAMENTE 43 letras e números (sem símbolos) — ou rode  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"  — e guarde-a em 2 lugares (sem ela o backup não abre)';
 
 /** base64 → Buffer de 32 bytes, com mensagens úteis (nunca imprime a chave). */
 export function parseKey(b64, name = 'BACKUP_ENCRYPTION_KEY') {
@@ -44,7 +44,7 @@ export function parseKey(b64, name = 'BACKUP_ENCRYPTION_KEY') {
   const s = String(b64).trim();
   if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(s)) throw new ToolError(`${name} não é base64 válido: ${KEY_HELP}`, { code: 'bad_key', exit: 2 });
   const key = Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  if (key.length !== 32) throw new ToolError(`${name} precisa ter exatamente 32 bytes em base64 (veio com ${key.length}): ${KEY_HELP}`, { code: 'bad_key', exit: 2 });
+  if (key.length !== 32) throw new ToolError(`${name} precisa ter exatamente 32 bytes em base64 — 43 letras/números, ou 44 caracteres terminando em "=" (veio com ${s.length} caracteres = ${key.length} bytes): ${KEY_HELP}`, { code: 'bad_key', exit: 2 });
   return key;
 }
 /** Lê a chave atual e as antigas (rotação): BACKUP_ENCRYPTION_KEY e BACKUP_ENCRYPTION_KEYS_OLD (separadas por vírgula). */

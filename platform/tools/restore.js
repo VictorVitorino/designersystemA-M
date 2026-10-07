@@ -15,7 +15,9 @@
    • Nunca restaura sobre o banco que está em DATABASE_ADMIN_URL (o de produção) sem --i-am-restoring-production.
    • Antes de tocar no banco: baixa, confere o SHA-256, decifra autenticando todos os blocos e confere o SHA-256 do dump em claro.
    • Depois: roda migrate --check, compara contagens e amostras de linhas com o manifesto e (opcional) re-hash de todos os arquivos referenciados.
-   O pg_restore mantém donos e privilégios (app_owner, GRANT, RLS): os papéis são criados antes com o mesmo bootstrap do migrate. */
+   O pg_restore mantém donos e privilégios (app_owner, GRANT, RLS): os papéis são criados antes com o mesmo bootstrap do migrate.
+   Ensaio num Postgres "puro" (sem os papéis do Supabase — anon, authenticated, service_role…, citados nos GRANT/DEFAULT PRIVILEGES do schema public):
+     restoreDb({ createMissingRoles: true }) cria antes, SEM login, só os papéis que o dump cita e que não existem. Só é aceito em banco LOCAL/descartável. */
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +28,7 @@ import { openTarget, openPrimaryStore, FileStore } from './lib/targets.js';
 import { findPgBin, pgEnvFromUrl, connect, listBackupTables, tableFingerprints, databaseIsEmpty, run, dbNameOf, isLocalHost } from './lib/pg.js';
 import { verifyingHash, restoreObjects, verifyObjects } from './lib/mirror.js';
 import { listBackups, loadManifest, resolveBackupName } from './lib/backup-catalog.js';
-import { migrate, bootstrapRoles } from './migrate.js';
+import { migrate, bootstrapRoles, lockSchemaMigrations } from './migrate.js';
 
 const noop = () => {};
 const sameDb = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.hostname === y.hostname && (x.port || '5432') === (y.port || '5432') && x.pathname === y.pathname; } catch { return false; } };
@@ -52,9 +54,45 @@ export function filterToc(tocText) {
   return { text: kept.join('\n'), dropped };
 }
 
-export async function restoreDb({ env = process.env, target, keys, name, toUrl, dropExisting = null, allowProduction = false, rolesBootstrap = true, log = noop, verifyObjectsFrom = null, objectConcurrency = 6 } = {}) {
+/** Papéis citados no dump: donos (última coluna do índice) e os nomes em GRANT/REVOKE/ALTER DEFAULT PRIVILEGES (só as entradas de ACL são convertidas em SQL). */
+export async function referencedRoles(file, env = process.env) {
+  const bin = findPgBin('pg_restore', env); const toc = await run(bin, ['--list', file], { env: process.env });
+  if (toc.code !== 0) throw new ToolError('pg_restore não consegue ler o dump: ' + toc.stderr.slice(0, 300), { code: 'bad_dump' });
+  const roles = new Set(); const acl = [];
+  for (const line of toc.stdout.split('\n')) {
+    const m = /^\d+; \d+ \d+ (.+)$/.exec(line); if (!m) continue;
+    const owner = m[1].trim().split(' ').at(-1); if (owner && owner !== '-') roles.add(owner);
+    if (/^(ACL|DEFAULT ACL) /.test(m[1])) acl.push(line);
+  }
+  if (acl.length) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'canteiro-acl-')); const lista = path.join(tmp, 'acl.list');
+    try {
+      fs.writeFileSync(lista, acl.join('\n') + '\n', { mode: 0o600 });
+      const r = await run(bin, ['-L', lista, '-f', '-', file], { env: process.env }); if (r.code !== 0) throw new ToolError('pg_restore não gerou o SQL das permissões: ' + r.stderr.slice(0, 200), { code: 'bad_dump' });
+      const ident = (x) => x.trim().replace(/^"(.*)"$/s, (_, a) => a.replace(/""/g, '"'));
+      for (const st of r.stdout.split(/;\s*\n/)) {
+        const t = st.replace(/--[^\n]*\n/g, ' ').replace(/\s+/g, ' ').trim(); if (!/^(GRANT|REVOKE|ALTER DEFAULT PRIVILEGES)\b/i.test(t)) continue;
+        const fr = /\bFOR ROLE ("(?:[^"]|"")+"|[^\s,]+(?:\s*,\s*(?:"(?:[^"]|"")+"|[^\s,]+))*)/i.exec(t); if (fr) for (const x of fr[1].split(',')) roles.add(ident(x));
+        const gb = /\bGRANTED BY ("(?:[^"]|"")+"|[^\s;]+)/i.exec(t); if (gb) roles.add(ident(gb[1]));
+        const alvo = /\b(?:TO|FROM) (.+?)(?: WITH GRANT OPTION| GRANTED BY .*| CASCADE| RESTRICT)?$/i.exec(t.replace(/^ALTER DEFAULT PRIVILEGES .*? (GRANT|REVOKE) /i, '$1 '));
+        if (alvo) for (const x of alvo[1].split(',')) roles.add(ident(x));
+      }
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+  for (const x of [...roles]) if (!x || /^public$/i.test(x)) roles.delete(x);
+  return [...roles].sort();
+}
+/** Cria (NOLOGIN, sem poderes) os papéis citados que não existem. Só para bancos de ENSAIO locais/descartáveis. */
+export async function createMissingRoles(sql, roles) {
+  const existentes = new Set((await sql`select rolname from pg_roles`).map((r) => r.rolname)); const criados = [];
+  for (const r of roles) if (!existentes.has(r)) { await sql.unsafe(`create role "${r.replace(/"/g, '""')}" nologin noinherit`); criados.push(r); }
+  return criados;
+}
+
+export async function restoreDb({ env = process.env, target, keys, name, toUrl, dropExisting = null, allowProduction = false, rolesBootstrap = true, createMissingRoles: criarPapeis = false, log = noop, verifyObjectsFrom = null, objectConcurrency = 6 } = {}) {
   const t0 = Date.now(); const phases = {}; const mark = (k, since) => { phases[k] = Date.now() - since; };
   if (!toUrl) throw new ToolError('informe o banco de destino com --to postgres://…/banco_novo (um banco VAZIO, nunca o de produção)', { code: 'no_to', exit: 2 });
+  if (criarPapeis && !isLocalHost(new URL(toUrl).hostname)) throw new ToolError('criar papéis ausentes só é permitido em banco LOCAL de ensaio (nunca em servidor real)', { code: 'refuse_roles', exit: 2 });
   if (env.DATABASE_ADMIN_URL && sameDb(env.DATABASE_ADMIN_URL, toUrl) && !allowProduction) throw new ToolError('o destino é o mesmo banco de DATABASE_ADMIN_URL (o banco em uso). Restaure em um banco NOVO; se for mesmo a intenção, use --i-am-restoring-production', { code: 'refuse_live', exit: 2 });
   const manifest = await loadManifest(target, name, { keys });
   log(`backup ${manifest.name}: criado em ${manifest.createdAt}, ${fmtBytes(manifest.dump.encryptedBytes)} cifrados, esquema até a migração ${manifest.schema.latestMigration}`);
@@ -78,6 +116,8 @@ export async function restoreDb({ env = process.env, target, keys, name, toUrl, 
       }
       // 3. papéis (idempotente) — donos e GRANTs do dump dependem deles
       if (rolesBootstrap) await bootstrapRoles(sql, { apiPassword: env.APP_API_DB_PASSWORD, opsPassword: env.APP_OPS_DB_PASSWORD });
+      let papeisCriados = [];
+      if (criarPapeis) { papeisCriados = await createMissingRoles(sql, await referencedRoles(file, env)); if (papeisCriados.length) log(`ensaio: criei ${papeisCriados.length} papel(éis) que o dump cita e este Postgres não tinha (sem login): ${papeisCriados.join(', ')}`); }
       mark('preparo', s);
 
       // 4. pg_restore com índice filtrado
@@ -87,6 +127,7 @@ export async function restoreDb({ env = process.env, target, keys, name, toUrl, 
       const r = await run(restoreBin, ['--exit-on-error', '--single-transaction', '--no-password', '-L', listFile, '-d', pgEnv.PGDATABASE, file], { env: pgEnv });
       if (r.code !== 0) throw new ToolError(`pg_restore falhou (código ${r.code}); nada foi aplicado (transação única): ${r.stderr.trim().split('\n').slice(-5).join(' | ')}`, { code: 'pg_restore_failed' });
       await sql.unsafe('analyze');
+      await lockSchemaMigrations(sql);   // um projeto Supabase novo aplicaria de novo os privilégios padrão do schema public na tabela recriada
       mark('pg_restore', s); log(`pg_restore concluído em ${fmtMs(phases.pg_restore)} (${dropped.length} itens do schema public padrão ignorados)`);
 
       // 5. migrate --check
@@ -104,7 +145,7 @@ export async function restoreDb({ env = process.env, target, keys, name, toUrl, 
       }
       for (const fq of Object.keys(fp)) if (!manifest.tables[fq]) warnings.push(`${fq}: tabela não existia no manifesto`);
       const consistent = manifest.pg?.consistentSnapshot !== false;
-      const rep = { name: manifest.name, ok: !diffs.length || !consistent, tables: Object.keys(fp).length, rows: Object.values(fp).reduce((a, t) => a + t.count, 0), counts: Object.fromEntries(Object.entries(fp).map(([k, v]) => [k, v.count])), diffs, warnings, phases, migrateCheck: mig.ok, consistentSnapshot: consistent };
+      const rep = { name: manifest.name, ok: !diffs.length || !consistent, tables: Object.keys(fp).length, rows: Object.values(fp).reduce((a, t) => a + t.count, 0), counts: Object.fromEntries(Object.entries(fp).map(([k, v]) => [k, v.count])), expected: Object.fromEntries(Object.entries(manifest.tables).map(([k, v]) => [k, v.count])), diffs, warnings, phases, migrateCheck: mig.ok, consistentSnapshot: consistent, rolesCreated: papeisCriados, plainBytes: plain.bytes, encryptedBytes: cipher.bytes };
       if (diffs.length) (consistent ? log : (m) => log('aviso: ' + m))(`DIFERENÇAS contra o manifesto:\n  - ${diffs.join('\n  - ')}`);
       else log(`contagens e amostras de todas as ${rep.tables} tabelas conferem com o manifesto (${rep.rows} linhas)`);
 

@@ -1,0 +1,91 @@
+# Assistente: cria/atualiza o projeto do Canteiro na Vercel e grava as variáveis da API do ambiente escolhido (platform/tools/vercel-setup.js):
+# Root Directory "platform", arquivos fora da raiz no build, Node 22, framework nenhum, região gru1, deploy automático pelo Git DESLIGADO,
+# ambiente personalizado "staging", variáveis montadas a partir dos segredos do GitHub (segredos como Sensitive; NUNCA DATABASE_ADMIN_URL,
+# DATABASE_OPS_URL, BACKUP_* nem tokens — e remove se alguém as tiver posto lá), domínio do ambiente e os registros de DNS para a TI.
+# Seguro repetir. As variáveis só valem a partir do próximo deploy. NÃO EXECUTADO contra a Vercel real ao ser escrito.
+name: Configurar Vercel
+
+on:
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: 'Qual ambiente configurar'
+        required: true
+        type: choice
+        options: [staging, production]
+      simular:
+        description: 'Só mostrar o que mudaria (não altera nada)'
+        type: boolean
+        default: false
+      rotacionar_csrf:
+        description: 'Gerar um CSRF_SECRET novo (as pessoas só precisam recarregar a página)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # nunca ao mesmo tempo que um deploy do mesmo ambiente
+  group: ${{ inputs.ambiente == 'production' && 'deploy-production' || 'deploy-staging' }}
+  cancel-in-progress: false
+
+jobs:
+  configurar:
+    name: Configurar a Vercel (${{ inputs.ambiente }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ${{ inputs.ambiente == 'production' && 'production-ops' || 'staging' }}
+    env:
+      AMBIENTE: ${{ inputs.ambiente }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      SUPABASE_POOLER_HOST: ${{ vars.SUPABASE_POOLER_HOST }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      STAGING_URL: ${{ vars.STAGING_URL }}
+      INVITE_ALLOWED_DOMAINS: ${{ vars.INVITE_ALLOWED_DOMAINS }}
+      # opcionais: login corporativo (infra/supabase/sso-saml.md) e cota de armazenamento por pessoa (MB; 0 = sem cota)
+      SSO_ENABLED: ${{ vars.SSO_ENABLED }}
+      SSO_DOMAINS: ${{ vars.SSO_DOMAINS }}
+      STORAGE_QUOTA_USER_MB: ${{ vars.STORAGE_QUOTA_USER_MB }}
+      VERCEL_TEAM: ${{ vars.VERCEL_TEAM }}
+      VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção (ferramentas)
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Configurar o projeto e gravar as variáveis da API
+        working-directory: platform
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          APP_API_DB_PASSWORD: ${{ secrets.APP_API_DB_PASSWORD }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          CSRF_SECRET: ${{ secrets.CSRF_SECRET }}                                          # opcional: sem ele, a Vercel guarda um gerado na 1ª vez
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}  # opcional
+          SIMULAR: ${{ inputs.simular }}
+          ROTACIONAR: ${{ inputs.rotacionar_csrf }}
+        run: |
+          args=(configurar --resumo "$GITHUB_STEP_SUMMARY" --json "$RUNNER_TEMP/configurar-vercel.json")
+          if [ "$SIMULAR" = "true" ]; then args+=(--simular); fi
+          if [ "$ROTACIONAR" = "true" ]; then args+=(--rotacionar-csrf); fi
+          node tools/vercel-setup.js "${args[@]}"

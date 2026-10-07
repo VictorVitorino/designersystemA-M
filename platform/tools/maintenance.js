@@ -7,7 +7,10 @@
      audit-retention    apaga auditoria com mais de --days (padrão 180) em lotes, com o sinal app.allow_audit_purge='on' [--dry-run]
      backup-freshness   falha se o último backup do banco (ou do espelho de arquivos) for mais velho que --max-hours (padrão 26)
      stats              números de uso e tamanhos; avisa perto dos limites [--warn-db-gb 6] [--warn-storage-gb 800]
+                        [--resumo ARQ] tabela em Markdown (resumo do GitHub Actions) · [--github-output ARQ] grava capacidade=ok|alerta e o texto dos alertas
+                        de CAPACIDADE (banco, arquivos, tuplas mortas) para o workflow abrir/fechar a issue "Alerta de capacidade" 
    Variáveis: DATABASE_OPS_URL (papel app_ops); backup-freshness usa BACKUP_TARGET + BACKUP_S3_* (somente LEITURA basta) e, se houver, BACKUP_ENCRYPTION_KEY para conferir o MAC. */
+import fs from 'node:fs';
 import { ToolError, buildRedactor, makeLogger, parseArgs, fmtBytes, runCli, isMain } from './lib/common.js';
 import { connect } from './lib/pg.js';
 import { openTarget } from './lib/targets.js';
@@ -42,7 +45,9 @@ export async function auditRetention(sql, { days = 180, dryRun = false, batch = 
   return { dryRun, days, eligible: n, deleted };
 }
 
-export async function backupFreshness({ target, keys = null, maxHours = 26, checkObjects = true, now = new Date() }) {
+/** Frescor do backup. Espelho PARCIAL (parou no horário-limite durante a 1ª cópia de um acervo grande) não é problema por si; vira problema
+ *  se continuar parcial por mais de `maxPartialDays` (a cópia nunca alcança a origem: falta rede ou tempo). */
+export async function backupFreshness({ target, keys = null, maxHours = 26, checkObjects = true, maxPartialDays = 7, now = new Date() }) {
   const problems = [], info = {}; const { complete } = await listBackups(target);
   if (!complete.length) problems.push('NENHUM backup do banco encontrado no destino');
   else {
@@ -55,7 +60,11 @@ export async function backupFreshness({ target, keys = null, maxHours = 26, chec
     if (!st) problems.push('nunca houve espelho dos arquivos (status/objects-last-run.json ausente)');
     else { const age = (now - new Date(st.at)) / 3600e3; info.objects = { at: st.at, ageHours: Math.round(age * 10) / 10, ok: st.ok, copied: st.copied };
       if (keys && !verifyManifest(keys, st)) problems.push('status do espelho de arquivos com MAC inválido');
-      if (age > maxHours) problems.push(`o último espelho de arquivos é de ${st.at} (${age.toFixed(1)} h; limite ${maxHours} h)`); if (!st.ok) problems.push('o último espelho de arquivos terminou COM FALHAS'); }
+      if (age > maxHours) problems.push(`o último espelho de arquivos é de ${st.at} (${age.toFixed(1)} h; limite ${maxHours} h)`); if (!st.ok) problems.push('o último espelho de arquivos terminou COM FALHAS');
+      if (st.partial) {
+        const dias = st.partialSince ? (now - new Date(st.partialSince)) / 86400e3 : 0; info.objects.partial = true; info.objects.partialSince = st.partialSince || null;
+        if (dias > maxPartialDays) problems.push(`o espelho de arquivos está INCOMPLETO há ${dias.toFixed(1)} dias (cada execução para no horário-limite antes de alcançar a origem): rode a 1ª cópia de uma máquina com rede melhor (node tools/backup.js objects) ou aumente a concorrência — docs/BACKUP-E-RESTAURACAO.md`);
+      } }
   }
   return { ok: !problems.length, problems, ...info };
 }
@@ -72,12 +81,27 @@ export async function stats(sql, { warnDbGb = 6, warnStorageGb = 800 } = {}) {
     const bloat = await tx`select relname as name, n_live_tup::bigint as live, n_dead_tup::bigint as dead, last_autovacuum, last_vacuum from pg_stat_user_tables where schemaname = 'app' and relname in ('presentations', 'presentation_versions', 'audit_log', 'rate_limits') order by n_dead_tup desc`;
     return { users: u, presentations: p, versions: v.n, assets: { ready: a.ready, bytes: Number(a.bytes), pending: a.pending, markedDeleted: a.marked_deleted }, other: o, dbBytes: Number(d.bytes), biggestTables: tables.map((t) => ({ name: t.name, bytes: Number(t.bytes) })), bloat: bloat.map((b) => ({ name: b.name, live: Number(b.live), dead: Number(b.dead), lastAutovacuum: b.last_autovacuum, lastVacuum: b.last_vacuum })) };
   });
-  const warnings = [];
-  if (r.dbBytes > warnDbGb * 1024 ** 3) warnings.push(`banco com ${fmtBytes(r.dbBytes)} (alerta em ${warnDbGb} GB): revise retenção de versões/auditoria ou aumente o plano`);
-  if (r.assets.bytes > warnStorageGb * 1024 ** 3) warnings.push(`arquivos somam ${fmtBytes(r.assets.bytes)} (alerta em ${warnStorageGb} GB): planeje mais espaço ou rode o GC`);
-  if (r.users.admins < 2) warnings.push('há menos de 2 administradores ativos (risco de perder o acesso administrativo)');
-  for (const b of r.bloat) if (b.dead > 10000 && b.dead > b.live) warnings.push(`${b.name}: ${b.dead} tuplas mortas para ${b.live} vivas (autovacuum atrasado — o autosave reescreve o deck inteiro); confira autovacuum em docs/MONITORAMENTO.md`);
-  return { ...r, dbHuman: fmtBytes(r.dbBytes), assetsHuman: fmtBytes(r.assets.bytes), warnings, ok: !warnings.length };
+  const alerts = [];   // {kind, message}: kind = db_size | storage_size | bloat (CAPACIDADE) | admins (risco de acesso)
+  if (r.dbBytes > warnDbGb * 1024 ** 3) alerts.push({ kind: 'db_size', message: `banco com ${fmtBytes(r.dbBytes)} (alerta em ${warnDbGb} GB): revise retenção de versões/auditoria ou aumente o plano` });
+  if (r.assets.bytes > warnStorageGb * 1024 ** 3) alerts.push({ kind: 'storage_size', message: `arquivos somam ${fmtBytes(r.assets.bytes)} (alerta em ${warnStorageGb} GB): planeje mais espaço ou rode o GC` });
+  if (r.users.admins < 2) alerts.push({ kind: 'admins', message: 'há menos de 2 administradores ativos (risco de perder o acesso administrativo)' });
+  for (const b of r.bloat) if (b.dead > 10000 && b.dead > b.live) alerts.push({ kind: 'bloat', message: `${b.name}: ${b.dead} tuplas mortas para ${b.live} vivas (autovacuum atrasado — o autosave reescreve o deck inteiro); confira autovacuum em docs/MONITORAMENTO.md` });
+  const warnings = alerts.map((a) => a.message);
+  const capacity = alerts.filter((a) => CAPACITY_KINDS.includes(a.kind));
+  return { ...r, dbHuman: fmtBytes(r.dbBytes), assetsHuman: fmtBytes(r.assets.bytes), warnings, alerts, capacity, limits: { warnDbGb, warnStorageGb }, ok: !warnings.length };
+}
+export const CAPACITY_KINDS = ['db_size', 'storage_size', 'bloat'];
+
+/** Resumo em Markdown dos números (para o resumo da execução no GitHub). */
+export function statsMarkdown(r) {
+  const L = ['## Números de uso', '', '| Item | Valor |', '|---|---|',
+    `| Usuários ativos (admins) | ${r.users.active} (${r.users.admins}) |`, `| Convidados pendentes / suspensos | ${r.users.invited} / ${r.users.suspended} |`,
+    `| Apresentações (na lixeira) | ${r.presentations.live} (${r.presentations.trash}) |`, `| Versões guardadas | ${r.versions} |`,
+    `| Arquivos prontos | ${r.assets.ready} (${r.assetsHuman}; alerta em ${r.limits.warnStorageGb} GB) |`, `| Banco | ${r.dbHuman} (alerta em ${r.limits.warnDbGb} GB) |`,
+    `| Maiores tabelas | ${r.biggestTables.map((t) => `${t.name} ${fmtBytes(t.bytes)}`).join(', ')} |`,
+    `| Tuplas mortas × vivas | ${r.bloat.map((b) => `${b.name} ${b.dead}/${b.live}`).join(', ') || '—'} |`, ''];
+  L.push(r.alerts.length ? `**Avisos:**\n${r.alerts.map((a) => `- ${a.message}`).join('\n')}` : 'Sem avisos: tudo dentro dos limites.', '');
+  return L.join('\n');
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
@@ -95,7 +119,14 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     if (cmd === 'purge-expired') { const r = await purgeExpired(sql); out(r, `convites expirados: ${r.invitesExpired}; contadores antigos apagados: ${r.rateRowsDeleted}`); return 0; }
     if (cmd === 'prune-versions') { const r = await pruneVersions(sql, { dryRun: !!args['dry-run'] }); out(r, `${r.dryRun ? '(simulação) ' : ''}${r.versionsRemoved} versões removidas em ${r.presentationsExamined} apresentações (mantém ${r.keepLast} últimas + 1 por dia por ${r.keepDailyDays} dias + manuais)`); return 0; }
     if (cmd === 'audit-retention') { const r = await auditRetention(sql, { days: Number(args.days ?? 180), dryRun: !!args['dry-run'] }); out(r, `${r.dryRun ? '(simulação) ' : ''}auditoria com mais de ${r.days} dias: ${r.eligible} registros, ${r.deleted} apagados`); return 0; }
-    if (cmd === 'stats') { const r = await stats(sql, { warnDbGb: Number(args['warn-db-gb'] ?? 6), warnStorageGb: Number(args['warn-storage-gb'] ?? 800) }); out(r, `usuários ativos ${r.users.active} (admins ${r.users.admins}) · apresentações ${r.presentations.live} (+${r.presentations.trash} na lixeira) · versões ${r.versions} · arquivos ${r.assets.ready} (${r.assetsHuman}) · banco ${r.dbHuman}${r.warnings.length ? '\nAVISOS:\n  - ' + r.warnings.join('\n  - ') : ''}`); return args['fail-on-warn'] && !r.ok ? 1 : 0; }
+    if (cmd === 'stats') {
+      const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };   // variável vazia no workflow → padrão
+      const r = await stats(sql, { warnDbGb: num(args['warn-db-gb'], 6), warnStorageGb: num(args['warn-storage-gb'], 800) });
+      out(r, `usuários ativos ${r.users.active} (admins ${r.users.admins}) · apresentações ${r.presentations.live} (+${r.presentations.trash} na lixeira) · versões ${r.versions} · arquivos ${r.assets.ready} (${r.assetsHuman}) · banco ${r.dbHuman}${r.warnings.length ? '\nAVISOS:\n  - ' + r.warnings.join('\n  - ') : ''}`);
+      if (args.resumo) fs.appendFileSync(args.resumo, statsMarkdown(r) + '\n');
+      if (args['github-output']) fs.appendFileSync(args['github-output'], `capacidade=${r.capacity.length ? 'alerta' : 'ok'}\nalertas<<CANTEIRO_FIM\n${r.capacity.map((a) => `- ${a.message}`).join('\n') || '- (nenhum)'}\nCANTEIRO_FIM\n`);
+      return args['fail-on-warn'] && !r.ok ? 1 : 0;
+    }
     throw new ToolError(`comando desconhecido: ${cmd}`, { exit: 2, code: 'usage' });
   } finally { await sql.end({ timeout: 5 }).catch(() => {}); }
 }

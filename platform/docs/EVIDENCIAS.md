@@ -18,7 +18,9 @@ Tudo abaixo foi **executado nesta máquina** (Linux, 4 CPUs, 16 GB, Postgres 16 
 | Carga 50 usuários × 180 s | **APROVADA**: PUT p95 164 ms, GET p95 90 ms, 0 × 429, 0 × 5xx, integridade 50/50, 0 vazamentos |
 | `npm audit --omit=dev` | **0 vulnerabilidades** |
 | Paridade original × nuvem (423 slides) | ver §1.2 |
-O que depende de contas externas (Supabase, Vercel, GitHub Actions, domínio, e-mail) **não foi executado** e está marcado como tal em [`CONFIGURACAO.md`](CONFIGURACAO.md).
+O que depende de contas externas (Supabase, Vercel, domínio, e-mail) **não foi executado** e está marcado como tal em [`CONFIGURACAO.md`](CONFIGURACAO.md).
+
+**CI no GitHub Actions (executado de verdade):** o workflow `CI` falhou do run 3 ao 13 — a suíte de segurança lia o site gerado (`dist/public`), que no GitHub só era gerado depois dela; o `--check` do `vercel.json` rodava depois do build; dois testes de taxa/tempo eram sensíveis à virada da janela e à carga; o S3 falso usava porta fixa. Corrigido nos commits `5eb2443` e `2924ee4`: **run 14 verde** (2026-10-07, [37615844075](https://github.com/VictorVitorino/designersystemA-M/actions/runs/37615844075)) — migrações do zero, `vercel.json` em dia com o build, `npm test`, `npm run test:security` e testes de operação, todos aprovados no runner do GitHub. Os workflows de publicação, backup e monitoramento só passam a rodar quando o código estiver na `main` (eles disparam a partir do branch padrão).
 
 ## 1. Preservação do editor original
 
@@ -125,6 +127,6 @@ Correções aplicadas no mesmo dia (detalhes e estado em `SEGURANCA.md` §4): **
 
 ## 9. O que não pôde ser testado aqui
 
-- Supabase real (Auth, Postgres gerenciado, Storage S3), Vercel (Functions, CDN, limites de 4,5 MB), GitHub Actions, domínio/HTTPS real, SMTP e entregabilidade de e-mail, SSO da A&M.
+- Supabase real (Auth, Postgres gerenciado, Storage S3), Vercel (Functions, CDN, limites de 4,5 MB), os workflows de publicação/backup/monitoramento no GitHub (dependem dos segredos e da `main`), domínio/HTTPS real, SMTP e entregabilidade de e-mail, SSO da A&M. A compatibilidade com as **chaves novas do Supabase** (`sb_publishable_…`/`sb_secret_…`, únicas em projetos criados a partir de nov/2025) foi provada contra o GoTrue falso que imita a recusa da chave nova como Bearer (`tests/api/supabase-keys.test.js`).
 - Navegadores além do Chromium (Firefox, Safari).
 - Latência de rede real entre Brasil e as regiões dos fornecedores.

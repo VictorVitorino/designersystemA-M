@@ -2,17 +2,22 @@
    • Tokens NUNCA no corpo: só cookies HttpOnly. O corpo leva apenas {authenticated, csrfToken, user, needsPassword}.
    • Limite de taxa ANTES de qualquer chamada ao GoTrue (login, forgot, verify), no Postgres (app.hit_rate).
    • Falhas de login iguais para e-mail inexistente × senha errada, com tempo equalizado; a auditoria guarda só o HMAC do e-mail.
-   • Quem não foi convidado nunca recebe sessão utilizável: a identidade só é vinculada pelo banco (app.resolve_identity) a um convite existente. */
+   • Quem não foi convidado nunca recebe sessão utilizável: a identidade só é vinculada pelo banco (app.resolve_identity) a um convite existente.
+   • SSO corporativo (F10, SAML do Supabase com PKCE; só com SSO_ENABLED): GET /sso?email= (ou ?domain=) → URL do IdP pelo GoTrue → 302; o IdP
+     volta ao GoTrue, que volta a GET /sso/callback?code= → troca por sessão com o verifier guardado no cookie do MESMO navegador → vínculo da
+     identidade nova à conta EXISTENTE pelo e-mail verificado (de um domínio de SSO_DOMAINS). São navegações do navegador: os erros voltam para
+     /entrar?motivo=<código> (not_invited, suspended, sso_email, sso_dominio, sso_indisponivel, sso_expirou, sso_falhou, sso_limite). */
 import { Hono } from 'hono';
 import { E, HttpError } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 import { requireUser, audit, auditAnon, limit } from '../lib/request.js';
-import { cookieNames, readCookie, setSessionCookies, clearSessionCookies, setCsrfCookie, setNeedsPasswordCookie } from '../auth/cookies.js';
+import { cookieNames, ssoCookieName, readCookie, setSessionCookies, clearSessionCookies, setCsrfCookie, setNeedsPasswordCookie, setSsoCookie } from '../auth/cookies.js';
 import { CSRF_TOKEN_RE, newCsrfToken, padTo, sha256hex, hmacHex, safeEqual } from '../auth/hash.js';
 import { getAuthKit } from '../auth/kit.js';
 import { JwtRejected } from '../auth/jwt.js';
 import { validatePassword } from '../auth/password.js';
 import { readJson, emailField, displayNameField, z } from '../auth/body.js';
+import { pkcePair, sealState, openState, safeNext, domainOf, ssoDomainAllowed, isSsoProvider, SSO_DOMAIN_RE, AUTH_CODE_RE, SSO_TTL_S } from '../auth/sso.js';
 
 const LoginBody = z.object({ email: emailField, password: z.string({ required_error: 'Informe a senha.' }).min(1, 'Informe a senha.').max(1024, 'Senha muito longa.') }).strict();
 const ForgotBody = z.object({ email: emailField }).strict();
@@ -22,6 +27,8 @@ const VerifyBody = z.object({
 }).strict();
 const PasswordBody = z.object({ password: z.string({ required_error: 'Informe a senha.' }).max(1024, 'Senha muito longa.') }).strict();
 const MeBody = z.object({ displayName: displayNameField }).strict();
+const SsoQuery = z.object({ email: emailField.optional(), domain: z.string().trim().toLowerCase().regex(SSO_DOMAIN_RE).optional(), next: z.string().max(512).optional() })
+  .refine((q) => !!q.email !== !!q.domain);
 
 export const publicUser = (u) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role, status: u.status });
 const sessionBody = (user, csrfToken, needsPassword) => ({ authenticated: true, csrfToken, user: publicUser(user), needsPassword: !!needsPassword });
@@ -206,10 +213,94 @@ export function authRoutes(deps) {
     return c.json(sessionBody(user, ensureCsrf(c), user.status === 'invited' || inRecovery(c)));
   });
 
-  // ------------------------------------------------------------------------------------------------ SSO (futuro)
-  const sso = () => { throw E.notConfigured('Login corporativo (SSO) ainda não está configurado.'); };
-  r.get('/sso/start', sso);
-  r.get('/sso/callback', sso);
+  // ------------------------------------------------------------------------------------------------ SSO corporativo (SAML + PKCE)
+  const ssoOff = () => E.notConfigured('Login corporativo (SSO) não está habilitado.');
+  /** Erro numa navegação do SSO: volta para a tela de entrada com o motivo (a tela mostra a mensagem), preservando o destino. */
+  function toLogin(c, motivo, next) {
+    const q = new URLSearchParams({ motivo });
+    if (next && next !== '/acervo') q.set('next', next);
+    c.header('Cache-Control', 'no-store');
+    return c.redirect(`/entrar?${q.toString()}`, 302);
+  }
+  /** Limite por IP numa navegação: estourou → tela de entrada com motivo sso_limite (em vez de JSON na tela). */
+  async function ssoLimit(c, bucket) {
+    try { await limit(c, bucket, c.get('ip') || 'unknown', 600, 100); return true; }
+    catch (e) { if (e instanceof HttpError && e.code === 'rate_limited') return false; throw e; }
+  }
+
+  async function ssoStart(c) {
+    if (!config.sso.enabled) throw ssoOff();
+    const raw = c.req.query();
+    const next = safeNext(typeof raw.next === 'string' ? raw.next : '');
+    if (!(await ssoLimit(c, 'sso_ip'))) return toLogin(c, 'sso_limite', next);
+    const q = SsoQuery.safeParse({ email: raw.email, domain: raw.domain, next: raw.next });
+    if (!q.success) return toLogin(c, 'sso_email', next);
+    const domain = q.data.email ? domainOf(q.data.email) : q.data.domain;
+    if (!ssoDomainAllowed(config, domain)) { await bestEffort(() => auditAnon(c, 'auth.sso_refused', 'sso', null, { reason: 'dominio' })); return toLogin(c, 'sso_dominio', next); }
+    const { verifier, challenge } = pkcePair();
+    let url;
+    try { url = await gotrue.ssoUrl({ domain, redirectTo: `${config.origin}/api/auth/sso/callback`, codeChallenge: challenge }); }
+    catch (e) {
+      if (!(e instanceof HttpError)) throw e;
+      log.warn('sso_start_failed', { code: e.code });
+      return toLogin(c, e.code === 'rate_limited' ? 'sso_limite' : 'sso_indisponivel', next);
+    }
+    setSsoCookie(c, config, sealState(config, { verifier, next }), SSO_TTL_S);   // o verifier fica só aqui (HttpOnly) e no servidor; o IdP vê o desafio
+    await bestEffort(() => auditAnon(c, 'auth.sso_start', 'sso', domain, {}));
+    c.header('Cache-Control', 'no-store');
+    return c.redirect(url, 302);
+  }
+
+  async function ssoCallback(c) {
+    if (!config.sso.enabled) throw ssoOff();
+    const state = openState(config, readCookie(c, ssoCookieName(config)));
+    setSsoCookie(c, config, '');                                           // uso único: sai em qualquer desfecho
+    const next = state ? state.next : '/acervo';
+    if (!(await ssoLimit(c, 'sso_cb_ip'))) return toLogin(c, 'sso_limite', next);
+    const q = c.req.query();
+    const refuse = async (motivo, reason, tokens) => {
+      if (tokens) await discard(tokens);
+      await bestEffort(() => auditAnon(c, 'auth.sso_refused', 'sso', null, { reason }));
+      return toLogin(c, motivo, next);
+    };
+    if (q.error !== undefined || q.error_code !== undefined) return refuse('sso_falhou', 'idp');   // a pessoa cancelou ou o IdP recusou (a descrição não é ecoada)
+    if (!state) return refuse('sso_expirou', 'estado');                                               // outro navegador, cookie vencido/adulterado
+    if (typeof q.code !== 'string' || !AUTH_CODE_RE.test(q.code)) return refuse('sso_expirou', 'codigo');
+    let tokens;
+    try { tokens = await gotrue.exchangeCode({ authCode: q.code, codeVerifier: state.verifier }); }
+    catch (e) {
+      if (!(e instanceof HttpError)) throw e;
+      if (e.code === 'link_invalid') return refuse('sso_expirou', 'codigo');
+      if (e.code === 'suspended') return refuse('suspended', 'banido');
+      log.warn('sso_exchange_failed', { code: e.code });
+      return toLogin(c, e.code === 'rate_limited' ? 'sso_limite' : 'sso_indisponivel', next);
+    }
+    let claims;
+    try { claims = await kit.verifier.verify(tokens.accessToken); }
+    catch (e) { if (e instanceof JwtRejected && e.reason === 'invalid') return refuse('sso_falhou', 'token', tokens); log.warn('sso_verify_failed', { reason: e && e.reason }); return toLogin(c, 'sso_indisponivel', next); }
+    if (!isSsoProvider(claims.provider)) return refuse('sso_falhou', 'provedor', tokens);                   // a sessão tem de vir do SSO
+    if (!ssoDomainAllowed(config, domainOf(claims.email))) return refuse('sso_dominio', 'dominio_idp', tokens);   // o IdP afirmou e-mail de outro domínio
+    if (!claims.emailVerified) return refuse('sso_falhou', 'email_nao_verificado', tokens);
+    const user = await kit.resolve(claims, { allowLink: true, touch: true });   // vincula à conta EXISTENTE pelo e-mail; nunca cria conta
+    const eh = kit.hashEmail(claims.email);
+    if (!user || user.status === 'suspended') {
+      await discard(tokens);
+      await bestEffort(() => auditAnon(c, 'auth.login_failed', 'user', null, { email_hash: eh, reason: user ? 'suspended' : 'not_invited', via: 'sso' }));
+      return toLogin(c, user ? 'suspended' : 'not_invited', next);
+    }
+    kit.cache.invalidateUser(user.id);
+    kit.cache.set(claims.sub, user);
+    setSessionCookies(c, config, tokens);
+    setNeedsPasswordCookie(c, config, false);
+    ensureCsrf(c, { rotate: true });                                              // token CSRF novo a cada login (evita fixação)
+    await auditUser(c, user, 'auth.login', { via: 'sso', provider: claims.provider });
+    c.header('Cache-Control', 'no-store');
+    return c.redirect(next, 302);
+  }
+
+  r.get('/sso', ssoStart);
+  r.get('/sso/start', ssoStart);                                                  // nome antigo (respondia 501): continua valendo
+  r.get('/sso/callback', ssoCallback);
   return r;
 }
 

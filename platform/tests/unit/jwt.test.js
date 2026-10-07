@@ -20,6 +20,21 @@ describe('modo JWKS (ES256)', () => {
     assert.equal(c.sub, SUB); assert.equal(c.email, 'ana@am.test'); assert.equal(c.emailVerified, true); assert.equal(c.sessionId, 's1');
   });
   test('expirado → expired', async () => assert.equal(await reason(v, await fake.mintToken(claims(), { ttl: -60 })), 'expired'));
+  test('provedor da identidade (F10): app_metadata.provider "sso:<uuid>" → mesmo valor (minúsculo); e-mail/ausente/outros → "supabase"', async () => {
+    const SSO = 'sso:0f8c1d1e-1b6e-4b5a-9a77-2f6a4a1b2c3d';
+    assert.equal((await v.verify(await fake.mintToken(claims({ app_metadata: { provider: SSO } })))).provider, SSO);
+    assert.equal((await v.verify(await fake.mintToken(claims({ app_metadata: { provider: SSO.toUpperCase() } })))).provider, SSO);
+    for (const am of [undefined, { provider: 'email' }, { provider: 'azure' }, { provider: 'sso:entra' }, { provider: 5 }, 'x']) assert.equal((await v.verify(await fake.mintToken(claims(am === undefined ? {} : { app_metadata: am })))).provider, 'supabase', JSON.stringify(am));
+  });
+  test('e-mail verificado: no SSO (e outros externos) só com email_verified === true; no e-mail/senha a falta da declaração conta como verificado', async () => {
+    const ver = async (am, um) => (await v.verify(await fake.mintToken({ sub: SUB, email: 'a@am.test', session_id: 's1', ...(am ? { app_metadata: am } : {}), ...(um !== undefined ? { user_metadata: um } : {}) }))).emailVerified;
+    const SSO = { provider: 'sso:0f8c1d1e-1b6e-4b5a-9a77-2f6a4a1b2c3d' };
+    assert.equal(await ver(SSO, { email_verified: true }), true);
+    for (const um of [{}, { email_verified: 'true' }, { email_verified: 1 }, { email_verified: false }, null]) assert.equal(await ver(SSO, um), false, JSON.stringify(um));
+    assert.equal(await ver({ provider: 'azure' }, {}), false, 'OAuth externo sem declaração não conta');
+    assert.equal(await ver({ provider: 'azure' }, { email_verified: true }), true);
+    assert.equal(await ver({ provider: 'email' }, {}), true); assert.equal(await ver(null, {}), true); assert.equal(await ver({ provider: 'email' }, { email_verified: false }), false);
+  });
   test('alg none (sem assinatura) → recusado', async () => {
     const t = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ ...claims(), iss: fake.issuer, aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 600, role: 'authenticated' })}.`;
     assert.equal(await reason(v, t), 'invalid');

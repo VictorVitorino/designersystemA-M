@@ -2,6 +2,7 @@
    resolução de identidade. Memoizado por `deps` (WeakMap) para o middleware de sessão, as rotas e os testes compartilharem o mesmo objeto. */
 import { createJwtVerifier } from './jwt.js';
 import { emailHash } from './hash.js';
+import { domainOf, isSsoProvider, ssoDomainAllowed } from './sso.js';
 import { E, HttpError } from '../lib/errors.js';
 
 /** Cache de identidade em memória. TTL MÁXIMO de 15 s: suspender/rebaixar um usuário precisa valer logo (a decisão final é sempre do banco). */
@@ -29,11 +30,14 @@ export function getAuthKit(deps) {
     verifier: deps.jwtVerifier || createJwtVerifier(config),
     cache: deps.identityCache || new IdentityCache(deps.identityTtlMs ?? 15_000),
     hashEmail: (email) => emailHash(config, email),
-    /** Mapeia o sujeito do provedor → usuário do banco (só convidados). Devolve null se não há convite. */
+    /** Mapeia (provedor, sujeito) → usuário do banco (só convidados). Devolve null se não há convite. O provedor vem do token ('supabase' ou
+     *  'sso:<uuid>'); identidade de SSO só é VINCULADA por e-mail quando o domínio do e-mail está em SSO_DOMAINS (defesa em profundidade). */
     async resolve(claims, { allowLink = false, touch = false } = {}) {
+      const provider = claims.provider || 'supabase';
+      const link = allowLink && (!isSsoProvider(provider) || ssoDomainAllowed(config, domainOf(claims.email)));
       let r;
       try {
-        [r] = await db.anon((tx) => tx`select * from app.resolve_identity('supabase', ${claims.sub}, ${claims.email}, ${claims.emailVerified}, ${allowLink}, ${touch})`);
+        [r] = await db.anon((tx) => tx`select * from app.resolve_identity(${provider}, ${claims.sub}, ${claims.email}, ${claims.emailVerified}, ${link}, ${touch})`);
       } catch (e) {
         if (e instanceof HttpError) throw e;
         throw E.unavailable();

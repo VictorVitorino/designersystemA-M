@@ -8,5 +8,8 @@ let app;
 function get() { if (!app) app = createApp(buildDeps(loadConfig(process.env))); return app; }
 export const config = { runtime: 'nodejs' };
 const h = (req) => handle(get())(req);
+/* SÓ exportações nomeadas por método. NÃO exporte `default`: o carregador Node da Vercel (@vercel/node, compileUserCode/unwrapDefaults)
+   desembrulha `.default` ANTES de procurar GET/POST/fetch; com `export default h` o módulo vira uma função comum, é chamado como
+   (req, res) do Node, devolve um Response que ninguém escreve e TODA rota /api fica sem resposta até o tempo máximo (504).
+   tests/unit/vercel-entry.test.js reproduz essa detecção. */
 export const GET = h, POST = h, PUT = h, PATCH = h, DELETE = h, OPTIONS = h, HEAD = h;
-export default h;

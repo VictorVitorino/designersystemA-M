@@ -74,7 +74,7 @@ export async function runDrill({ adminUrl, outDir = path.join(HERE, '..', 'docs'
       objects: { copied: objRes.copied, copiedBytes: objRes.copiedBytes, ms: objRes.durationMs, secondRunCopied: objRes2.copied, secondRunSkipped: objRes2.alreadyInDestination, sourceObjects: objRes.sourceObjects } };
     let s3Target = null, s3Env = null;
     if (useS3) {
-      moto = await startMoto(Number(process.env.DRILL_MOTO_PORT) || 4301);
+      moto = await startMoto(Number(process.env.DRILL_MOTO_PORT) || 0);
       if (!moto) { ev.limits.push('moto_server não instalado: o backup em S3 NÃO foi exercitado neste ensaio (pip install "moto[server]")'); log('aviso: moto_server ausente, pulando S3'); }
       else {
         await makeBucket(moto.endpoint, 'canteiro-backup-drill');

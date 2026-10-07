@@ -1,5 +1,8 @@
-# Manutenção semanal: expira convites, poda versões antigas, aplica a retenção de auditoria (180 dias), mostra números de uso e faz o RELATÓRIO de arquivos órfãos.
-# Apagar arquivos órfãos de verdade (GC) NUNCA roda sozinho: só por execução manual, digitando APAGAR, e com a aprovação do ambiente "production".
+# Manutenção semanal de PRODUÇÃO: expira convites, poda versões antigas, aplica a retenção de auditoria (180 dias), mostra números de uso,
+# abre/atualiza a issue "Alerta de capacidade" (banco ou arquivos acima de WARN_DB_GB/WARN_STORAGE_GB, ou tuplas mortas demais) e a FECHA
+# quando normalizar — mesmo padrão do uptime.yml — e faz o RELATÓRIO de arquivos órfãos.
+# Agendada só com a produção LIGADA (variável do repositório PRODUCTION_ENABLED=true); "Run workflow" manual sempre roda.
+# Apagar arquivos órfãos de verdade (GC) NUNCA roda sozinho: só por execução manual marcando gc_apply e digitando APAGAR (essa é a aprovação).
 name: Manutenção
 
 on:
@@ -18,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: maintenance
@@ -25,10 +29,19 @@ concurrency:
 
 jobs:
   rotinas:
-    name: Rotinas e relatório
+    name: Rotinas, números de uso e relatório
+    if: vars.PRODUCTION_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: production-ops
+    env:
+      AMBIENTE: production
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      SUPABASE_POOLER_HOST: ${{ vars.SUPABASE_POOLER_HOST }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      WARN_DB_GB: ${{ vars.WARN_DB_GB }}
+      WARN_STORAGE_GB: ${{ vars.WARN_STORAGE_GB }}
     steps:
       - name: Baixar o código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,38 +59,83 @@ jobs:
         working-directory: platform
         run: npm ci --omit=dev
 
-      - name: Rotinas (convites, versões, auditoria) e estatísticas
+      - name: Conferir as chaves (operação e arquivos) e achar o servidor do banco
         working-directory: platform
         env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}          # nome antigo (compatibilidade)
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}  # só para achar o servidor do banco
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+        run: node tools/chaves.js conferir --precisa ops,arquivos --resumo "$GITHUB_STEP_SUMMARY" --github-env "$GITHUB_ENV"
+
+      - name: Rotinas (convites, versões, auditoria) e números de uso
+        id: stats
+        working-directory: platform
+        env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
           DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
         run: |
-          node tools/maintenance.js purge-expired
-          node tools/maintenance.js prune-versions
-          node tools/maintenance.js audit-retention --days 180
-          echo "## Números de uso" >> "$GITHUB_STEP_SUMMARY"
-          node tools/maintenance.js stats --warn-db-gb "${{ vars.WARN_DB_GB || '6' }}" --warn-storage-gb "${{ vars.WARN_STORAGE_GB || '800' }}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          node tools/chaves.js exec --precisa ops -- node tools/maintenance.js purge-expired
+          node tools/chaves.js exec --precisa ops -- node tools/maintenance.js prune-versions
+          node tools/chaves.js exec --precisa ops -- node tools/maintenance.js audit-retention --days 180
+          node tools/chaves.js exec --precisa ops -- node tools/maintenance.js stats --warn-db-gb "${WARN_DB_GB:-6}" --warn-storage-gb "${WARN_STORAGE_GB:-800}" --resumo "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"
 
       - name: Relatório de arquivos órfãos (GC em modo relatório — não apaga nada)
         working-directory: platform
         env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
           DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
-          STORAGE_DRIVER: s3
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_REGION: ${{ secrets.S3_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
         run: |
           echo "## Arquivos órfãos (relatório)" >> "$GITHUB_STEP_SUMMARY"
-          node tools/gc-assets.js --scan-storage 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          node tools/chaves.js exec --precisa ops,arquivos -- node tools/gc-assets.js --scan-storage 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Abrir ou atualizar a issue "Alerta de capacidade"
+        if: steps.stats.outputs.capacidade == 'alerta'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ALERTAS: ${{ steps.stats.outputs.alertas }}
+        with:
+          script: |
+            const titulo = 'Alerta de capacidade';
+            const corpo = `Detectado em ${new Date().toISOString()} pela manutenção semanal (execução ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}):\n\n${process.env.ALERTAS}\n\nRoteiro: docs/OPERACAO.md → "Banco cheio" e docs/MONITORAMENTO.md (limites WARN_DB_GB / WARN_STORAGE_GB). A issue fecha sozinha quando os números voltarem ao normal.`;
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            const atual = abertas.find((i) => i.title === titulo && !i.pull_request);
+            if (atual) await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: atual.number, body: corpo });
+            else await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: titulo, body: corpo });
+
+      - name: Fechar a issue "Alerta de capacidade" quando normalizar
+        if: steps.stats.outputs.capacidade == 'ok'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data: abertas } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            for (const i of abertas.filter((x) => x.title === 'Alerta de capacidade' && !x.pull_request)) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, body: `Voltou ao normal em ${new Date().toISOString()}. Fechando automaticamente.` });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, state: 'closed', state_reason: 'completed' });
+            }
+
+      - name: Terminar com erro se houver alerta de capacidade (aciona o aviso por e-mail do GitHub)
+        if: steps.stats.outputs.capacidade == 'alerta'
+        run: exit 1
 
   gc-apagar:
-    name: Apagar arquivos órfãos (GC) — manual e aprovado
+    name: Apagar arquivos órfãos (GC) — manual, confirmado com APAGAR
     needs: rotinas
-    if: github.event_name == 'workflow_dispatch' && inputs.gc_apply && inputs.confirmacao == 'APAGAR'
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.gc_apply && inputs.confirmacao == 'APAGAR' && needs.rotinas.result != 'cancelled'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    environment: production      # exige a aprovação dos revisores
+    environment: production-ops      # sem revisores (não existem no plano): a confirmação APAGAR é a aprovação
+    env:
+      AMBIENTE: production
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      SUPABASE_POOLER_HOST: ${{ vars.SUPABASE_POOLER_HOST }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
     steps:
       - name: Baixar o código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,25 +153,32 @@ jobs:
         working-directory: platform
         run: npm ci --omit=dev
 
+      - name: Conferir as chaves e achar o servidor do banco
+        working-directory: platform
+        env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js conferir --precisa ops,arquivos,backup --resumo "$GITHUB_STEP_SUMMARY" --github-env "$GITHUB_ENV"
+
       - name: Conferir que existe backup recente ANTES de apagar
         working-directory: platform
         env:
-          BACKUP_TARGET: ${{ secrets.BACKUP_TARGET }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
-          BACKUP_S3_REGION: ${{ secrets.BACKUP_S3_REGION }}
           BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
-        run: node tools/maintenance.js backup-freshness --max-hours 26
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: node tools/chaves.js exec --precisa backup -- node tools/maintenance.js backup-freshness --max-hours 26
 
       - name: Aplicar o GC (marca; apaga o que já passou da carência de 24 h)
         working-directory: platform
         env:
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
           DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
-          STORAGE_DRIVER: s3
-          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
-          S3_REGION: ${{ secrets.S3_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-        run: node tools/gc-assets.js --apply --scan-storage 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+        run: node tools/chaves.js exec --precisa ops,arquivos -- node tools/gc-assets.js --apply --scan-storage 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

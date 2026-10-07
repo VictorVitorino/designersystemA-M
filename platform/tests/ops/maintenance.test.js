@@ -1,7 +1,10 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { setup, sha } from './_helpers.js';
-import { purgeExpired, pruneVersions, auditRetention, stats } from '../../tools/maintenance.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { setup, sha, tmp, rmrf, OPS_URL } from './_helpers.js';
+import { purgeExpired, pruneVersions, auditRetention, stats, statsMarkdown, CAPACITY_KINDS } from '../../tools/maintenance.js';
 import { attempt } from '../db/helpers.js';
 
 let db, ops, userId, presId; const sys = (fn) => ops.asSystem(fn);
@@ -58,4 +61,26 @@ test('audit-retention: sem o sinal o banco BLOQUEIA o delete; com o job apaga s�
 test('stats: números e alertas de limite', async () => {
   const s = await stats(ops.sql); assert.equal(s.users.active, 2); assert.equal(s.users.admins, 2); assert.equal(s.presentations.live, 1); assert.ok(s.dbBytes > 0); assert.equal(s.warnings.length, 0);
   const w = await stats(ops.sql, { warnDbGb: 0.000001 }); assert.ok(w.warnings.some((x) => /banco com/.test(x))); assert.equal(w.ok, false);
+});
+
+test('stats: alerta de CAPACIDADE (banco/arquivos/tuplas mortas) separado do de acesso (admins); resumo em Markdown e saída para o workflow', async () => {
+  const w = await stats(ops.sql, { warnDbGb: 0.000001, warnStorageGb: 800 });
+  assert.deepEqual(w.capacity.map((a) => a.kind), ['db_size']); assert.ok(w.alerts.every((a) => typeof a.kind === 'string' && a.message)); assert.deepEqual(CAPACITY_KINDS, ['db_size', 'storage_size', 'bloat']);
+  assert.deepEqual(w.limits, { warnDbGb: 0.000001, warnStorageGb: 800 });
+  const md = statsMarkdown(w); assert.match(md, /^## Números de uso/); assert.match(md, /\| Banco \| .+alerta em 0\.000001 GB/); assert.match(md, /\*\*Avisos:\*\*\n- banco com/);
+  assert.match(statsMarkdown(await stats(ops.sql)), /Sem avisos/);
+  // menos de 2 admins é aviso de ACESSO, não de capacidade: não abre a issue "Alerta de capacidade"
+  await sys((tx) => tx`update app.users set role = 'member' where email = 'm2@am.test'`);
+  try { const a = await stats(ops.sql); assert.deepEqual(a.alerts.map((x) => x.kind), ['admins']); assert.deepEqual(a.capacity, []); assert.equal(a.ok, false); }
+  finally { await sys((tx) => tx`update app.users set role = 'admin' where email = 'm2@am.test'`); }
+  // CLI como o maintenance.yml chama: --resumo (Markdown) e --github-output (capacidade=ok|alerta + texto dos alertas em bloco)
+  const d = tmp('mstats'); const resumo = path.join(d, 'resumo.md'), saida = path.join(d, 'saida');
+  const cli = (args) => new Promise((resolve) => { const p = spawn(process.execPath, ['tools/maintenance.js', 'stats', ...args], { cwd: new URL('../..', import.meta.url).pathname, env: { PATH: process.env.PATH, DATABASE_OPS_URL: OPS_URL } }); let e = ''; p.stderr.on('data', (x) => { e += x; }); p.on('exit', (code) => resolve({ code, e })); });
+  try {
+    let r = await cli(['--resumo', resumo, '--github-output', saida, '--warn-db-gb', '0.000001']); assert.equal(r.code, 0, r.e);
+    let txt = fs.readFileSync(saida, 'utf8'); assert.match(txt, /^capacidade=alerta$/m); assert.match(txt, /^alertas<<CANTEIRO_FIM\n- banco com .+\nCANTEIRO_FIM$/m); assert.match(fs.readFileSync(resumo, 'utf8'), /Números de uso/);
+    fs.rmSync(saida); r = await cli(['--github-output', saida, '--warn-db-gb', '', '--warn-storage-gb', '']); assert.equal(r.code, 0, r.e);
+    txt = fs.readFileSync(saida, 'utf8'); assert.match(txt, /^capacidade=ok$/m); assert.match(txt, /- \(nenhum\)/, 'variável vazia no workflow → limites padrão (6 GB / 800 GB)');
+    r = await cli(['--warn-db-gb', '0.000001', '--fail-on-warn']); assert.equal(r.code, 1, '--fail-on-warn devolve 1 com aviso');
+  } finally { rmrf(d); }
 });

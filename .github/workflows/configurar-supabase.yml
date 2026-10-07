@@ -1,0 +1,77 @@
+# Assistente: configura um projeto Supabase (staging ou produção) do jeito que o Canteiro exige e CONFERE relendo tudo (platform/tools/supabase-setup.js):
+# Auth (sem cadastro aberto, senha ≥ 12, Site URL e Redirect URLs, SMTP do Resend, modelos de e-mail em pt-BR, link de 24 h, sessões), chaves JWT,
+# bucket PRIVADO de arquivos, limite de 100 MB e protocolo S3, Data API sem o schema app, SSL obrigatório, servidor do banco e DNS do e-mail.
+# Precisa do token TEMPORÁRIO SUPABASE_ACCESS_TOKEN (segredo do repositório): APAGUE-O ao terminar — o resumo lembra.
+# Seguro repetir (só altera o que estiver diferente). "simular" só lê e mostra o que mudaria. NÃO EXECUTADO contra o Supabase real ao ser escrito.
+name: Configurar Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: 'Qual projeto configurar'
+        required: true
+        type: choice
+        options: [staging, production]
+      simular:
+        description: 'Só mostrar o que mudaria (não altera nada)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: configurar-supabase-${{ inputs.ambiente }}
+  cancel-in-progress: false
+
+jobs:
+  configurar:
+    name: Configurar o Supabase (${{ inputs.ambiente }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ${{ inputs.ambiente == 'production' && 'production-ops' || 'staging' }}
+    env:
+      AMBIENTE: ${{ inputs.ambiente }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_REGION: ${{ vars.SUPABASE_REGION }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      STAGING_URL: ${{ vars.STAGING_URL }}
+      EMAIL_REMETENTE: ${{ vars.EMAIL_REMETENTE }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências de produção (ferramentas)
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Configurar e conferir (Auth, e-mail, Storage, Data API, SSL, banco, DNS do e-mail)
+        working-directory: platform
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SIMULAR: ${{ inputs.simular }}
+        run: |
+          args=(--resumo "$GITHUB_STEP_SUMMARY" --json "$RUNNER_TEMP/configurar-supabase.json")
+          if [ "$SIMULAR" = "true" ]; then args+=(--simular); fi
+          node tools/supabase-setup.js "${args[@]}"
+
+      - name: Lembrete — apagar o token temporário
+        if: always()
+        run: echo "::warning title=Apague o SUPABASE_ACCESS_TOKEN::GitHub → Settings → Secrets and variables → Actions → SUPABASE_ACCESS_TOKEN → Remove; e revogue o token em supabase.com → Account → Access Tokens (ele abre TODOS os projetos da conta)."

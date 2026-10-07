@@ -2,13 +2,16 @@
      at   = access token JWT        HttpOnly, SameSite=Lax, Path=/, ~1 h
      rt   = refresh token           HttpOnly, SameSite=Lax, Path=/, 30 d
      csrf = token CSRF (double-submit) NÃO HttpOnly de propósito (o JS do app o devolve no cabeçalho X-CSRF-Token)
-     np   = "precisa definir senha" (só UX: mantém a tela de nova senha após recarregar a página)
+     np   = estado de recuperação ASSINADO (pode definir senha) — emitido só por /verify
+     sso  = estado do login corporativo em andamento (verifier PKCE + destino, assinado; 10 min, uso único) — só entre /sso e /sso/callback
    Em produção/staging (HTTPS) os nomes levam o prefixo `__Host-`: o navegador então exige Secure + Path=/ + sem Domain,
    o que impede um subdomínio (ou HTTP) de plantar/sobrescrever o cookie. Em local/test (HTTP) usamos os nomes sem prefixo e sem Secure. */
 import { setCookie, getCookie } from 'hono/cookie';
 
 export const RT_MAX_AGE_S = 30 * 24 * 3600;
 export const cookieNames = (config) => ({ at: `${config.cookiePrefix}am_at`, rt: `${config.cookiePrefix}am_rt`, csrf: `${config.cookiePrefix}am_csrf`, np: `${config.cookiePrefix}am_np` });
+/** Cookie do login corporativo em andamento — à parte de cookieNames: não é cookie de sessão e só vive entre /sso e /sso/callback. */
+export const ssoCookieName = (config) => `${config.cookiePrefix}am_sso`;
 
 const base = (config, httpOnly) => ({ path: '/', httpOnly, secure: !!config.cookieSecure, sameSite: 'Lax' });
 
@@ -25,6 +28,12 @@ export function setCsrfCookie(c, config, token) { setCookie(c, cookieNames(confi
 export function setNeedsPasswordCookie(c, config, on) {
   const n = cookieNames(config).np;
   if (on) setCookie(c, n, typeof on === 'string' ? on : '1', { ...base(config, true), maxAge: 3600 });   // valor = token assinado emitido por /verify (AF-1); nunca um literal que o cliente possa forjar
+  else setCookie(c, n, '', { ...base(config, true), maxAge: 0 });
+}
+/** Estado do SSO (HttpOnly, SameSite=Lax: volta na navegação GET que o GoTrue redireciona para o retorno). `value` vazio apaga. */
+export function setSsoCookie(c, config, value, maxAgeS = 600) {
+  const n = ssoCookieName(config);
+  if (value) setCookie(c, n, value, { ...base(config, true), maxAge: maxAgeS });
   else setCookie(c, n, '', { ...base(config, true), maxAge: 0 });
 }
 /** Apaga os cookies de sessão (o CSRF permanece, a menos que `csrf: true`). */

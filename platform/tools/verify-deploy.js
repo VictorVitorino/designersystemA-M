@@ -8,23 +8,35 @@
    Verificações do BANCO (sempre): RLS ligada em todas as tabelas do schema app · nenhuma permissão para PUBLIC/anon/authenticated (schema, tabelas, colunas,
      sequências, funções, privilégios padrão) · políticas nunca para PUBLIC · papéis (app_api sem superuser/BYPASSRLS e sem pertença a app_system/app_owner;
      app_user/app_system sem BYPASSRLS) · funções SECURITY DEFINER com search_path fixo e dono sem superpoderes · gatilhos de proteção presentes ·
-     migrações aplicadas sem divergência de checksum · Data API (schema app fora de pgrst.db_schemas) · conexão com TLS.
+     migrações aplicadas sem divergência de checksum · public.schema_migrations fechada (RLS, sem PUBLIC/anon/authenticated/service_role/app_*) ·
+     Data API (schema app fora de pgrst.db_schemas) · conexão com TLS.
    Verificações de ARQUIVOS: bucket/prefixo privado (consulta à API do S3 quando permitida + tentativa ANÔNIMA de leitura de um arquivo real); pasta local sem acesso de "outros".
    Verificações do AMBIENTE DA API (--api-env-file: lista de NOMES de variáveis do projeto na Vercel, uma por linha ou NOME=valor; valores nunca são impressos):
      variáveis proibidas ausentes (DATABASE_ADMIN_URL, DATABASE_OPS_URL, BACKUP_*…), GOTRUE_FAKE desligado, nada sensível exposto com prefixo público.
-   Verificações do SITE (--url): HTTPS/HSTS, cabeçalhos de segurança, /api/health e /api/ready, rotas protegidas respondem 401, cookies __Host- com Secure.
+   Verificações do SITE (--url): HTTPS/HSTS, cabeçalhos de segurança, /api/health e /api/ready, rotas protegidas respondem 401, cookies __Host- com Secure,
+     páginas (/entrar, /acervo, /admin) com CSP estrita, /editor/<id> e /visualizar/<id> (reescrita + CSP com hashes) e 404 para rota inexistente.
+     Se o domínio estiver atrás da proteção da Vercel, defina VERCEL_AUTOMATION_BYPASS_SECRET (vai no cabeçalho x-vercel-protection-bypass).
+   O HTML PUBLICADO é o do build (--url … --expect-build pasta[,pasta2]): baixa /editor/index.html e /visualizar/index.html (e a rota real /editor/<id>)
+     e exige SHA-256 IGUAL ao de <pasta>/editor/index.html — a garantia de que o publicado é byte a byte o que foi provado; confere também que o
+     Content-Security-Policy publicado do editor e do visualizador é o do vercel.json (--vercel-json, padrão platform/vercel.json). Tenta de novo por
+     até --retries × --retry-delay segundos (a troca de versão na borda leva alguns segundos). Informa se o build é o mesmo da prova de paridade registrada.
+   Login do Supabase visto de fora (com SUPABASE_URL + SUPABASE_ANON_KEY, fora do --offline): cadastro aberto desligado e login por e-mail ligado.
    --scan-dist: procura segredos no build do site (o que vai para o navegador). */
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildRedactor, parseArgs, runCli, isMain, ToolError } from './lib/common.js';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { buildRedactor, parseArgs, runCli, isMain, ToolError, sleep } from './lib/common.js';
+import { cabecalhosSupabase } from './lib/http-api.js';
 import { connect } from './lib/pg.js';
 import { openPrimaryStore, S3Store } from './lib/targets.js';
 import { keyOfSha } from './lib/mirror.js';
-import { listMigrations } from './migrate.js';
+import { listMigrations, SCHEMA_MIGRATIONS_LOCKED_FROM } from './migrate.js';
 import { scanTree } from './secret-scan.js';
+import { FORBIDDEN_API_ENV } from './lib/api-env.js';
 
 const BAD_GRANTEES = new Set(['PUBLIC', 'anon', 'authenticated']);
-export const FORBIDDEN_API_ENV = [/^DATABASE_ADMIN_URL$/, /^DATABASE_OPS_URL$/, /^APP_API_DB_PASSWORD$/, /^APP_OPS_DB_PASSWORD$/, /^BACKUP_/, /^VERCEL_TOKEN$/, /^SUPABASE_DB_PASSWORD$/, /^SUPABASE_ACCESS_TOKEN$/, /^GITHUB_TOKEN$/, /^TEST_DATABASE_/];
+export { FORBIDDEN_API_ENV };
 const PUBLIC_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|REACT_APP_|NUXT_PUBLIC_)/;
 const SECRETY = /(SERVICE|SECRET|PASSWORD|PRIVATE|ADMIN|JWT|TOKEN)/i;
 const mk = (id, title, status, detail = '', items = []) => ({ id, title, status, detail, items });
@@ -119,6 +131,22 @@ export async function checkMigrations(sql) {
   return p.length ? mk('migrations', t, 'fail', `${p.length} problema(s)`, p) : w.length ? mk('migrations', t, 'warn', '', w) : mk('migrations', t, 'ok', `${rows.length} migrações aplicadas e idênticas aos arquivos`);
 }
 
+/** public.schema_migrations: RLS ligada e nenhum privilégio para PUBLIC, papéis do Supabase (anon/authenticated/service_role) ou da aplicação (PUB-05). */
+export async function checkMigrationsTable(sql) {
+  const t = 'Controle de migrações fechado (public.schema_migrations: RLS ligada, sem acesso para PUBLIC, Supabase e papéis da aplicação)';
+  const [tab] = await sql`select c.relrowsecurity as rls, c.relowner::regrole::text as dono from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'schema_migrations' and c.relkind in ('r','p')`;
+  if (!tab) return mk('migrations_table', t, 'skip', 'public.schema_migrations não existe (veja a verificação de migrações)');
+  const p = [];
+  if (!tab.rls) p.push('RLS DESLIGADA em public.schema_migrations: com a Data API ligada, quem tem a chave pública leria ou apagaria o controle de migrações (rode node tools/migrate.js)');
+  for (const r of await sql`select a.privilege_type as priv from pg_class c join pg_namespace n on n.oid = c.relnamespace, aclexplode(coalesce(c.relacl, acldefault('r'::"char", c.relowner))) a where n.nspname = 'public' and c.relname = 'schema_migrations' and a.grantee = 0`) p.push(`public.schema_migrations: ${r.priv} para PUBLIC`);
+  const roles = await sql`select rolname from pg_roles where rolname = any(${SCHEMA_MIGRATIONS_LOCKED_FROM}) and rolname <> ${tab.dono} order by 1`;
+  for (const { rolname } of roles) {
+    const [x] = await sql`select has_table_privilege(${rolname}, 'public.schema_migrations', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') as tem`;
+    if (x.tem) p.push(`public.schema_migrations: ${rolname} tem privilégio (deveria ser só do dono, ${tab.dono})`);
+  }
+  return p.length ? mk('migrations_table', t, 'fail', `${p.length} problema(s)`, p) : mk('migrations_table', t, 'ok', `RLS ligada; só o dono (${tab.dono}) acessa`);
+}
+
 export async function checkDataApi(sql, { env = process.env, fetchImpl = fetch, offline = false } = {}) {
   const t = 'Data API do Supabase não expõe o schema app'; const items = [];
   const role = await sql`select oid from pg_roles where rolname = 'authenticator'`;
@@ -203,9 +231,11 @@ export function checkApiEnv(vars, { expectEnv = null } = {}) {
 }
 
 // ------------------------------------------------------------------------------------------------------------------- site
-export async function checkSite(url, { fetchImpl = fetch, expectEnv = null } = {}) {
+export async function checkSite(url, { fetchImpl = fetch, expectEnv = null, bypass = '' } = {}) {
   const base = url.replace(/\/$/, ''); const u = new URL(base); const https = u.protocol === 'https:'; const local = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
-  const res = []; const get = (p, init = {}) => fetchImpl(base + p, { redirect: 'manual', signal: AbortSignal.timeout(15000), ...init });
+  // bypass: "Protection Bypass for Automation" da Vercel (segredo VERCEL_AUTOMATION_BYPASS_SECRET), para quando o domínio estiver atrás da proteção da Vercel
+  const extra = bypass ? { 'x-vercel-protection-bypass': bypass } : {};
+  const res = []; const get = (p, init = {}) => fetchImpl(base + p, { redirect: 'manual', signal: AbortSignal.timeout(15000), ...init, headers: { ...extra, ...(init.headers || {}) } });
   try {
     const h = await get('/api/health'); const j = await h.json().catch(() => ({}));
     res.push(h.status === 200 && j.ok === true ? mk('site_health', '/api/health responde', 'ok', `versão ${j.version || '?'} · ambiente ${j.env || '?'}`) : mk('site_health', '/api/health responde', 'fail', `HTTP ${h.status}`));
@@ -219,16 +249,113 @@ export async function checkSite(url, { fetchImpl = fetch, expectEnv = null } = {
     if (!hd('x-frame-options') && !/frame-ancestors/.test(hd('content-security-policy') || '')) miss.push('proteção contra clickjacking ausente (X-Frame-Options ou frame-ancestors)');
     if (hd('x-powered-by')) miss.push('X-Powered-By exposto');
     res.push(miss.length ? mk('site_headers', 'Cabeçalhos de segurança', 'fail', '', miss) : mk('site_headers', 'Cabeçalhos de segurança', 'ok', 'HSTS, nosniff, CSP, Referrer-Policy e anti-clickjacking presentes'));
-    if (https && !local) { try { const ins = await fetchImpl(`http://${u.host}/`, { redirect: 'manual', signal: AbortSignal.timeout(10000) }); const loc = ins.headers.get('location') || ''; res.push([301, 302, 307, 308].includes(ins.status) && loc.startsWith('https://') ? mk('site_https', 'HTTP redireciona para HTTPS', 'ok', `HTTP ${ins.status}`) : mk('site_https', 'HTTP redireciona para HTTPS', 'fail', `http:// respondeu ${ins.status}`)); } catch { res.push(mk('site_https', 'HTTP redireciona para HTTPS', 'warn', 'porta 80 inacessível (aceitável se só HTTPS)')); } }
+    if (https && !local) { try { const ins = await fetchImpl(`http://${u.host}/`, { redirect: 'manual', headers: extra, signal: AbortSignal.timeout(10000) }); const loc = ins.headers.get('location') || ''; res.push([301, 302, 307, 308].includes(ins.status) && loc.startsWith('https://') ? mk('site_https', 'HTTP redireciona para HTTPS', 'ok', `HTTP ${ins.status}`) : mk('site_https', 'HTTP redireciona para HTTPS', 'fail', `http:// respondeu ${ins.status}`)); } catch { res.push(mk('site_https', 'HTTP redireciona para HTTPS', 'warn', 'porta 80 inacessível (aceitável se só HTTPS)')); } }
     const prot = []; for (const p of ['/api/presentations', '/api/admin/users', '/api/admin/audit']) { const x = await get(p); if (![401, 403].includes(x.status)) prot.push(`${p} respondeu ${x.status} sem login (esperado 401/403)`); }
     res.push(prot.length ? mk('site_auth', 'Rotas protegidas exigem login', 'fail', '', prot) : mk('site_auth', 'Rotas protegidas exigem login', 'ok', '401/403 sem sessão'));
     const s = await get('/api/auth/session'); const cookies = s.headers.getSetCookie ? s.headers.getSetCookie() : [s.headers.get('set-cookie') || '']; const cp = [];
     for (const c of cookies.filter(Boolean)) { if (https && !/;\s*secure/i.test(c)) cp.push(`cookie sem Secure: ${c.split('=')[0]}`); if (/^__Host-/.test(c) && (/;\s*domain=/i.test(c) || !/;\s*path=\/(;|$)/i.test(c))) cp.push(`cookie __Host- inválido: ${c.split('=')[0]}`); if (https && !/^__Host-/.test(c)) cp.push(`cookie sem prefixo __Host-: ${c.split('=')[0]}`); }
     res.push(cp.length ? mk('site_cookies', 'Cookies de sessão/CSRF seguros', 'fail', '', cp) : mk('site_cookies', 'Cookies de sessão/CSRF seguros', cookies.filter(Boolean).length ? 'ok' : 'warn', cookies.filter(Boolean).length ? 'Secure, prefixo __Host-' : 'a rota de sessão não definiu cookies (CSRF)'));
+    // páginas do site (cleanUrls + CSP estrita por página) e rotas reais do editor e do visualizador (reescrita para o mesmo HTML, CSP por hash)
+    const pag = []; const sigaGet = (p) => get(p, { redirect: 'follow' });
+    for (const p of ['/entrar', '/acervo', '/admin']) {
+      const r = await sigaGet(p); const csp = r.headers.get('content-security-policy') || ''; const tipo = r.headers.get('content-type') || '';
+      if (r.status !== 200) pag.push(`${p}: HTTP ${r.status} (esperado 200)`); else if (!/text\/html/i.test(tipo)) pag.push(`${p}: content-type ${tipo || '(vazio)'} (esperado text/html)`);
+      else if (!/script-src 'self'(;|$)/.test(csp) || /script-src[^;]*'unsafe-inline'/.test(csp)) pag.push(`${p}: CSP sem script-src 'self' estrito`);
+      await r.arrayBuffer().catch(() => null);
+    }
+    for (const p of ['/editor/00000000-0000-4000-8000-000000000000', '/visualizar/00000000-0000-4000-8000-000000000000']) {
+      const r = await sigaGet(p); const csp = r.headers.get('content-security-policy') || ''; const tipo = r.headers.get('content-type') || '';
+      if (r.status !== 200) pag.push(`${p}: HTTP ${r.status} (esperado 200: a reescrita /editor/:id → /editor/index.html não funcionou)`); else if (!/text\/html/i.test(tipo)) pag.push(`${p}: content-type ${tipo || '(vazio)'}`);
+      else if (!/'strict-dynamic'/.test(csp) || !/'sha256-[A-Za-z0-9+/=]{20,}'/.test(csp)) pag.push(`${p}: CSP sem 'strict-dynamic' e hashes dos scripts (o editor não carregaria)`);
+      await r.arrayBuffer().catch(() => null);
+    }
+    { const r = await sigaGet(`/rota-que-nao-existe-${Date.now().toString(36)}`); if (r.status !== 404) pag.push(`rota inexistente respondeu HTTP ${r.status} (esperado 404)`); await r.arrayBuffer().catch(() => null); }
+    res.push(pag.length ? mk('site_pages', 'Páginas, editor e visualizador abrem com a CSP certa (e 404 para rota inexistente)', 'fail', '', pag) : mk('site_pages', 'Páginas, editor e visualizador abrem com a CSP certa (e 404 para rota inexistente)', 'ok', '/entrar, /acervo, /admin, /editor/<id>, /visualizar/<id> e 404'));
     const cors = await get('/api/health', { headers: { Origin: 'https://evil.example' } }); const acao = cors.headers.get('access-control-allow-origin');
     res.push(acao && (acao === '*' || acao.includes('evil')) ? mk('site_cors', 'CORS não libera origens estranhas', 'fail', `Access-Control-Allow-Origin: ${acao}`) : mk('site_cors', 'CORS não libera origens estranhas', 'ok', 'sem liberação para origem externa'));
   } catch (e) { res.push(mk('site', 'Site acessível', 'fail', `não consegui consultar ${base}: ${String(e.message).slice(0, 120)}`)); }
   return res;
+}
+
+// ------------------------------------------------------------------------------------------------------- login (Supabase Auth)
+/** Configuração pública do Auth do projeto (GET /auth/v1/settings com a publishable key): cadastro aberto precisa estar DESLIGADO e o login por e-mail LIGADO. */
+export async function checkAuthSettings({ env = process.env, fetchImpl = fetch } = {}) {
+  const t = 'Login do Supabase: cadastro aberto desligado e login por e-mail ligado';
+  try {
+    const r = await fetchImpl(`${String(env.SUPABASE_URL).replace(/\/$/, '')}/auth/v1/settings`, { headers: { ...cabecalhosSupabase(env.SUPABASE_ANON_KEY), Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    if (r.status === 401 || r.status === 403) return mk('auth_settings', t, 'fail', `o Supabase recusou a SUPABASE_ANON_KEY (HTTP ${r.status}): ela não é a publishable key deste projeto`);
+    if (r.status !== 200) return mk('auth_settings', t, 'warn', `/auth/v1/settings respondeu HTTP ${r.status}`);
+    const j = await r.json().catch(() => ({})); const p = [];
+    if (j.disable_signup !== true) p.push('o CADASTRO ABERTO está ligado (qualquer pessoa criaria conta): rode o workflow "Configurar Supabase" ou desligue em Authentication → Sign In / Providers');
+    if (j.external && j.external.email === false) p.push('o login por e-mail está DESLIGADO: ninguém consegue entrar com e-mail e senha');
+    if (j.external && j.external.anonymous_users === true) p.push('login anônimo ligado: desligue (Authentication → Sign In / Providers)');
+    return p.length ? mk('auth_settings', t, 'fail', `${p.length} problema(s)`, p) : mk('auth_settings', t, 'ok', 'cadastro só por convite; e-mail e senha ligados');
+  } catch (e) { return mk('auth_settings', t, 'warn', `não consegui consultar /auth/v1/settings (${String(e.message).slice(0, 80)})`); }
+}
+
+// ------------------------------------------------------------------------------------------------- HTML publicado = build
+const PLATFORM_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sha256Buf = (b) => crypto.createHash('sha256').update(b).digest('hex');
+/** CSP de uma regra `source` do vercel.json. */
+export function cspDoVercelJson(vercelJson, source) {
+  const h = (vercelJson.headers || []).find((x) => x.source === source); return h?.headers?.find((x) => String(x.key).toLowerCase() === 'content-security-policy')?.value || null;
+}
+/** SHA-256 do build do editor registrado na prova de paridade (docs/evidencias/paridade.md), se houver. */
+export function shaDaParidade(texto) { const m = /cloud-editor\.html`\s*\|\s*`([0-9a-f]{64})`/.exec(String(texto || '')); return m ? m[1] : null; }
+
+/**
+ * Baixa o editor e o visualizador publicados e exige o MESMO SHA-256 do build local; confere a CSP publicada contra o vercel.json.
+ * @param {string} url  endereço publicado (https://…)
+ * @param {{buildDirs:string[], vercelJsonPath?:string, parityDocPath?:string|null, fetchImpl?:Function, tentativas?:number, esperaMs?:number, sondaId?:string}} o
+ */
+export async function checkPublishedBuild(url, { buildDirs = [], vercelJsonPath = path.join(PLATFORM_DIR, 'vercel.json'), parityDocPath = path.join(PLATFORM_DIR, 'docs', 'evidencias', 'paridade.md'), fetchImpl = fetch, tentativas = 12, esperaMs = 10000, sondaId = 'verificacao-publicacao', bypass = '' } = {}) {
+  const out = []; const base = String(url).replace(/\/+$/, ''); const PAGS = ['editor', 'visualizar'];
+  const pastas = buildDirs.map((d) => path.resolve(d)).filter((d) => fs.existsSync(path.join(d, 'editor', 'index.html')));
+  if (!pastas.length) return [mk('published_build', 'HTML publicado = build (SHA-256)', 'fail', `não achei o build local (editor/index.html) em: ${buildDirs.join(', ') || '(nenhuma pasta informada)'}`)];
+  const esperado = {}; const local = [];
+  for (const pag of PAGS) {
+    const shas = pastas.map((d) => { const f = path.join(d, pag, 'index.html'); return fs.existsSync(f) ? sha256Buf(fs.readFileSync(f)) : null; });
+    if (shas.some((x) => !x)) return [mk('published_build', 'HTML publicado = build (SHA-256)', 'fail', `${pag}/index.html ausente no build local (${pastas.join(', ')})`)];
+    if (new Set(shas).size > 1) local.push(`${pag}/index.html difere entre ${pastas.join(' e ')}`);
+    esperado[pag] = shas[0];
+  }
+  if (local.length) out.push(mk('build_local', 'Build local consistente', 'fail', 'as cópias do build não são iguais', local));
+  let vj = null; try { vj = JSON.parse(fs.readFileSync(vercelJsonPath, 'utf8')); } catch (e) { out.push(mk('published_csp', 'CSP publicada = vercel.json', 'fail', `não consegui ler ${vercelJsonPath}: ${String(e.message).slice(0, 80)}`)); }
+  const cspEsperada = vj ? { editor: cspDoVercelJson(vj, '/editor/(.*)'), visualizar: cspDoVercelJson(vj, '/visualizar/(.*)') } : null;
+  if (cspEsperada && (!cspEsperada.editor || !cspEsperada.visualizar)) out.push(mk('published_csp', 'CSP publicada = vercel.json', 'fail', 'o vercel.json não tem Content-Security-Policy para /editor/(.*) e /visualizar/(.*)'));
+  // rotas: o arquivo (segue o redirecionamento do cleanUrls) e a rota que o usuário abre (/editor/<id>, reescrita para o mesmo arquivo)
+  const rotas = PAGS.flatMap((pag) => [{ pag, caminho: `/${pag}/index.html`, confereCsp: false }, { pag, caminho: `/${pag}/${sondaId}`, confereCsp: true }]);
+  let ult = [];
+  for (let t = 1; t <= Math.max(1, tentativas); t++) {
+    ult = [];
+    for (const r of rotas) {
+      try {
+        const res = await fetchImpl(base + r.caminho, { redirect: 'follow', headers: { 'Cache-Control': 'no-cache', ...(bypass ? { 'x-vercel-protection-bypass': bypass } : {}) }, signal: AbortSignal.timeout(30000) });
+        const corpo = Buffer.from(await res.arrayBuffer());
+        ult.push({ ...r, status: res.status, sha: sha256Buf(corpo), bytes: corpo.length, csp: r.confereCsp ? res.headers.get('content-security-policy') : undefined, final: res.url || base + r.caminho });
+      } catch (e) { ult.push({ ...r, erro: String(e.message).slice(0, 100) }); }
+    }
+    const tudoCerto = ult.every((x) => !x.erro && x.status === 200 && x.sha === esperado[x.pag] && (!x.confereCsp || !cspEsperada || x.csp === cspEsperada[x.pag]));
+    if (tudoCerto || t === tentativas) break;
+    await sleep(esperaMs);
+  }
+  for (const pag of PAGS) {
+    const rs = ult.filter((x) => x.pag === pag); const ruins = rs.filter((x) => x.status !== 200 || x.sha !== esperado[pag]);
+    const itens = ruins.map((x) => (x.erro ? `${x.caminho}: falha ao baixar (${x.erro})` : x.status === 401 || x.status === 403 ? `${x.caminho}: HTTP ${x.status} — o endereço pede login da Vercel (Deployment Protection): rode "Configurar Vercel" ou ajuste em Settings → Deployment Protection` : x.status !== 200 ? `${x.caminho}: HTTP ${x.status}` : `${x.caminho}: SHA-256 publicado ${x.sha} ≠ build ${esperado[pag]} (${x.bytes} bytes)`));
+    out.push(ruins.length ? mk(`published_${pag}`, `HTML publicado de /${pag} = build (SHA-256)`, 'fail', 'o HTML publicado NÃO é byte a byte o do build: publicação reprovada', itens)
+      : mk(`published_${pag}`, `HTML publicado de /${pag} = build (SHA-256)`, 'ok', `sha256 ${esperado[pag]} (${rs.map((x) => x.caminho).join(' e ')})`));
+    if (cspEsperada?.[pag]) {
+      const c = rs.find((x) => x.confereCsp); const igual = !!c && !c.erro && c.csp === cspEsperada[pag];
+      out.push(igual ? mk(`published_csp_${pag}`, `CSP publicada de /${pag} = vercel.json`, 'ok', `${cspEsperada[pag].length} caracteres, idêntica`)
+        : mk(`published_csp_${pag}`, `CSP publicada de /${pag} = vercel.json`, 'fail', 'a Content-Security-Policy publicada difere da do vercel.json', [c ? (c.csp ? `publicada (${c.csp.length} caracteres): ${c.csp.slice(0, 120)}…` : `${c.caminho}: sem cabeçalho Content-Security-Policy${c.erro ? ' (' + c.erro + ')' : ''}`) : 'rota não consultada']));
+    }
+  }
+  if (parityDocPath && fs.existsSync(parityDocPath)) {
+    const p = shaDaParidade(fs.readFileSync(parityDocPath, 'utf8'));
+    if (p) out.push(p === esperado.editor ? mk('parity_build', 'Build publicado = build da prova de paridade', 'ok', `sha256 ${p.slice(0, 16)}… (docs/evidencias/paridade.md)`)
+      : mk('parity_build', 'Build publicado = build da prova de paridade', 'warn', `a prova registrada em docs/evidencias/paridade.md é do build ${p.slice(0, 16)}…; este publica ${esperado.editor.slice(0, 16)}…: rode a prova de paridade para este build (regra do projeto) antes de divulgar`));
+  }
+  return out;
 }
 
 export function checkDist(dir) {
@@ -238,24 +365,39 @@ export function checkDist(dir) {
 }
 
 /** Executa todas as verificações aplicáveis. `sql` pode ser uma transação (testes mutam e dão rollback). */
-export async function runChecks({ sql = null, env = process.env, url = null, apiEnv = null, distDir = null, expectEnv = null, offline = false, fetchImpl = fetch, s3Factory = null } = {}) {
+export async function runChecks({ sql = null, env = process.env, url = null, apiEnv = null, distDir = null, expectEnv = null, offline = false, fetchImpl = fetch, s3Factory = null, expectBuild = null, vercelJsonPath, parityDocPath, retries, retryDelayMs } = {}) {
   const out = [];
   if (sql) {
-    out.push(await checkRls(sql), await checkGrants(sql), await checkRoles(sql), await checkDefiners(sql), await checkGuards(sql), await checkMigrations(sql), await checkDataApi(sql, { env, fetchImpl, offline }), await checkTls(sql, { env }), await checkStorage(sql, { env, fetchImpl, offline, s3Factory }));
+    out.push(await checkRls(sql), await checkGrants(sql), await checkRoles(sql), await checkDefiners(sql), await checkGuards(sql), await checkMigrations(sql), await checkMigrationsTable(sql), await checkDataApi(sql, { env, fetchImpl, offline }), await checkTls(sql, { env }), await checkStorage(sql, { env, fetchImpl, offline, s3Factory }));
   }
+  if (!offline && env.SUPABASE_URL && env.SUPABASE_ANON_KEY) out.push(await checkAuthSettings({ env, fetchImpl }));
   if (apiEnv) out.push(checkApiEnv(apiEnv, { expectEnv }));
   if (distDir) out.push(checkDist(distDir));
-  if (url && !offline) out.push(...(await checkSite(url, { fetchImpl, expectEnv })));
+  const bypass = String(env.VERCEL_AUTOMATION_BYPASS_SECRET || '').trim();
+  if (url && !offline) out.push(...(await checkSite(url, { fetchImpl, expectEnv, bypass })));
+  if (url && !offline && expectBuild) out.push(...(await checkPublishedBuild(url, { buildDirs: expectBuild, fetchImpl, bypass, ...(vercelJsonPath ? { vercelJsonPath } : {}), ...(parityDocPath !== undefined ? { parityDocPath } : {}), ...(retries ? { tentativas: retries } : {}), ...(retryDelayMs !== undefined ? { esperaMs: retryDelayMs } : {}) })));
   return out;
+}
+
+/** Tabela Markdown dos resultados (para o resumo do GitHub Actions). Nunca contém valores de segredos (os detalhes já são redigidos). */
+export function resumoMarkdown(results, { titulo = 'verify-deploy', redact = buildRedactor() } = {}) {
+  const icon = { ok: 'ok', fail: '**FALHOU**', warn: 'aviso', skip: 'pulou' };
+  const L = [`### ${titulo}`, '', '| Verificação | Resultado | Detalhe |', '|---|---|---|'];
+  for (const r of results) L.push(`| ${r.title} | ${icon[r.status] || r.status} | ${redact([r.detail, ...(r.items || []).slice(0, 6)].filter(Boolean).join(' · ')).replace(/\|/g, '\\|').slice(0, 900)} |`);
+  return L.join('\n') + '\n';
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const args = parseArgs(argv, { bool: ['json', 'strict', 'offline'] }); const redact = buildRedactor(env);
+  const expectBuild = args['expect-build'] ? String(args['expect-build']).split(',').map((x) => x.trim()).filter(Boolean) : null;
+  if (expectBuild && !args.url) throw new ToolError('--expect-build precisa de --url (o endereço publicado)', { exit: 2, code: 'usage' });
   const dbUrl = env.DATABASE_ADMIN_URL || env.DATABASE_OPS_URL; let sql = null;
   if (dbUrl) sql = connect(dbUrl, { max: 1 }); else if (!args.url && !args['api-env-file'] && !args['scan-dist']) throw new ToolError('defina DATABASE_OPS_URL ou DATABASE_ADMIN_URL (ou use --url/--api-env-file/--scan-dist)', { exit: 2, code: 'no_db' });
   try {
     const apiEnv = args['api-env-file'] ? parseEnvNames(fs.readFileSync(args['api-env-file'], 'utf8')) : null;
-    const results = await runChecks({ sql, env, url: args.url, apiEnv, distDir: args['scan-dist'], expectEnv: args['expect-env'] || null, offline: !!args.offline });
+    const results = await runChecks({ sql, env, url: args.url, apiEnv, distDir: args['scan-dist'], expectEnv: args['expect-env'] || null, offline: !!args.offline,
+      expectBuild, vercelJsonPath: args['vercel-json'] ? path.resolve(args['vercel-json']) : undefined, retries: args.retries ? Number(args.retries) : undefined, retryDelayMs: args['retry-delay'] !== undefined ? Number(args['retry-delay']) * 1000 : undefined });
+    if (args.resumo) fs.appendFileSync(args.resumo, resumoMarkdown(results, { titulo: args['titulo-resumo'] || 'verify-deploy' }) + '\n');
     const failed = results.filter((r) => r.status === 'fail'), warned = results.filter((r) => r.status === 'warn');
     if (args.json) process.stdout.write(JSON.stringify({ ok: !failed.length && !(args.strict && warned.length), results }) + '\n');
     else {

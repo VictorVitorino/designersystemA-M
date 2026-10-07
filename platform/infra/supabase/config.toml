@@ -1,7 +1,8 @@
-# Supabase CLI — configuração OPCIONAL (as mesmas decisões de auth-settings.md em arquivo).
-# Para o projeto HOSPEDADO use `supabase link --project-ref <ref>` e `supabase config push` (confira o diff antes de aceitar).
-# NÃO EXECUTADO neste ambiente (sem Supabase CLI nem acesso ao projeto): valide a sintaxe na sua versão da CLI (`supabase --version`).
-# Os valores com env(NOME) vêm de variáveis de ambiente do SEU terminal; nenhum segredo fica neste arquivo.
+# Supabase — as decisões de infra/supabase/auth-settings.md em arquivo. É a FONTE que o workflow "Configurar Supabase"
+# (.github/workflows/configurar-supabase.yml → tools/supabase-setup.js) aplica pela Management API do Supabase e depois confere relendo.
+# O workflow troca, por ambiente: site_url e additional_redirect_urls (de PRODUCTION_URL/STAGING_URL), o remetente e a senha do SMTP (RESEND_API_KEY).
+# Também serve à Supabase CLI (`supabase config push`), mas o caminho oficial do Canteiro é o workflow. NÃO EXECUTADO contra um Supabase real.
+# Nenhum segredo fica neste arquivo: env(NOME) vem de variáveis de ambiente.
 project_id = "canteiro"
 
 [api]
@@ -11,18 +12,25 @@ extra_search_path = ["public"]
 
 [auth]
 enabled = true
-site_url = "https://canteiro.<seu-dominio>"                      # = APP_ORIGIN
-additional_redirect_urls = ["https://canteiro.<seu-dominio>/auth/confirmar"]
+site_url = "https://canteiro.<seu-dominio>"                      # = APP_ORIGIN (o workflow usa o endereço de cada ambiente)
+# Endereços para onde o Supabase pode devolver a pessoa. O workflow troca "https://canteiro.<seu-dominio>" pelo endereço de cada ambiente:
+#   /auth/confirmar          → links de convite, confirmação e "esqueci a senha"
+#   /api/auth/sso/callback   → retorno do login corporativo (SSO SAML com PKCE; infra/supabase/sso-saml.md). Fica cadastrado mesmo com o SSO desligado.
+additional_redirect_urls = ["https://canteiro.<seu-dominio>/auth/confirmar", "https://canteiro.<seu-dominio>/api/auth/sso/callback"]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
-enable_signup = false                 # sem cadastro aberto: só convite
+enable_signup = false                 # SEM cadastro aberto: só convite (o convite usa a chave secreta e continua funcionando)
 enable_anonymous_sign_ins = false
 minimum_password_length = 12
 password_requirements = "lower_upper_letters_digits"
 
+[auth.sessions]
+timebox = "720h"                      # (Pro) sessão dura no máximo 30 dias
+inactivity_timeout = "168h"           # (Pro) 7 dias sem usar → entrar de novo
+
 [auth.email]
-enable_signup = false
+enable_signup = true                  # provedor de E-MAIL LIGADO (login com e-mail e senha). Quem bloqueia o cadastro aberto é o [auth] enable_signup = false acima
 double_confirm_changes = true
 enable_confirmations = true
 secure_password_change = true
@@ -44,18 +52,18 @@ content_path = "./templates/confirm.html"
 
 [auth.email.smtp]
 enabled = true
-host = "env(SMTP_HOST)"
-port = 587
-user = "env(SMTP_USER)"
-pass = "env(SMTP_PASS)"
-admin_email = "nao-responda@<seu-dominio>"
+host = "smtp.resend.com"              # Resend (plano gratuito)
+port = 465
+user = "resend"
+pass = "env(RESEND_API_KEY)"          # a senha do SMTP do Resend é a própria chave da API
+admin_email = "nao-responda@canteiro.<seu-dominio>"
 sender_name = "Canteiro A&M"
 
 [auth.rate_limit]
-email_sent = 30                       # por hora; ajuste ao volume real de convites
+email_sent = 30                       # por hora; ajuste ao volume real de convites (o Resend gratuito envia até 100/dia)
 sign_in_sign_ups = 300                # por 5 min por IP — a API concentra todos os logins em poucos IPs
 token_verifications = 300
 
 [storage]
 enabled = true
-file_size_limit = "100MiB"
+file_size_limit = "100MiB"            # = o maior anexo que a API aceita

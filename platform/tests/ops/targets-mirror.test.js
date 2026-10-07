@@ -10,7 +10,7 @@ import { parseKey, encryptBuffer } from '../../tools/lib/backup-crypto.js';
 
 const KEY = parseKey(newKey()); const read = async (rs) => { const c = []; for await (const x of rs) c.push(x); return Buffer.concat(c); };
 let moto = null;
-before(async () => { moto = await startMoto(4301); if (moto) await makeBucket(moto.endpoint, 'principal'), await makeBucket(moto.endpoint, 'backup'); });
+before(async () => { moto = await startMoto(); if (moto) await makeBucket(moto.endpoint, 'principal'), await makeBucket(moto.endpoint, 'backup'); });
 after(async () => { if (moto) await moto.stop(); });
 
 const s3 = (bucket, prefix = '') => new S3Store({ bucket, prefix, endpoint: moto.endpoint, accessKeyId: 'test', secretAccessKey: 'test', forcePathStyle: true });

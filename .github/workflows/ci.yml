@@ -136,3 +136,62 @@ jobs:
             platform/dist/public/
           if-no-files-found: ignore
           retention-days: 7
+
+  postgres-17:
+    name: Postgres 17 da imagem do Supabase (migrações, controle fechado, isolamento e verify-deploy)
+    # o Supabase novo é Postgres 17 e o papel postgres NÃO é superusuário (e o schema public tem privilégios padrão para anon/authenticated):
+    # este job prova as migrações e o isolamento nesse cenário. Roda em PR, na main e manual (não em todo push de branch, para poupar minutos).
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: supabase/postgres:17.6.1.011
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      APP_ENV: test
+      APP_API_DB_PASSWORD: ci-api-pw-nao-e-segredo
+      APP_OPS_DB_PASSWORD: ci-ops-pw-nao-e-segredo
+      # o banco "postgres" da imagem tem os privilégios padrão do Supabase no schema public (é onde o Canteiro roda de verdade)
+      DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Migrações do zero no banco do Supabase e migrate --check
+        run: |
+          node tools/migrate.js
+          node tools/migrate.js --check
+
+      - name: verify-deploy (offline) — RLS, permissões, papéis e public.schema_migrations fechada
+        run: node tools/verify-deploy.js --offline
+
+      - name: Testes de isolamento (RLS) num banco de teste da mesma instância
+        env:
+          TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'create database canteiro_test'
+          node --test --test-concurrency=1 "tests/db/*.test.js"
