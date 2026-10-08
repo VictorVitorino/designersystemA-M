@@ -51,7 +51,7 @@ O Blueprint já define `APP_ENV=staging`, `DATABASE_SSL=require`, `STORAGE_DRIVE
 4. Configurar **Supabase Auth → URL Configuration**: Site URL = `APP_ORIGIN` e Redirect URLs para o site e a página `/auth/confirmar` (confirmar o fluxo exato do Auth ao testar).
 5. Clicar **Manual Deploy** depois de preenchidos os valores. Verificar `GET /api/health` (servidor vivo) e **`GET /api/ready` com status 200** (DB, login, arquivos e migrações). Não confundir esses dois endpoints: `health` pode estar verde com o banco fora do ar.
 
-6. Após o deploy, executar **Actions → Verificar MVP Free online** na `main` com a URL do Render. O teste externo consulta apenas GET/HEAD, valida banco, login, armazenamento, CSP e arquivos essenciais. **Ainda exige homologação manual em outro computador.**
+6. Após o deploy, executar **Actions → Verificar MVP Free online** na `main` com a URL do Render. O teste externo consulta apenas GET/HEAD, valida banco, login, armazenamento, CSP e arquivos essenciais, além de provar que visitantes sem login **não podem consultar apresentações**. **Ainda exige homologação manual em outro computador.**
 
 ## 4. Critérios para aprovar o MVP
 

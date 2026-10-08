@@ -32,5 +32,5 @@ jobs:
       - name: Registrar resultado
         run: |
           echo '### MVP Free: smoke online aprovado' >> "$GITHUB_STEP_SUMMARY"
-          echo '- 6 grupos de verificações HTTP do piloto' >> "$GITHUB_STEP_SUMMARY"
+          echo '- 8 grupos de verificações HTTP, incluindo bloqueio de acervo anônimo do piloto' >> "$GITHUB_STEP_SUMMARY"
           echo '- Falta a homologação de login e salvamento em outro computador' >> "$GITHUB_STEP_SUMMARY"
