@@ -152,6 +152,43 @@ describe('servidor estático', () => {
     }
     assert.equal(resolveFile(real, '/assets/app.0123456789abcdef.js'), path.join(real, 'assets', 'app.0123456789abcdef.js'));
   });
+  test('symlinks internos nunca expõem arquivos ocultos ou rotas privadas', async () => {
+    write('api/segredo.txt', 'ARQUIVO-DA-API-PRIVADA');
+    fs.symlinkSync(path.join(pub, '.env'), path.join(pub, 'assets', 'alias-oculto.txt'));
+    fs.symlinkSync(path.join(pub, 'api', 'segredo.txt'), path.join(pub, 'assets', 'alias-api.txt'));
+    for (const url of ['/assets/alias-oculto.txt', '/assets/alias-api.txt']) {
+      const [r, content] = await body(url);
+      assert.equal(r.status, 404, url);
+      assert.ok(!/SEGREDO|ARQUIVO-DA-API/.test(content), url);
+    }
+    assert.equal(resolveFile(fs.realpathSync(pub), '/assets/alias-oculto.txt'), null);
+    assert.equal(resolveFile(fs.realpathSync(pub), '/assets/alias-api.txt'), null);
+  });
+
+  test('index.html por diretório e rewrite SPA não pode seguir symlink para fora da pasta pública', async () => {
+    const isolated = path.join(dist, 'isolated-public');
+    fs.mkdirSync(path.join(isolated, 'admin'), { recursive: true });
+    fs.mkdirSync(path.join(isolated, 'assets', 'nested'), { recursive: true });
+    fs.mkdirSync(path.join(isolated, 'editor'), { recursive: true });
+    for (const file of ['index.html', 'admin/index.html', 'assets/nested/index.html']) {
+      fs.symlinkSync(path.join(dist, 'outside.txt'), path.join(isolated, file));
+    }
+    const local = serveStatic(t.api, { ...t.config, publicDir: isolated });
+    for (const url of ['/', '/admin', '/admin/usuarios', '/assets/nested', '/assets/nested/', '/acervo']) {
+      const r = await local.request(url);
+      const txt = await r.text();
+      assert.equal(r.status, 404, url);
+      assert.ok(!txt.includes('OUTSIDE-SECRET'), url);
+    }
+
+    // Links para arquivos públicos internos continuam válidos, inclusive com rewrite.
+    fs.writeFileSync(path.join(isolated, 'safe.html'), '<!doctype html>SAFE-INTERNAL');
+    fs.symlinkSync(path.join(isolated, 'safe.html'), path.join(isolated, 'editor', 'index.html'));
+    const valid = await local.request('/editor/3f0f6a52-1111-4000-8000-000000000001');
+    assert.equal(valid.status, 200);
+    assert.ok((await valid.text()).includes('SAFE-INTERNAL'));
+  });
+
   test('MIME corretos + nosniff', async () => {
     const want = { '/assets/app.0123456789abcdef.js': 'text/javascript; charset=utf-8', '/assets/estilo.css': 'text/css; charset=utf-8', '/assets/foto.png': 'image/png', '/assets/dados.json': 'application/json; charset=utf-8',
       '/assets/fonte.woff2': 'font/woff2', '/assets/logo.svg': 'image/svg+xml', '/robots.txt': 'text/plain; charset=utf-8', '/assets/arquivo.xyz': 'application/octet-stream' };
