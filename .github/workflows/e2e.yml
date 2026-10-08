@@ -36,6 +36,9 @@ jobs:
       APP_ENV: test
       TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
       DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
+      # Dev E2E usa o serviço Postgres do runner, com banco isolado canteiro_t_e2e.
+      # Não tenta iniciar cluster do SO nem usa o banco do CI; bloqueia URLs remotas.
+      E2E_EXTERNAL_POSTGRES: '1'
       # Versão FIXA do Playwright: vem do package-lock.json (devDependency exata). Ao subir a versão, mude os DOIS juntos
       # (npm install --save-dev --save-exact playwright@X.Y.Z) e rode os testes; o passo abaixo reprova se divergirem.
       PLAYWRIGHT_VERSION: 1.63.0
