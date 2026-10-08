@@ -902,8 +902,11 @@ await scenario('32 · comentários da plataforma no editor e no visualizar: list
   const del = await p.$('#cloudComments .cl-ci.done button[data-a=del]'); await del.click(); await p.click('.cl-dlg [data-act=""].dng, .cl-dlg .cl-b.dng');
   await until(async () => (await post(ana, '/comments')).find((c) => c.body === 'Revisar o título deste slide').deleted, 8000, 200);
   check('CL-133 Excluir (com confirmação): DELETE /comments/:id', (await post(ana, '/comments')).find((c) => c.body === 'Revisar o título deste slide').deleted === true);
-  await p.keyboard.press('Escape'); await sleep(200);
-  check('CL-134 Esc fecha o painel', !(await p.$('#cloudComments')));
+  /* O botão de excluir desaparece após confirmação; testar Esc sem foco no painel. */
+  await p.evaluate(() => { if (document.activeElement?.blur) document.activeElement.blur(); });
+  await p.keyboard.press('Escape');
+  await p.waitForSelector('#cloudComments', { state: 'detached', timeout: 4000 }).catch(() => {});
+  check('CL-134 Esc fecha o painel após excluir comentário, mesmo sem foco interno', !(await p.$('#cloudComments')));
   await p.close();
   const v = await openEditor(bia, s.id, 'cmts-view', { mode: 'visualizar' }); await v.waitForSelector('#presenter.open'); await sleep(400);
   await v.click('#cloudCmBtn'); await v.waitForSelector('#cloudComments', { timeout: 8000 }); await sleep(300);

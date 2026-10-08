@@ -346,6 +346,11 @@
       else if (k !== 'Enter' && k !== ' ') e.preventDefault();   /* Delete, Ctrl+Z, letras…: nada age por trás do menu */
       e.stopImmediatePropagation(); return;
     }
+    /* Esc fecha Comentários mesmo quando o foco volta ao body após excluir um item.
+       A prioridade continua sendo das caixas e menus tratados acima. */
+    if (k === 'Escape' && CM.el && !isOpenEl('#modal') && !xpOpen()) {
+      e.preventDefault(); e.stopImmediatePropagation(); cmClose(); return;
+    }
     if (!mod || e.shiftKey || (lk !== 's' && lk !== 'o')) return;
     /* Ctrl+S = salvar uma versão agora; Ctrl+O = abrir um arquivo (nova no acervo × substituir esta). "Baixar" e "Baixar como…" continuam baixando HTML/PDF/PowerPoint */
     if (isOpenEl('#modal') || xpOpen()) return;   /* caixas do próprio editor engolem a tecla */

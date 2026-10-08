@@ -1,0 +1,76 @@
+# Primeiro acesso ao MVP de testes: convite via Supabase Auth + papel app_ops.
+# Nunca executa em push/PR, exige main + confirmação e ambiente mvp.
+name: Convidar administrador MVP Free
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Digite ADMIN-MVP para autorizar o convite'
+        type: string
+        required: true
+      project_ref:
+        description: 'Referência do Supabase MVP (20 caracteres)'
+        type: string
+        required: true
+      email:
+        description: 'E-mail do primeiro administrador'
+        type: string
+        required: true
+      nome:
+        description: 'Nome para exibição'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+concurrency:
+  group: mvp-first-admin
+  cancel-in-progress: false
+jobs:
+  convidar:
+    name: Primeiro administrador (somente MVP Free)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: mvp
+    steps:
+      - name: Bloquear execução que não é da main
+        run: |
+          test "$GITHUB_REF" = 'refs/heads/main' || { echo '::error::Somente main'; exit 1; }
+      - name: Baixar código revisado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+      - name: Instalar dependências de execução
+        working-directory: platform
+        run: npm ci --omit=dev
+      - name: Validar o projeto, papel de operações, Auth e conexão TLS
+        working-directory: platform
+        env:
+          MVP_ADMIN_CONFIRMATION: ${{ inputs.confirmation }}
+          MVP_PROJECT_REF: ${{ inputs.project_ref }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node tools/mvp-guard-admin.js
+      - name: Convidar administrador pelo Supabase Auth
+        working-directory: platform
+        env:
+          DATABASE_OPS_URL: ${{ secrets.DATABASE_OPS_URL }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EMAIL: ${{ inputs.email }}
+          NOME: ${{ inputs.nome }}
+        run: node tools/create-first-admin.js --email "$EMAIL" --name "$NOME"
+      - name: Registrar etapa concluída
+        run: |
+          echo '### Primeiro administrador MVP' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Convite solicitado ao Supabase Auth do projeto **mvp**' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Próximo passo: abrir o e-mail e definir senha; confirmar acesso em /entrar' >> "$GITHUB_STEP_SUMMARY"
