@@ -1,0 +1,54 @@
+# Piloto gratuito — Render Web Service (Node 22) + Supabase Free.
+# Nao cria banco nem servicos pagos. Publicacao manual apos CI e E2E aprovados.
+# Nunca coloque valores de segredo neste arquivo. Configure-os no painel Render.
+services:
+  - type: web
+    name: canteiro-mvp-piloto
+    runtime: node
+    plan: free
+    region: virginia
+    autoDeployTrigger: off
+    buildCommand: cd platform && npm ci --omit=dev && npm run build:web
+    startCommand: cd platform && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: APP_ENV
+        value: staging
+      - key: DATABASE_SSL
+        value: require
+      - key: DB_POOL_MAX
+        value: "2"
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: SSO_ENABLED
+        value: "false"
+      - key: TRUST_PROXY
+        value: "true"
+      - key: CSRF_SECRET
+        generateValue: true
+      - key: APP_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
