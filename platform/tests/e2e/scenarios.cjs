@@ -324,7 +324,7 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
     await pb.waitForSelector('li.card', { timeout: 20000 });
     const cards = await pb.$$eval('li.card', (l) => l.map((li) => ({ id: li.dataset.id, title: li.querySelector('.card__title').textContent, owner: li.dataset.owner, meta: li.querySelector('.card__meta').textContent })));
     const ca = cards.find((c) => c.title === 'Obra A do acervo local'), cb = cards.find((c) => c.title === 'Obra B do acervo local');
-    check('8.7 as 2 apresentações aparecem em /acervo (aba Minhas) como do Bruno, com 1 e 3 slides', !!ca && !!cb && ca.owner === 'me' && cb.owner === 'me' && /^1 slide/.test(ca.meta) && /^3 slides/.test(cb.meta), cards);
+    check('8.7 as 2 apresentações aparecem em /acervo (aba Minhas) como do Bruno, com 1 e 3 slides', !!ca && !!cb && ca.owner === 'me' && cb.owner === 'me' && /^0*1 slide/.test(ca.meta) && /^0*3 slides/.test(cb.meta), cards);
     if (ca && cb) {
       const ga = (await getPres(ctx.bruno, ca.id)).json, gb = (await getPres(ctx.bruno, cb.id)).json;
       const tb = textsOf(gb.content);
