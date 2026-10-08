@@ -9,7 +9,7 @@ services:
     region: virginia
     autoDeployTrigger: off
     buildCommand: cd platform && npm ci --omit=dev && npm run build:web
-    startCommand: cd platform && npm start
+    startCommand: cd platform && node tools/mvp-preflight.js && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
@@ -20,6 +20,8 @@ services:
         value: require
       - key: DB_POOL_MAX
         value: "2"
+      - key: STORAGE_QUOTA_USER_MB
+        value: "100"
       - key: STORAGE_DRIVER
         value: s3
       - key: S3_FORCE_PATH_STYLE

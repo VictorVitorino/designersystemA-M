@@ -46,7 +46,7 @@ A configuração do projeto pode exigir ajustes adicionais no Supabase que ainda
 | `S3_BUCKET` | Nome do bucket **privado** |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Credenciais S3 exclusivas do projeto; **somente no servidor** |
 
-O Blueprint já define `APP_ENV=staging`, `DATABASE_SSL=require`, `STORAGE_DRIVER=s3`, `S3_FORCE_PATH_STYLE=true`, `DB_POOL_MAX=2`, `NODE_VERSION=22.22.0` e gera `CSRF_SECRET`. O campo `APP_ORIGIN` é preenchido depois de o serviço receber URL; atualize-o se o hostname mudar.
+O Blueprint já define `APP_ENV=staging`, `DATABASE_SSL=require`, `STORAGE_DRIVER=s3`, `S3_FORCE_PATH_STYLE=true`, `DB_POOL_MAX=2`, `STORAGE_QUOTA_USER_MB=100`, `NODE_VERSION=22.22.0` e gera `CSRF_SECRET`. Antes da API iniciar, o script `tools/mvp-preflight.js` bloqueia erros de configuração: só aceita HTTPS Render, banco como `app_api` via TLS, Auth/JWKS e S3 do mesmo projeto Supabase, cota limitada e nenhum segredo administrativo no Render. Ele não contata a rede nem imprime credenciais. O campo `APP_ORIGIN` é preenchido depois de o serviço receber URL; atualize-o se o hostname mudar.
 
 4. Configurar **Supabase Auth → URL Configuration**: Site URL = `APP_ORIGIN` e Redirect URLs para o site e a página `/auth/confirmar` (confirmar o fluxo exato do Auth ao testar).
 5. Clicar **Manual Deploy** depois de preenchidos os valores. Verificar `GET /api/health` (servidor vivo) e **`GET /api/ready` com status 200** (DB, login, arquivos e migrações). Não confundir esses dois endpoints: `health` pode estar verde com o banco fora do ar.
