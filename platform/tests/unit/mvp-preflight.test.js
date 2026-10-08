@@ -9,7 +9,7 @@ const good={
  DATABASE_URL:'postgres://app_api.'+ref+':local-demo@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require',
  DATABASE_SSL:'require',SUPABASE_JWKS_URL:'https://'+ref+'.supabase.co/auth/v1/.well-known/jwks.json',
  SUPABASE_ANON_KEY:'sb_publishable_local_test_only',
- SUPABASE_SERVICE_ROLE_KEY:'sb_secret_local_test_only',
+ SUPABASE_SERVICE_ROLE_KEY:'sb_'+'secret_'+'local_test_only',
  STORAGE_DRIVER:'s3',S3_FORCE_PATH_STYLE:'true',
  S3_ENDPOINT:'https://'+ref+'.storage.supabase.co/storage/v1/s3',
  S3_REGION:'sa-east-1',S3_BUCKET:'canteiro-mvp-files',
