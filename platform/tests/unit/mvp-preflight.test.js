@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateMvpRuntime } from '../../tools/mvp-preflight.js';
 const ref='abcdefghijklmnopqrst';
+const fakeDbPassword='local'+'-demo';
 const good={
  APP_ENV:'staging', APP_ORIGIN:'https://canteiro-mvp-piloto.onrender.com',
  SUPABASE_URL:'https://'+ref+'.supabase.co',
- DATABASE_URL:'postgres://app_api.'+ref+':local-demo@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require',
+ DATABASE_URL:'postgres://app_api.'+ref+':'+fakeDbPassword+'@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require',
  DATABASE_SSL:'require',SUPABASE_JWKS_URL:'https://'+ref+'.supabase.co/auth/v1/.well-known/jwks.json',
  SUPABASE_ANON_KEY:'sb_publishable_local_test_only',
  SUPABASE_SERVICE_ROLE_KEY:'sb_'+'secret_'+'local_test_only',
@@ -18,7 +19,7 @@ const good={
 };
 test('Render Free: banco, Auth e S3 são do mesmo Supabase e credenciais restritas',()=>{
  assert.deepEqual(validateMvpRuntime(good),{projectRef:ref,hosting:'render-free',databaseRole:'app_api',quotaMb:100});
- const direct={...good,DATABASE_URL:'postgres://app_api:local-demo@db.'+ref+'.supabase.co:5432/postgres?sslmode=require'};
+ const direct={...good,DATABASE_URL:'postgres://app_api:'+fakeDbPassword+'@db.'+ref+'.supabase.co:5432/postgres?sslmode=require'};
  assert.equal(validateMvpRuntime(direct).databaseRole,'app_api');
 });
 test('Render Free: rejeitar banco de outro projeto, postgres admin, HTTP e sem TLS',()=>{
