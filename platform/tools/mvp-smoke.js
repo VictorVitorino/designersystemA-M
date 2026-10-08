@@ -37,7 +37,14 @@ export async function smoke(site,{http=fetch,tries=6,delay=10000}={}) {
   requireOk(csp.includes("'strict-dynamic'")&&!/script-src[^;]*unsafe-inline/.test(csp),'CSP do editor insegura');
   const js=await get('/js/cloud-core.js','HEAD');
   requireOk(js.status===200&&/javascript/.test(js.headers.get('content-type')||''),'Editor cloud JS ausente');
-  return {site:base,components:live,checks:6};
+  const sess=await get('/api/auth/session');
+  const anonymous=await sess.json();
+  requireOk(sess.status===200 && anonymous?.authenticated===false && !anonymous?.user,
+    'sessão de visitante não pode estar autenticada');
+  const acervo=await get('/api/presentations');
+  requireOk([401,403].includes(acervo.status),
+    'acervo exposto a visitantes sem login');
+  return {site:base,components:live,checks:8};
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
   smoke(process.env.MVP_SITE_URL).then(x=>console.log('MVP: '+x.checks+' verificações HTTP aprovadas em '+x.site+

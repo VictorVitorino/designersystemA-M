@@ -9,6 +9,8 @@ test('smoke MVP bloqueia SSRF, URL falsa e credenciais no endereço',()=>{
 });
 const fake=({unready=false,weak=false}={})=>async(url)=>{
  const p=new URL(url).pathname;
+ if(p==='/api/auth/session')return Response.json({authenticated:false,csrfToken:'test'});
+ if(p==='/api/presentations')return Response.json({error:'unauthorized'},{status:401});
  if(p==='/api/health')return Response.json({ok:true,env:'staging'});
  if(p==='/api/ready')return Response.json({db:true,auth:true,storage:!unready,migrations:true},{status:unready?503:200});
  if(p==='/entrar')return new Response('Entrar',{headers:{'Content-Type':'text/html','Content-Security-Policy':"default-src 'self'",'X-Content-Type-Options':'nosniff'}});
@@ -19,7 +21,7 @@ const fake=({unready=false,weak=false}={})=>async(url)=>{
 };
 test('smoke MVP verifica readiness, editor, JS e CSP sem credenciais',async()=>{
  const o=await smoke('https://a.onrender.com',{http:fake(),tries:1,delay:0});
- assert.equal(o.checks,6);assert.equal(o.components.storage,true);
+ assert.equal(o.checks,8);assert.equal(o.components.storage,true);
  await assert.rejects(()=>smoke('https://a.onrender.com',{http:fake({unready:true}),tries:1,delay:0}),/não está pronto/);
  await assert.rejects(()=>smoke('https://a.onrender.com',{http:fake({weak:true}),tries:1,delay:0}),/CSP do editor insegura/);
 });
