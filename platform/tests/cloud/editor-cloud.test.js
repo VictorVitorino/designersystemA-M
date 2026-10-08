@@ -854,7 +854,13 @@ await scenario('31 · formulário na nuvem: o texto diz que a resposta vai com o
   await p.evaluate(() => { const again = document.querySelector('#presenter .amf-again'); if (again && again.offsetParent) again.click(); }); await fill();
   const st2 = await until(async () => { const t = await p.$eval('#presenter .amf-st', (n) => n.textContent); return /planilha/.test(t) && !/Enviando/.test(t) ? t : null; }, 6000, 200);
   const extra = cspViolations.splice(cv0);   /* esperado: a CSP bloqueia o endereço fora do Google (connect-src) — é exatamente o caso explicado */
-  for (let i = consoleErrors.length - 1; i >= 0; i--) if (/^form-txt: (Refused to connect to|Fetch API cannot load) 'https:\/\/planilha\.example\.com|^form-txt: Fetch API cannot load https:\/\/planilha\.example\.com/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+  // Chromium recente usa "Connecting to ... violates ..." em vez de "Refused to connect to ...".
+  // Ignorar SOMENTE o bloqueio CSP esperado do endereço fictício deste cenário; erros reais continuam no CL-88.
+  for (let i = consoleErrors.length - 1; i >= 0; i--) {
+    const msg = consoleErrors[i];
+    if (/^form-txt: (?:Refused to connect to|Connecting to) 'https:\/\/planilha\.example\.com\/coleta' (?:violates|because it violates) the following Content Security Policy directive/.test(msg)
+      || /^form-txt: Fetch API cannot load '?https:\/\/planilha\.example\.com\/coleta/.test(msg)) consoleErrors.splice(i, 1);
+  }
   hosts.delete('planilha.example.com');   /* bloqueado pela CSP: o pedido não sai do navegador */
   check('CL-128 planilha com endereço fora do Google: a mensagem explica que na versão online só vale um app do Google (em vez de "sem internet")', /na versão online só vale o endereço de um app do Google/.test(st2 || '') && extra.length > 0 && extra.every((v) => /connect-src/.test(v.d) && /example\.com/.test(v.u)), { st2, extra });
   await leave();
@@ -973,7 +979,10 @@ await scenario('35 · imagens https:// externas: a CSP continua estrita e a pess
   check('CL-149 imagens com endereço https:// geram o aviso "2 imagens… não aparecem na versão online" com "baixe cada imagem… insira de novo pelo botão Imagem"; img-src segue sem https:', /2 imagens desta apresentação não aparecem na versão online/.test(txt) && /baixe cada imagem para o computador e insira de novo pelo botão Imagem/.test(txt) && /img-src 'self' data: blob:;/.test(csp) && !/img-src[^;]*https:/.test(csp), { txt: txt.slice(0, 200), csp: (csp.match(/img-src[^;]*/) || [''])[0] });
   await p.click('.cl-dlg .cl-b'); await p.close();
   const extra = cspViolations.splice(cv0);   /* esperado: as duas imagens externas bloqueadas (img-src) — o aviso acima explica por quê */
-  for (let i = consoleErrors.length - 1; i >= 0; i--) if (/^externa: Refused to load the image 'https:\/\/imagens\.example\.com/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+  // Chromium recente usa "Loading the image ... violates ..."; a CSP deve continuar a bloquear as imagens.
+  for (let i = consoleErrors.length - 1; i >= 0; i--) {
+    if (/^externa: (?:Refused to load|Loading) the image 'https:\/\/imagens\.example\.com\/(?:foto|outra)\.png' (?:violates|because it violates) the following Content Security Policy directive/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+  }
   hosts.delete('imagens.example.com');   /* bloqueadas pela CSP: nada sai do navegador */
   check('CL-150 as únicas violações de CSP desta apresentação são as imagens externas bloqueadas (img-src), como esperado', extra.length > 0 && extra.every((v) => /img-src/.test(v.d) && /imagens\.example\.com/.test(v.u)), extra.slice(0, 3));
 });
