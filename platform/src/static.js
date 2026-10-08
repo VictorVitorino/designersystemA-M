@@ -37,6 +37,16 @@ export const editorWithoutId = (p) => EDITOR_ANY.test(p) && !EDITOR_UUID.test(p)
 
 const isApiPath = (p) => p === '/api' || p.startsWith('/api/');
 
+// Validar também o caminho CANÔNICO: um link simbólico aparentemente público
+// não deve escapar do diretório, apontar para arquivos ocultos ou para /api.
+function canonicalPublicPath(publicDirReal, resolved) {
+  const relative = path.relative(publicDirReal, resolved);
+  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) return false;
+  const parts = relative.split(path.sep).filter(Boolean);
+  return !parts.some((seg) => seg.startsWith('.') && seg !== '.well-known')
+    && !(parts.length && parts[0].toLowerCase() === 'api');
+}
+
 /** Resolve o caminho da URL num arquivo dentro de publicDir. @returns {string|null} caminho absoluto (real) ou null */
 export function resolveFile(publicDirReal, rawPath) {
   if (/%(2f|5c|00)/i.test(rawPath) || rawPath.includes('\\') || rawPath.includes('\0')) return null;
@@ -49,7 +59,7 @@ export function resolveFile(publicDirReal, rawPath) {
   if (abs !== publicDirReal && !abs.startsWith(publicDirReal + path.sep)) return null;
   let real;
   try { real = fs.realpathSync(abs); } catch { return abs; }                      // inexistente: devolve o caminho lógico (404 adiante)
-  return real === publicDirReal || real.startsWith(publicDirReal + path.sep) ? real : null;   // symlink que sai da pasta → recusado
+  return canonicalPublicPath(publicDirReal, real) ? real : null;   // symlink externo, oculto ou API → recusado
 }
 
 function loadCsp(cspFile, log) {
@@ -89,6 +99,17 @@ export function serveStatic(apiApp, config, opts = {}) {
 
   const notFound = (c) => c.text('Não encontrado.', 404, { 'Cache-Control': 'no-store' });
 
+  // A verificação feita em resolveFile protege o caminho pedido diretamente.
+  // Um index.html descoberto depois (diretório ou rewrite SPA) também precisa
+  // ser verificado: ele pode ser um link simbólico apontando para fora de publicDir.
+  function safeIndex(candidate) {
+    try {
+      const real = fs.realpathSync(candidate);
+      if (!canonicalPublicPath(publicReal, real)) return null;
+      return fs.statSync(real).isFile() ? real : null;
+    } catch { return null; }
+  }
+
   /** Descobre o arquivo a servir para a URL (ou null). */
   function locate(rawPath) {
     const decoded = (() => { try { return decodeURIComponent(rawPath); } catch { return null; } })();
@@ -99,12 +120,15 @@ export function serveStatic(apiApp, config, opts = {}) {
     const segs = rel.split(path.sep).filter(Boolean);
     const last = segs[segs.length - 1] || '';
     const isDir = (() => { try { return fs.statSync(file).isDirectory(); } catch { return false; } })();
-    if (isDir) { const idx = path.join(file, 'index.html'); return fs.existsSync(idx) && fs.statSync(idx).isFile() ? idx : null; }   // sem listagem de diretório
+    if (isDir) return safeIndex(path.join(file, 'index.html')); // sem listagem e sem links para fora da pasta
     try { if (fs.statSync(file).isFile()) return file; } catch { /* segue para as reescritas */ }
     if (path.extname(last)) return null;                                      // asset inexistente: 404 (nunca devolve HTML no lugar)
     const first = segs[0];
     if (first && SCREEN_DIRS.has(first)) {
-      for (const cand of [path.join(publicReal, first, 'index.html'), path.join(publicReal, 'index.html')]) { try { if (fs.statSync(cand).isFile()) return cand; } catch { /* tenta o próximo */ } }
+      for (const cand of [path.join(publicReal, first, 'index.html'), path.join(publicReal, 'index.html')]) {
+        const safe = safeIndex(cand);
+        if (safe) return safe;
+      }
     }
     return null;
   }

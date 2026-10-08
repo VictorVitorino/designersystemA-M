@@ -28,14 +28,26 @@ let secrets = fs.existsSync(secretsFile) ? JSON.parse(fs.readFileSync(secretsFil
 secrets.csrf ||= crypto.randomBytes(32).toString('base64url'); secrets.apiPw ||= crypto.randomBytes(16).toString('hex'); secrets.opsPw ||= crypto.randomBytes(16).toString('hex');
 fs.writeFileSync(secretsFile, JSON.stringify(secrets), { mode: 0o600 });
 
-const ADMIN_URL = process.env.DATABASE_ADMIN_URL || `postgres://postgres:postgres@127.0.0.1:5432/${DB}`;
+const EXTERNAL_TEST_DB = process.env.E2E_EXTERNAL_POSTGRES === '1';
+let ADMIN_URL = process.env.DATABASE_ADMIN_URL || `postgres://postgres:postgres@127.0.0.1:5432/${DB}`;
 function step(msg) { console.log('\n▶ ' + msg); }
 
 /* 1. banco */
 step(`Postgres local: banco ${DB}`);
-try { execFileSync('node', [path.join(HERE, 'local-db.js'), 'up'], { stdio: 'inherit' }); } catch (e) { console.error('Não consegui iniciar o Postgres local. Instale o PostgreSQL 16 ou defina DATABASE_ADMIN_URL.'); process.exit(1); }
-if (DB !== 'canteiro_dev') { try { execFileSync('node', [path.join(HERE, 'local-db.js'), 'create', DB], { stdio: 'inherit' }); } catch (e) { /* já existe */ } }
-if (args.reset) execFileSync('node', [path.join(HERE, 'local-db.js'), 'reset', DB], { stdio: 'inherit' });
+if (EXTERNAL_TEST_DB) {
+  // O CI já fornece PostgreSQL no runner; não é possível executar su/pg_ctlcluster ali.
+  // Modo estritamente descartável e de loopback, isolado do canteiro_test usado pelo CI.
+  if (!process.env.DATABASE_ADMIN_URL) { console.error('E2E_EXTERNAL_POSTGRES exige DATABASE_ADMIN_URL local.'); process.exit(2); }
+  try {
+    const { prepareExternalTestDb } = await import('./external-test-db.js');
+    ADMIN_URL = await prepareExternalTestDb(process.env.DATABASE_ADMIN_URL, DB, { reset: !!args.reset });
+    console.log('Postgres do runner pronto: banco de testes ' + DB);
+  } catch (e) { console.error('Falha ao preparar banco E2E isolado:', e.message); process.exit(1); }
+} else {
+  try { execFileSync('node', [path.join(HERE, 'local-db.js'), 'up'], { stdio: 'inherit' }); } catch (e) { console.error('Não consegui iniciar o Postgres local. Instale o PostgreSQL 16 ou defina DATABASE_ADMIN_URL.'); process.exit(1); }
+  if (DB !== 'canteiro_dev') { try { execFileSync('node', [path.join(HERE, 'local-db.js'), 'create', DB], { stdio: 'inherit' }); } catch (e) { /* já existe */ } }
+  if (args.reset) execFileSync('node', [path.join(HERE, 'local-db.js'), 'reset', DB], { stdio: 'inherit' });
+}
 const { migrate } = await import('./migrate.js');
 await migrate(ADMIN_URL, { apiPassword: secrets.apiPw, opsPassword: secrets.opsPw, roles: true });
 const dbUrl = (user, pw) => { const u = new URL(ADMIN_URL); u.username = user; u.password = pw; return u.toString(); };

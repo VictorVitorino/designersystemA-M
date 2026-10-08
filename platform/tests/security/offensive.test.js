@@ -731,12 +731,20 @@ describe('cadeia de suprimento', () => {
     assert.equal(fs.readFileSync(path.join(PLATFORM, 'vercel.json'), 'utf8'), a.vercelText, 'vercel.json versionado está atualizado');
     LOG.push({ level: 'metric', m: 'editor_sha256', f: { sha: a.editorSha256, hashes: a.inlineScriptHashes } });
   });
-  test('dependências: lockfile presente e com integridade em todas as entradas; versões do package.json com ^ (travadas pelo lock; recomendação: fixar)', () => {
+  test('dependências: lockfile íntegro, ferramentas de desenvolvimento isoladas e imagem de produção sem pacotes dev', () => {
     const lock = JSON.parse(fs.readFileSync(path.join(PLATFORM, 'package-lock.json'), 'utf8')); const pkgs = Object.entries(lock.packages).filter(([k]) => k);
     assert.ok(pkgs.length > 20); for (const [k, v] of pkgs) if (!v.link) assert.ok(v.integrity || v.resolved === undefined, k + ' sem integrity');
     const pkg = JSON.parse(fs.readFileSync(path.join(PLATFORM, 'package.json'), 'utf8'));
     const caret = Object.entries(pkg.dependencies).filter(([, v]) => /^[\^~]/.test(v)); LOG.push({ level: 'metric', m: 'deps_caret', f: { n: caret.length, names: caret.map(([k]) => k) } });
-    assert.equal(Object.keys(pkg.devDependencies || {}).length, 0, 'sem devDependencies no pacote de produção');
+    // Playwright é necessário para os testes, mas não deve entrar na imagem de produção.
+    assert.deepEqual(lock.packages[''].devDependencies || {}, pkg.devDependencies || {}, 'lockfile deve refletir as ferramentas de desenvolvimento');
+    for (const name of Object.keys(pkg.devDependencies || {})) {
+      assert.ok(!(name in (pkg.dependencies || {})), name + ': não pode estar nas dependências de produção');
+      assert.equal(lock.packages['node_modules/' + name]?.dev, true, name + ': deve ser marcado como dev no lockfile');
+    }
+    const dockerfile = fs.readFileSync(path.join(PLATFORM, 'Dockerfile'), 'utf8');
+    assert.equal((dockerfile.match(/RUN npm ci --omit=dev\b/g) || []).length, 2,
+      'as etapas web e deps da imagem devem instalar apenas dependências de produção');
   });
   test('métricas coletadas nesta execução (impressas para o relatório)', () => {
     const m = LOG.filter((l) => l.level === 'metric' || l.level === 'note'); console.log('\nMÉTRICAS: ' + JSON.stringify(m.map((x) => ({ [x.m]: x.f }))));

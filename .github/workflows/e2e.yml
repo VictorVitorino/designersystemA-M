@@ -36,6 +36,9 @@ jobs:
       APP_ENV: test
       TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
       DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/canteiro_test
+      # Dev E2E usa o serviço Postgres do runner, com banco isolado canteiro_t_e2e.
+      # Não tenta iniciar cluster do SO nem usa o banco do CI; bloqueia URLs remotas.
+      E2E_EXTERNAL_POSTGRES: '1'
       # Versão FIXA do Playwright: vem do package-lock.json (devDependency exata). Ao subir a versão, mude os DOIS juntos
       # (npm install --save-dev --save-exact playwright@X.Y.Z) e rode os testes; o passo abaixo reprova se divergirem.
       PLAYWRIGHT_VERSION: 1.63.0
@@ -68,8 +71,12 @@ jobs:
       - name: Gerar o site
         run: npm run build:web
 
-      - name: Instalar python-pptx (o cenário 7 abre o .pptx exportado fora do navegador)
-        run: python3 -m pip install --user --break-system-packages python-pptx==1.0.2 || python3 -m pip install --user python-pptx==1.0.2
+      - name: Instalar python-pptx em venv (compatível com python3 -I do E2E)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/e2e-python"
+          "$RUNNER_TEMP/e2e-python/bin/python" -m pip install --disable-pip-version-check python-pptx==1.0.2
+          "$RUNNER_TEMP/e2e-python/bin/python" -I -c 'from pptx import Presentation; print("python-pptx disponível no Python isolado")'
+          echo "$RUNNER_TEMP/e2e-python/bin" >> "$GITHUB_PATH"
 
       - name: Suítes do cliente web (269+ verificações) e do editor em nuvem (Chromium real, CSP estrita)
         run: node tests/web/web.test.js && node --test --test-concurrency=1 tests/cloud/cloud-core.test.js tests/cloud/editor-cloud.test.js
