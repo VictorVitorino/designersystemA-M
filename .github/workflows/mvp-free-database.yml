@@ -1,0 +1,90 @@
+# Inicialização manual do banco gratuito do Canteiro.
+# NUNCA é executado por push ou PR; só aceita main, ambiente mvp e confirmação explícita.
+name: Preparar banco MVP Free
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Digite MVP para confirmar a MIGRAÇÃO do banco de testes'
+        required: true
+        type: string
+      project_ref:
+        description: 'Identificador de 20 letras/números do projeto Supabase MVP'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mvp-free-database
+  cancel-in-progress: false
+
+jobs:
+  migrar:
+    name: Aplicar migrações no projeto MVP dedicado
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: mvp
+    steps:
+      - name: Recusar branch incorreta ou confirmação inválida
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          TARGET: ${{ inputs.project_ref }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          test "$GITHUB_REF" = 'refs/heads/main' || { echo '::error::Migração MVP permitida apenas na main'; exit 1; }
+          test "$CONFIRMATION" = 'MVP' || { echo '::error::Digite exatamente MVP'; exit 1; }
+          test -n "$PROJECT_REF" && test "$PROJECT_REF" = "$TARGET" || { echo '::error::Confirme o projeto Supabase do ambiente mvp'; exit 1; }
+
+      - name: Baixar código revisado da main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Instalar somente dependências de execução
+        working-directory: platform
+        run: npm ci --omit=dev
+
+      - name: Validar destino Supabase e conexão com TLS antes de modificar o banco
+        working-directory: platform
+        env:
+          MVP_CONFIRMATION: ${{ inputs.confirmation }}
+          MVP_INPUT_REF: ${{ inputs.project_ref }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          APP_API_DB_PASSWORD: ${{ secrets.APP_API_DB_PASSWORD }}
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+        run: node tools/guard-mvp-db.js
+
+      - name: Criar papéis restritos e aplicar migrações versionadas
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+          APP_API_DB_PASSWORD: ${{ secrets.APP_API_DB_PASSWORD }}
+          APP_OPS_DB_PASSWORD: ${{ secrets.APP_OPS_DB_PASSWORD }}
+        run: node tools/migrate.js
+
+      - name: Conferir checksums e ausência de migrações pendentes
+        working-directory: platform
+        env:
+          DATABASE_ADMIN_URL: ${{ secrets.DATABASE_ADMIN_URL }}
+        run: node tools/migrate.js --check
+
+      - name: Registrar a evidência sem mostrar senhas
+        env:
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          echo '### Banco MVP Free preparado' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ambiente: **mvp** (Postgres Supabase dedicado)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Referência: \`$PROJECT_REF\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Migrações: **aplicadas e conferidas**' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Próximo passo: configurar Render Free e validar /api/ready + fluxo completo' >> "$GITHUB_STEP_SUMMARY"

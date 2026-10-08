@@ -1,0 +1,36 @@
+# Smoke HTTP seguro do piloto: sem login, segredos ou mutações; só roda manualmente na main.
+name: Verificar MVP Free online
+on:
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: 'HTTPS do Render, ex. https://canteiro-mvp-piloto.onrender.com'
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Bloquear outras branches
+        run: |
+          test "$GITHUB_REF" = 'refs/heads/main' || { echo '::error::Somente main'; exit 1; }
+      - name: Baixar a versão testada
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Instalar Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Conferir API, banco, Auth, Storage, editor e CSP
+        env:
+          MVP_SITE_URL: ${{ inputs.site_url }}
+        run: node platform/tools/mvp-smoke.js
+      - name: Registrar resultado
+        run: |
+          echo '### MVP Free: smoke online aprovado' >> "$GITHUB_STEP_SUMMARY"
+          echo '- 6 grupos de verificações HTTP do piloto' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Falta a homologação de login e salvamento em outro computador' >> "$GITHUB_STEP_SUMMARY"
