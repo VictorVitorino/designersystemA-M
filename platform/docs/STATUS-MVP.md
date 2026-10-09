@@ -58,3 +58,44 @@
 - Nunca alterar `studio/` para implementar plataforma/infraestrutura.
 
 **Regra de atualização:** só mudar status de uma etapa com evidência reproduzível e verificada; indicar links dos testes e da implantação. O percentual de 85% é estimativo e não deve ser aumentado automaticamente ao criar documentação ou infraestrutura.
+
+## Atualização do desenvolvimento — 09/10/2026 (PRs e qualidade)
+
+Este registro complementa a fotografia anterior; **não altera os critérios de aceite** nem converte CI aprovado em implantação real.
+
+### Integrado à `main` com verificações aprovadas no PR
+
+| Entrega | Evidência | Alteração comprovada |
+|---|---|---|
+| Correção de teste de cota | [PR #12](https://github.com/VictorVitorino/designersystemA-M/pull/12) | Dados de imagem determinísticos para evitar falso negativo na suíte de quota; CI e E2E aprovados. |
+| Proteção de edições ao copiar/restaurar | [PR #13](https://github.com/VictorVitorino/designersystemA-M/pull/13) | Interrompe cópia/restauração se o salvamento prévio falhou ou se ainda existem alterações locais; testes no navegador, CI, Postgres17 e Build Render aprovados. |
+| Render Free — parâmetros públicos do Supabase | [PR #11](https://github.com/VictorVitorino/designersystemA-M/pull/11) | Pré-configura URL, JWKS, S3, região e bucket do projeto dedicado, preservando segredos fora do repositório; CI, E2E, Postgres17 e CodeQL aprovados no PR. |
+| Readiness concorrente e proteção de logs | [PR #14](https://github.com/VictorVitorino/designersystemA-M/pull/14) | Single-flight, TTL, timeout e mensagens seguras, com 4 regressões novas aprovadas; CI, Postgres17, CodeQL e E2E aprovados no PR. |
+
+### Alterações em validação (ainda não estão na `main`)
+
+- [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4): exigir HTTPS para endpoints externos; reforçado para rejeitar URLs que contenham `userinfo` (usuário/senha) e com novos testes. **Novos checks ainda precisam concluir** após os commits mais recentes.
+- [PR #15](https://github.com/VictorVitorino/designersystemA-M/pull/15): desligar o servidor Node de forma graciosa durante um salvamento. CI, PostgreSQL 17 e CodeQL foram aprovados; **E2E aguardava conclusão no último acompanhamento**. Não integrar até todos os portões estarem verdes.
+
+### Verificação independente do ambiente Supabase dedicado
+
+- Projeto **`canteiro-mvp`**, região **`sa-east-1`**, estado **`ACTIVE_HEALTHY`** e PostgreSQL **17**.
+- Migrações de papéis e aplicação `0001`–`0009` presentes.
+- Auditoria de segurança: nenhum WARN/ERROR; um INFO intencional `rls_enabled_no_policy` na tabela `public.schema_migrations` (RLS deny-all).
+- O estado saudável do projeto **não comprova** conexão real de login, upload ou salvamento via Render.
+
+### Próximas tarefas técnicas (somente após comprovar a necessidade)
+
+1. Corrigir qualquer falha dos PRs #4 e #15, registrar regressões e integrar após CI + Postgres17 + CodeQL aplicável + E2E.
+2. Executar verificações de performance e concorrência contra **ambiente isolado de teste**, documentando p50/p95/p99, erro e throughput; não gerar carga sobre o Supabase Free ativo sem avaliação de cota.
+3. Exercitar importação, exportação, autorização e restauração com **dados fictícios**, preservando `studio/` e a prova de paridade.
+4. Revisar backups e procedimentos de recuperação com evidência, sem marcar como aprovado um restore que não foi realmente ensaiado.
+5. Revalidar os checks completos da `main` quando as alterações forem integradas.
+
+### Bloqueios externos para a aceitação do MVP
+
+- Conta e Web Service **Render Free** ainda não configurados; não há URL de piloto comprovada com `/api/ready = 200`.
+- Variáveis secretas de Render/GitHub, parâmetros do Auth, cadastro público desligado e primeiro convite administrativo ainda exigem ações autorizadas em painel.
+- Persistência real entre **dois computadores**, arquivos, convites, permissões e recuperação de backup ainda sem homologação de ponta a ponta com os serviços externos.
+
+**Resumo de aceite: permanece 1/6; etapa 2/6 em preparação.** Não tratar o `Deploy staging` do GitHub como evidência de um site Render publicado: o workflow pode ser concluído sem infraestrutura externa habilitada.
