@@ -109,9 +109,19 @@ await scenario('01 · boot, modo inerte e CSP', async () => {
   for (const u of ['/editor/nao-e-uuid', '/editor/', '/editor/index.html', '/visualizar/abc']) { const q = await newPage(ana, 'redir'); await q.goto(BASE + u); await q.waitForURL(/\/acervo$/, { timeout: 8000 }).catch(() => { }); reds.push(new URL(q.url()).pathname); await q.close(); }
   check('CL-03 /editor/<não-UUID>, /editor/, /editor/index.html e /visualizar/<não-UUID> redirecionam para /acervo (o editor original não abre fora da nuvem) — BE-ED-07', reds.every((x) => x === '/acervo'), reds);
   await reqLog(ana, true);
-  const inert = await newPage(ana, 'inerte'); await inert.goto(BASE + '/__test/inerte'); await sleep(1500);
+  const inert = await newPage(ana, 'inerte');
+  /* As páginas de redirecionamento anteriores ainda podem concluir GET /acervo em
+     segundo plano. Medir só as requisições DESTA página evita falso positivo. */
+  const apiCalls = [];
+  inert.on('request', (req) => {
+    try {
+      const u = new URL(req.url());
+      if (u.pathname.startsWith('/api/')) apiCalls.push({ path: u.pathname + u.search, method: req.method() });
+    } catch { /* requisição inválida será reportada pelos outros testes de rede */ }
+  });
+  await inert.goto(BASE + '/__test/inerte'); await sleep(1500);
   const ci = await inert.evaluate(() => ({ cloud: window.AM_CLOUD, api: window.AMCloud, cover: AMCover.isOpen(), pill: !!document.getElementById('cloudPill') }));
-  const apiCalls = (await reqLog(ana)).filter((r) => r.path.startsWith('/api/'));
+
   check('CL-03b modo inerte: o MESMO HTML fora de /editor/<uuid> se comporta como o editor original (capa aberta, sem pílula, sem AM_CLOUD, sem chamadas à API)', !ci.cloud && !ci.api && ci.cover === true && !ci.pill && apiCalls.length === 0, { ci, apiCalls: apiCalls.map((r) => r.path) });
   await inert.close();
 });
