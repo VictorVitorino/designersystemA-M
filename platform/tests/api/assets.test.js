@@ -300,6 +300,42 @@ describe('upload direto (arquivos grandes) e finalize', () => {
       const au = await audits('asset.upload', sha); assert.equal(au.length, 1); assert.equal(au[0].meta.direct, true);
     } finally { real(); }
   });
+  test('finalize direto repara objeto canônico corrompido com tamanho idêntico e não informa deduplicação falsa', async () => {
+    fakeS3();
+    try {
+      const good = await tiny(186), sha = sha256Hex(good);
+      const corrupt = Buffer.from(good); corrupt[corrupt.length - 1] ^= 0xff;
+      await env.storage.put(sha, corrupt, { mime: 'image/png', verify: false });
+      assert.equal((await env.storage.verify(sha)).ok, false);
+      const up = await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: good.length, mime: 'image/png', kind: 'image' } });
+      assert.equal(up.status, 200, up.text);
+      stage(A, sha, good);
+      const fin = await env.post(A, `/api/assets/${sha}/finalize`);
+      assert.equal(fin.status, 201, fin.text);
+      assert.equal(fin.json.deduplicated, false, 'corrupção reparada exige escrita real');
+      assert.deepEqual((await env.storage.get(sha)).body, good);
+      assert.equal((await env.storage.verify(sha)).ok, true);
+      assert.equal((await rowOf(sha)).status, 'ready');
+      const logs = await audits('asset.upload', sha);
+      assert.equal(logs.at(-1).meta.deduplicated, false);
+    } finally { real(); }
+  });
+  test('finalize direto existente íntegro mantém deduplicação sem regravação', async () => {
+    fakeS3();
+    try {
+      const good = await tiny(187), sha = sha256Hex(good);
+      await env.storage.put(sha, good, { mime: 'image/png' });
+      const prior = env.calls.put;
+      const up = await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: good.length, mime: 'image/png', kind: 'image' } });
+      assert.equal(up.status, 200);
+      stage(A, sha, good);
+      const fin = await env.post(A, `/api/assets/${sha}/finalize`);
+      assert.equal(fin.status, 201, fin.text);
+      assert.equal(fin.json.deduplicated, true);
+      assert.equal(env.calls.put, prior, 'o armazenamento não regravou o arquivo íntegro');
+      assert.equal((await env.storage.verify(sha)).ok, true);
+    } finally { real(); }
+  });
   test('finalize com bytes que NÃO têm o hash declarado: 422, objeto apagado, registro descartado, rejeição auditada', async () => {
     fakeS3();
     try {

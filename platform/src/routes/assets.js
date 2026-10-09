@@ -208,6 +208,15 @@ export function assetsRoutes(deps) {
     if (prom.mismatch) { const e = E.rejected('O arquivo enviado foi alterado depois de conferido.', { reasons: ['preparo_alterado'] }); await discard(e); throw e; }
     if (!prom.promoted && !prom.existed) { await dropStaging(); throw E.conflict('O arquivo ainda não foi enviado ao armazenamento.'); }   // preparo sumiu entre a conferência e a promoção
     if (!(await storage.head(want))) throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');              // nunca "ready" sem objeto
+    // Deduplicação no finalize direto também não pode confiar só em HEAD: a chave
+    // canônica pode existir com conteúdo corrompido do MESMO tamanho. Os bytes do
+    // preparo já passaram por SHA-256 e validação; use-os para reparar a cópia.
+    let deduplicated = prom.existed;
+    if (prom.existed && !(await storage.verify(want)).ok) {
+      await storage.put(want, stg.body, { mime: info.mime, verify: false, overwrite: true });
+      if (!(await storage.verify(want)).ok) throw E.unavailable('Não foi possível conferir o arquivo armazenado.');
+      deduplicated = false;
+    }
     let status;
     try {
       status = await txAsUser(c, async (tx) => {
@@ -218,7 +227,7 @@ export function assetsRoutes(deps) {
         if (quota) await assertQuota(tx, user.id, { sha: want, size: info.size });
         await grantOwnership(tx, user.id, want);
         const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${cur.kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
-        if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true, deduplicated: prom.existed });
+        if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true, deduplicated });
         return m.status;
       });
     } catch (e) {
@@ -228,7 +237,7 @@ export function assetsRoutes(deps) {
       throw e;
     }
     if (status !== 'ready') throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');
-    return c.json(publicInfo({ sha: want, size: info.size, mime: info.mime, width: info.width, height: info.height }, prom.existed), 201);
+    return c.json(publicInfo({ sha: want, size: info.size, mime: info.mime, width: info.width, height: info.height }, deduplicated), 201);
   });
 
   // ------------------------------------------------------------------ leitura
