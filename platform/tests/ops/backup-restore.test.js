@@ -99,9 +99,17 @@ test('espelho de arquivos via backupObjects + status; freshness e retenção', a
   assert.ok(!(await backupFreshness({ target: new FileStore(mkdir('vazio')), keys: null })).ok);
   // retenção: backups falsos antigos (um por dia por 40 dias) → plano; simulação não apaga; --apply apaga só db/ e nunca objects/
   const T = ctx.target; const fake = []; for (let i = 1; i <= 40; i++) { const at = new Date(Date.now() - i * 86400e3 - 3600e3); const name = `canteiro-test-${at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z/, 'Z')}`; fake.push(name); await T.put(dumpKey(name), Buffer.from('x')); await T.put(manifestKey(name), Buffer.from('{}')); }
-  const sim = await pruneBackups({ target: T }); assert.ok(sim.toRemove.length > 0 && sim.removed.length === 0); assert.ok(await T.head(dumpKey(fake[39])));
-  const real = await pruneBackups({ target: T, apply: true }); assert.equal(real.removed.length, sim.toRemove.length);
-  assert.ok(await T.head(dumpKey(first.name)), 'o backup mais recente fica'); assert.equal(await T.head(dumpKey(fake[39])), null);
+  const sim = await pruneBackups({ target: T }); assert.ok(sim.toRemove.length > 0 && sim.removed.length === 0);
+  const removedFake = sim.toRemove.find((name) => fake.includes(name));
+  assert.ok(removedFake, 'ao menos um backup antigo deve ser podado');
+  assert.ok(await T.head(dumpKey(removedFake)), 'simulação não apaga o backup escolhido');
+  // GFS preserva uma cópia de cada mês: o backup mais antigo pode ser mensal e DEVE sobreviver.
+  const keptFake = sim.kept.find(({ name }) => fake.includes(name));
+  const real = await pruneBackups({ target: T, apply: true });
+  assert.deepEqual([...real.removed].sort(), [...sim.toRemove].sort(), 'a execução corresponde ao plano revisado');
+  assert.ok(await T.head(dumpKey(first.name)), 'o backup mais recente fica');
+  assert.equal(await T.head(dumpKey(removedFake)), null, 'o backup planejado para remoção é realmente apagado');
+  if (keptFake) assert.ok(await T.head(dumpKey(keptFake.name)), 'cópia de retenção mensal/semanal sobrevive');
   let n = 0; for await (const o of T.list('objects/')) n++; assert.equal(n, 7, 'a poda nunca toca nos arquivos espelhados');
 });
 
