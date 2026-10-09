@@ -114,3 +114,42 @@ Atualização de checks: PR #4 já obteve sucesso no PostgreSQL17, CodeQL e Chro
 - PRs #19, #21 e #22: CI (incluindo PostgreSQL 17), CodeQL e E2E aprovados nos respectivos SHAs consultados; integração ainda pendente.
 - PR #23: CI, PostgreSQL 17, CodeQL e build Render Free aprovados; E2E falhou na inicialização da pilha por convite ausente. Reexecução do job E2E solicitada, aguardando resultado.
 - Nenhum deploy Render real comprovado. Maturidade técnica permanece **85% estimados** e aceite **1/6**.
+
+## Atualização de execução — 09/10/2026, manhã
+
+> Esta seção é a fotografia mais recente deste relatório; a seção de auditoria acima preserva **a sequência histórica**, inclusive status de checks que depois evoluíram. O percentual anterior de 85% é uma estimativa antiga, sem cálculo objetivo, e **não é indicador de conclusão**.
+
+### Entregas confirmadas na `main`
+
+| PR | Integração confirmada | Portões registrados no head do PR |
+|---|---|---|
+| [#17](https://github.com/VictorVitorino/designersystemA-M/pull/17) | `8db837c` | CI, PostgreSQL 17, CodeQL, Chromium, Build Render Free |
+| [#19](https://github.com/VictorVitorino/designersystemA-M/pull/19) | `16c60f8` | CI, PostgreSQL 17, CodeQL, Chromium |
+| [#22](https://github.com/VictorVitorino/designersystemA-M/pull/22) | `7230196` | CI, PostgreSQL 17, CodeQL, Chromium |
+| [#21](https://github.com/VictorVitorino/designersystemA-M/pull/21) | `c7d748d` | CI, PostgreSQL 17, CodeQL, Chromium |
+| [#23](https://github.com/VictorVitorino/designersystemA-M/pull/23) | `6563100` | CI, PostgreSQL 17, CodeQL, Chromium e Build Render Free |
+
+Essas verificações cobrem a implementação no repositório. **Não são prova de conexão real ao Render/Supabase** nem do uso do editor por dois computadores.
+
+### PRs ainda pendentes
+
+- [#4 — endpoints HTTPS](https://github.com/VictorVitorino/designersystemA-M/pull/4): a primeira versão teve CI cancelado após regressão na fixture de sessão. O commit corretivo `dbf802f` ajustou a fixture para endpoints HTTPS fictícios; só integrar se o conjunto final de CI, PostgreSQL, CodeQL e E2E terminar aprovado. Não considerar resultados de commits anteriores suficientes.
+- [#16 — este relatório](https://github.com/VictorVitorino/designersystemA-M/pull/16): atualização de rastreabilidade e bloqueios de aceitação; não autoriza deploy.
+- [#18](https://github.com/VictorVitorino/designersystemA-M/pull/18) e [#20](https://github.com/VictorVitorino/designersystemA-M/pull/20): encerrados como propostas sobrepostas ao #19; nenhum merge duplicado.
+
+### Portões objetivos do piloto
+
+| Etapa | Estado verificável | Evidência exigida para fechar |
+|---|---|---|
+| 1. Editor, backend, CI, segurança, E2E | Implementada com verificações históricas; **revalidar a main final** | CI, PostgreSQL 17, CodeQL, E2E da exata `main` de liberação |
+| 2. Banco, autenticação, primeiro administrador | **Parcial** | Convite e login real, cadastro público desabilitado, Auth/recovery e bucket S3 demonstrados |
+| 3. Render Free | **Pendente** | URL HTTPS real, `/api/health` e `/api/ready` retornando HTTP 200 |
+| 4. Persistência entre computadores | **Pendente** | Criar, editar, salvar, sair e reabrir no segundo computador com texto e imagens íntegros |
+| 5. Segurança, recuperação, regressões no piloto | **Pendente** | Isolamento entre contas, restauração, import/export e evidências de recuperação |
+| 6. Liberação a convidados | **Pendente** | Critérios anteriores aprovados, operação básica documentada |
+
+**Aceitação formal: 1/6.** Não aumentar progresso com base apenas na quantidade de PRs integrados. Não executar testes de carga sobre o projeto Free sem avaliação de quotas.
+
+### Dependências externas
+
+Implantação Render Free não comprovada; variáveis secretas em ambientes protegidos e configuração real do Supabase Auth/convite continuam necessárias. Até comprovação por URL real, não marcar o MVP como publicado ou homologado.
