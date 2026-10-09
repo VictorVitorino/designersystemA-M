@@ -61,7 +61,7 @@ export function createS3Storage(cfg, opts = {}) {
     driver: 's3',
 
     /** Idempotente (HEAD antes de PUT). Sem ACL, sem metadados além de Content-Type e Cache-Control. */
-    async put(sha, bytes, { mime, verify = true } = {}) {
+    async put(sha, bytes, { mime, verify = true, overwrite = false } = {}) {
       assertSha(sha); assertMime(mime);
       const body = toBuffer(bytes);
       if (body.length === 0) throw new StorageIntegrityError('objeto vazio', 'empty');
@@ -69,7 +69,7 @@ export function createS3Storage(cfg, opts = {}) {
       if (verify && sha256Hex(body) !== sha) throw new StorageIntegrityError('os bytes não correspondem ao sha256 informado', 'sha_mismatch');
       const Key = objectKey(sha);
       const cur = await headRaw(Key);
-      if (cur && cur.size === body.length) return { created: false, size: body.length };
+      if (cur && cur.size === body.length && !overwrite) return { created: false, size: body.length };
       const params = { Bucket, Key, Body: body, ContentType: mime, CacheControl: CACHE_CONTROL, ContentLength: body.length };
       try {
         await client.send(new PutObjectCommand(checksumOn ? { ...params, ChecksumSHA256: b64OfSha(sha) } : params));
