@@ -61,4 +61,11 @@ export async function start(env = process.env) {
   process.once('SIGINT', onSignal);
   return { server, deps, stop };
 }
-if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { console.error(JSON.stringify({ level: 'fatal', msg: String(e.message) })); process.exit(1); });
+/* Mensagens de exceção de drivers (Postgres, Auth, TLS) podem conter URLs com usuário/senha ou tokens.
+   Não imprimir e.message nem e.stack no log público do serviço. Só categorias fixas, sem valores do ambiente. */
+export function startupFailureEvent(error) {
+  const msg = typeof error?.message === 'string' ? error.message : '';
+  const invalidConfig = msg.startsWith('Configuração inválida:') || msg.startsWith('Configuração insegura/incompleta:');
+  return { level: 'fatal', msg: 'startup_failed', kind: invalidConfig ? 'invalid_configuration' : 'runtime_failure' };
+}
+if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { console.error(JSON.stringify(startupFailureEvent(e))); process.exit(1); });

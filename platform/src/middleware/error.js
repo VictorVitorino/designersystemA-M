@@ -2,8 +2,16 @@
 import { HttpError, E } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 
+// Apenas códigos de infraestrutura conhecidos entram no log. Uma regex para texto
+// alfanumérico permitiria vazamento de tokens curtos vindos de provedores externos.
+const SAFE_DRIVER_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+  'EHOSTUNREACH', 'EPIPE', '08001', '08006', '28P01', '3D000',
+  '53300', '57P01', '57P03', '40001', '53100',
+]);
+
 export function onError(deps) {
-  const log = createLogger(deps.config);
+  const log = deps.logger || createLogger(deps.config);
   return (err, c) => {
     const requestId = c.get('requestId');
     let e = err;
@@ -15,8 +23,15 @@ export function onError(deps) {
       else if (e && e.code === '42501') e = E.forbidden();
       else if (e && (e.type === 'entity.too.large' || e.name === 'PayloadTooLargeError')) e = E.tooLarge();
       else if (e instanceof SyntaxError) e = E.badRequest('JSON inválido.');
-      else { log.error('unhandled', { requestId, path: c.req.path, method: c.req.method, err: String(e && e.message || e).slice(0, 300), code: e && e.code, stack: process.env.APP_ENV === 'production' ? undefined : String(e && e.stack || '').split('\n').slice(0, 4).join(' | ') }); e = E.internal(); }
-    } else if (e.status >= 500) log.error('http_error', { requestId, path: c.req.path, code: e.code });
+      else {
+        // Logs do Render (APP_ENV=staging) são persistidos fora do processo. Erros de Postgres/TLS/Auth
+        // podem incluir URLs, senhas e tokens em message/stack; o caminho pedido também é entrada externa.
+        // O requestId permite correlacionar sem registrar valores enviados pelo cliente ou pelo driver.
+        const code = SAFE_DRIVER_CODES.has(e?.code) ? e.code : 'unknown';
+        log.error('unhandled', { requestId, method: c.req.method, code });
+        e = E.internal();
+      }
+    } else if (e.status >= 500) log.error('http_error', { requestId, method: c.req.method, code: e.code });
     const body = { error: { code: e.code, message: e.message, ...(e.details ? { details: e.details } : {}), requestId } };
     return c.json(body, e.status, e.headers || {});
   };
