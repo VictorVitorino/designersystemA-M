@@ -2,8 +2,16 @@
 import { HttpError, E } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 
+// Apenas códigos de infraestrutura conhecidos entram no log. Uma regex para texto
+// alfanumérico permitiria vazamento de tokens curtos vindos de provedores externos.
+const SAFE_DRIVER_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+  'EHOSTUNREACH', 'EPIPE', '08001', '08006', '28P01', '3D000',
+  '53300', '57P01', '57P03', '40001', '53100',
+]);
+
 export function onError(deps) {
-  const log = createLogger(deps.config);
+  const log = deps.logger || createLogger(deps.config);
   return (err, c) => {
     const requestId = c.get('requestId');
     let e = err;
@@ -19,7 +27,7 @@ export function onError(deps) {
         // Logs do Render (APP_ENV=staging) são persistidos fora do processo. Erros de Postgres/TLS/Auth
         // podem incluir URLs, senhas e tokens em message/stack; o caminho pedido também é entrada externa.
         // O requestId permite correlacionar sem registrar valores enviados pelo cliente ou pelo driver.
-        const code = typeof e?.code === 'string' && /^[A-Za-z0-9_]{1,24}$/.test(e.code) ? e.code : 'unknown';
+        const code = SAFE_DRIVER_CODES.has(e?.code) ? e.code : 'unknown';
         log.error('unhandled', { requestId, method: c.req.method, code });
         e = E.internal();
       }
