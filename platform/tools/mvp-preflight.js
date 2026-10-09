@@ -3,7 +3,10 @@
    Não imprime URLs com credenciais nem valores de segredo. */
 import { verifyUrl } from './mvp-smoke.js';
 
-const PROJECT_REF = /^[a-z0-9]{20}$/;
+// Isolamento deliberado: o Blueprint Render do piloto usa SOMENTE o projeto Supabase
+// canteiro-mvp. Não basta conferir que Auth, banco e S3 têm a mesma ref:
+// eles poderiam estar todos apontando para outra iniciativa por engano.
+const CANTEIRO_PROJECT_REF = 'fgdrjxuhzagmvqyhrqlf';
 const POOLER = /^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/;
 
 export function validateMvpRuntime(env) {
@@ -14,7 +17,7 @@ export function validateMvpRuntime(env) {
   try { auth = new URL(env.SUPABASE_URL); db = new URL(env.DATABASE_URL); }
   catch { throw new Error('SUPABASE_URL ou DATABASE_URL ausente/inválida'); }
   const ref = auth.hostname.split('.')[0];
-  if (!PROJECT_REF.test(ref) || auth.origin !== 'https://' + ref + '.supabase.co'
+  if (ref !== CANTEIRO_PROJECT_REF || auth.origin !== 'https://' + ref + '.supabase.co'
       || auth.pathname !== '/' || auth.search || auth.hash || auth.username || auth.password)
     throw new Error('SUPABASE_URL deve apontar ao projeto Supabase exclusivo do MVP');
   // get('sslmode') retorna só a primeira ocorrência. Uma URL com parâmetros
