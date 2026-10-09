@@ -39,10 +39,14 @@ test('Render Blueprint MVP Free não define plano pago nem credenciais em texto'
   const yaml = fs.readFileSync(path.join(root, 'render.yaml'), 'utf8');
   assert.match(yaml, /plan: free/);
   assert.match(yaml, /autoDeployTrigger: off/);
+  assert.match(yaml, /key: APP_ORIGIN\s*\n\s*fromService:\s*\n\s*name: canteiro-mvp-piloto\s*\n\s*type: web\s*\n\s*envVarKey: RENDER_EXTERNAL_URL/, 'Render injeta o endereço HTTPS do próprio serviço');
+  assert.doesNotMatch(yaml, /key: APP_ORIGIN\s*\n\s*sync: false/);
+  const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+  assert.match(readme, /render\.com\/deploy\?repo=https:\/\/github\.com\/VictorVitorino\/designersystemA-M/);
   assert.match(yaml, /STORAGE_DRIVER\s*\n\s*value: s3/);
   assert.match(yaml, /DATABASE_SSL\s*\n\s*value: require/);
   assert.doesNotMatch(yaml, /plan: (?:starter|pro|standard|business)/);
-  for (const name of ['APP_ORIGIN','DATABASE_URL','SUPABASE_SERVICE_ROLE_KEY','S3_ACCESS_KEY_ID','S3_SECRET_ACCESS_KEY']) {
+  for (const name of ['DATABASE_URL','SUPABASE_SERVICE_ROLE_KEY','S3_ACCESS_KEY_ID','S3_SECRET_ACCESS_KEY']) {
     assert.match(yaml, new RegExp('key: ' + name + '\\n\\s*sync: false'));
   }
 });

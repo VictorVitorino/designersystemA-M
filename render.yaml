@@ -33,7 +33,10 @@ services:
       - key: CSRF_SECRET
         generateValue: true
       - key: APP_ORIGIN
-        sync: false
+        fromService:
+          name: canteiro-mvp-piloto
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL

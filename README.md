@@ -34,3 +34,13 @@ O build não faz nenhuma chamada de rede.
 ## Publicar
 
 Só o build que passou no portão: `cp studio/AM-Studio-Editor.html AM-Studio-Editor.html && cp studio/AM-Studio-Editor.html Canteiro-AM.html`.
+
+## MVP na nuvem (piloto, gratuito)
+
+O editor original continua disponível como arquivo HTML. Para **testar login e salvamento entre computadores**, a plataforma completa usa Render Free (site + API) e um projeto separado do Supabase Free (banco + autenticação + arquivos).
+
+[![Implantar no Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/VictorVitorino/designersystemA-M)
+
+O botão **não publica automaticamente**: você acessa o Render, confere o único serviço `plan: free` e preenche as credenciais do projeto **exclusivo** `canteiro-mvp` como variáveis seguras. O endereço HTTPS é preenchido automaticamente pelo Render. **Não cole senhas ou chaves secretas no GitHub/ChatGPT.**
+
+**Antes de convidar usuários:** conclua as etapas e os testes em [Guia de implantação do MVP](platform/docs/MVP-GRATUITO.md), incluindo `/api/ready`, acesso anônimo bloqueado e reabertura em outro computador. A hospedagem gratuita tem suspensão por inatividade e não oferece SLA de produção.
