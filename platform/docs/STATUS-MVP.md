@@ -13,7 +13,7 @@
 | Testes completos de navegador / E2E | ✅ aprovados na main | [E2E da main 37856550988](https://github.com/VictorVitorino/designersystemA-M/actions/runs/37856550988) |
 | PR #2: infraestrutura gratuita Render + Supabase | ✅ integrado na main | [PR #2](https://github.com/VictorVitorino/designersystemA-M/pull/2) com CI e E2E aprovados |
 | PR #5: convite seguro de administrador + correção de Esc | ✅ integrado com CI, segurança e E2E aprovados | [PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5) |
-| Banco Supabase dedicado Canteiro | ✅ projeto criado em organização Free; 9 migrações de app aplicadas e verificadas | Supabase **canteiro-mvp**, região `sa-east-1`, banco PostgreSQL 17, 15 tabelas do schema `app` |
+| Banco Supabase dedicado Canteiro | ✅ projeto criado em organização Free; 9 migrações de app aplicadas e verificadas | Supabase **canteiro-mvp**, região `sa-east-1`, banco PostgreSQL 17, 14 tabelas com RLS e 1 view (`app.directory`) no schema `app` |
 | Storage Supabase privado | ✅ criado, sem arquivos | Bucket `canteiro-mvp-files`, **private**, limite por arquivo de 50 MB; acesso público e políticas a validar no piloto |
 | Primeiro administrador/convite real | ⏳ ainda não enviado | Workflow no GitHub existe, mas requer desabilitar cadastro aberto e configurar credenciais por canal seguro |
 | Render Free publicado | ⏳ não configurado | Botão de implantação na README e Blueprint Free aprovados, mas nenhuma conta Render conectada ou URL validada |
@@ -82,6 +82,7 @@ Este registro complementa a fotografia anterior; **não altera os critérios de 
 
 - Projeto **`canteiro-mvp`**, região **`sa-east-1`**, estado **`ACTIVE_HEALTHY`** e PostgreSQL **17**.
 - Migrações de papéis e aplicação `0001`–`0009` presentes.
+- Conferência por catálogo PostgreSQL: **14/14 tabelas** do schema `app` têm RLS ligada, **0 sem RLS**; os papéis `anon` e `authenticated` não têm `USAGE` no schema. Existe também **1 view** (`app.directory`), não uma décima quinta tabela.
 - Bucket `canteiro-mvp-files` consultado no banco: **privado**, 50 MiB por arquivo e **zero objetos** no momento da inspeção. Esse resultado não substitui teste de upload/leitura real no S3.
 - Auditoria de segurança: nenhum WARN/ERROR; um INFO intencional `rls_enabled_no_policy` na tabela `public.schema_migrations` (RLS deny-all).
 - O estado saudável do projeto **não comprova** conexão real de login, upload ou salvamento via Render.
