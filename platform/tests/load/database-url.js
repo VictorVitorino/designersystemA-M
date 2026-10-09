@@ -8,10 +8,11 @@ export function loadAdminUrl(env, dbName) {
   if (!/^canteiro_t_[a-z0-9_]+$/.test(dbName)) {
     throw new Error('ensaio de carga exige banco canteiro_t_* isolado');
   }
-  if (env.E2E_EXTERNAL_POSTGRES === '1') {
-    if (!env.DATABASE_ADMIN_URL) throw new Error('runner exige DATABASE_ADMIN_URL local');
-    // Valida protocolo, host de loopback e nome do banco ANTES de qualquer acesso.
-    return externalTestDatabaseUrls(env.DATABASE_ADMIN_URL, dbName).targetUrl;
+  // Em qualquer execução (CI ou local), o ensaio recria bancos e grava dados
+  // fictícios. Uma DATABASE_ADMIN_URL remota NÃO pode chegar ao dev.js.
+  if (env.E2E_EXTERNAL_POSTGRES === '1' && !env.DATABASE_ADMIN_URL) {
+    throw new Error('runner exige DATABASE_ADMIN_URL local');
   }
-  return env.DATABASE_ADMIN_URL || `postgres://postgres:postgres@127.0.0.1:5432/${dbName}`;
+  const localDefault = `postgres://postgres:postgres@127.0.0.1:5432/${dbName}`;
+  return externalTestDatabaseUrls(env.DATABASE_ADMIN_URL || localDefault, dbName).targetUrl;
 }
