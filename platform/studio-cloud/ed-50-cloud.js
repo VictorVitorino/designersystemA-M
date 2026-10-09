@@ -808,7 +808,13 @@
       return confirmDialog('Restaurar a versão “' + (v.label || KIND[v.kind] || v.no) + '”?', 'A apresentação volta ao estado de ' + when(v.createdAt) + '. O estado atual fica guardado no histórico, então dá para voltar atrás.', 'Restaurar', 'Cancelar').then(async function (ok) {
         if (!ok) { historyDialog(); return true; }
         try {
-          await saveNow({ force: true });
+          var saved = await saveNow({ force: true });
+          // Restaurar substitui o deck atual: não descartar alterações locais
+          // por acidente se a gravação prévia falhou ou recebeu nova edição.
+          if (!saved || A.dirty) {
+            toast('Restauração cancelada: suas alterações ainda não foram salvas na nuvem.');
+            return true;
+          }
           await jreq('POST', '/presentations/' + ID + '/versions/' + v.no + '/restore', { baseRev: A.rev });
           var p = await loadPresentation(), deck = await hydrate(p.content, false);
           A.rev = p.rev; A.lastContent = p.content; applyDeck(deck); A.dirty = false; A.seq++; A.rej = null; await pendingDel(); A.savedAt = new Date(); setStatus('saved'); toast('Versão restaurada.');
@@ -819,7 +825,16 @@
   }
   async function makeCopy() {
     try {
-      if (!VIEW) { try { S.flush(); } catch (e) { } await saveNow({ force: true }); }
+      if (!VIEW) {
+        endTextEdit();
+        var saved = await saveNow({ force: true });
+        // O servidor duplica a versão na nuvem, não o deck desta aba. Nunca
+        // abrir uma cópia desatualizada quando ainda há alterações por enviar.
+        if (!saved || A.dirty) {
+          toast('Cópia não criada: suas alterações ainda não foram salvas na nuvem. Tente de novo quando aparecer “Salvo na nuvem”.');
+          return;
+        }
+      }
       var dup = await jreq('POST', '/presentations/' + ID + '/duplicate', {});
       toast('Cópia criada. Abrindo…'); goEditor(dup.id);
     } catch (e) { toast('Não foi possível criar a cópia: ' + (e.message || 'tente de novo') + '.'); }

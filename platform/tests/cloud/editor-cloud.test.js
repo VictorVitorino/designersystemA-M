@@ -1045,6 +1045,67 @@ await scenario('38 · limite de 4 MB medido em bytes UTF-8: texto acentuado acim
   await p.close();
 });
 
+await scenario('39 · cópia não descarta edição pendente quando o salvamento falha', async () => {
+  const s = await seed(ana, 'ana', 'Cópia pendente');
+  const p = await openEditor(ana, s.id, 'copy-guard');
+  const pattern = '**/api/presentations/**/content';
+  await p.route(pattern, (r) => r.request().method() === 'PUT'
+    ? r.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Servidor temporariamente indisponível"}}' })
+    : r.continue());
+  await typeNewText(p, 'Texto local que não pode sumir');
+  await reqLog(ana, true);
+  await p.click('#cloudPill'); await p.click('.cl-mi[data-id=copy]');
+  await until(async () => (await pillState(p)) === 'offline', 8000);
+  const requests = await reqLog(ana);
+  const duplicates = requests.filter((r) => r.method === 'POST' && r.path === '/api/presentations/' + s.id + '/duplicate');
+  const kept = textsOf(await deckOf(p)).includes('Texto local que não pode sumir');
+  const warn = (await toastsOf(p)).some((t) => /Cópia não criada: suas alterações ainda não foram salvas/.test(t));
+  check('CL-158 com PUT 503, Criar cópia não chama POST duplicate, não navega, mantém o texto local e explica o motivo',
+    duplicates.length === 0 && p.url().endsWith('/editor/' + s.id) && kept && warn,
+    { duplicates: duplicates.length, url: p.url(), kept, warn, state: await pillState(p) });
+  await p.unroute(pattern);
+  await waitSaved(p, 30000);
+  check('CL-159 após reconectar, a mesma edição fica salva no servidor e a página continua aberta',
+    JSON.stringify((await serverPres(ana, s.id)).content).includes('Texto local que não pode sumir') && p.url().endsWith('/editor/' + s.id));
+  await p.close();
+});
+
+await scenario('40 · restauração não substitui edição pendente se o salvamento falhar', async () => {
+  const s = await seed(ana, 'ana', 'Restauração pendente');
+  const p = await openEditor(ana, s.id, 'restore-guard');
+  await typeNewText(p, 'Conteúdo salvo na nuvem');
+  await waitSaved(p);
+  await p.keyboard.press('Control+s');
+  await until(async () => (await serverPres(ana, s.id)).versions.some((v) => v.kind === 'manual'), 9000);
+  const before = await serverPres(ana, s.id);
+  const pattern = '**/api/presentations/**/content';
+  await p.route(pattern, (r) => r.request().method() === 'PUT'
+    ? r.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"unavailable","message":"Servidor temporariamente indisponível"}}' })
+    : r.continue());
+  await typeNewText(p, 'Rascunho que precisa sobreviver');
+  await reqLog(ana, true);
+  await p.click('#cloudPill'); await p.click('.cl-mi[data-id=hist]');
+  await p.waitForSelector('.cl-vi', { timeout: 8000 });
+  const manual = p.locator('.cl-vi').filter({ hasText: 'Manual' }).first();
+  await manual.click();
+  await p.click('[data-act=vrs]');
+  await p.waitForSelector('.cl-dlg .cl-b.pri', { timeout: 8000 });
+  await p.click('.cl-dlg .cl-b.pri');
+  await until(async () => (await pillState(p)) === 'offline', 8000);
+  const requests = await reqLog(ana);
+  const restores = requests.filter((r) => r.method === 'POST' && /\/versions\/\d+\/restore$/.test(r.path));
+  const after = await serverPres(ana, s.id);
+  const kept = textsOf(await deckOf(p)).includes('Rascunho que precisa sobreviver');
+  check('CL-160 PUT 503 impede POST restore, preserva a edição local e não altera a revisão na nuvem',
+    restores.length === 0 && after.rev === before.rev && kept && p.url().endsWith('/editor/' + s.id),
+    { restores: restores.length, before: before.rev, after: after.rev, kept });
+  await p.unroute(pattern);
+  await waitSaved(p, 30000);
+  check('CL-161 recuperação automática envia o rascunho sem restauração ou perda de dados',
+    JSON.stringify((await serverPres(ana, s.id)).content).includes('Rascunho que precisa sobreviver'));
+  await p.close();
+});
+
 /* ---------- fim: CSP e erros globais ---------- */
 check('CL-87 ZERO violações de CSP em todo o roteiro (editor, player, exportações, importação PPTX/PDF, histórico, conflito, visualizar) — ' + cspViolations.length, cspViolations.length === 0, cspViolations.slice(0, 5));
 check('CL-94 rede: o editor só fala com a própria origem e com as fontes do Google (' + [...hosts].join(', ') + ')', [...hosts].every((h) => h === 'localhost:' + PORT || h === 'fonts.googleapis.com' || h === 'fonts.gstatic.com'), [...hosts]);
