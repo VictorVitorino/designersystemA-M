@@ -170,15 +170,53 @@ describe('GET /api/assets/:sha256 — leitura', () => {
     await env.sys((tx) => tx`update app.assets set status = 'ready' where sha256 = ${x}`);
     const r = await env.get(A, `/api/assets/${x}`); assert.equal(r.status, 404); assert.ok(!/ENOENT|\/tmp|canteiro-a3/.test(r.text));
   });
+  test('metadado ready com tamanho diferente do armazenamento não devolve 200 nem bytes parciais', async () => {
+    const bytes = await tiny(123), fileSha = sha256Hex(bytes);
+    assert.equal((await putRaw(A, fileSha, bytes)).status, 201);
+    await env.sys((tx) => tx`update app.assets set size_bytes = ${bytes.length + 1} where sha256 = ${fileSha}`);
+    try {
+      const r = await env.get(A, `/api/assets/${fileSha}`);
+      assert.equal(r.status, 503, 'inconsistência real deve interromper a entrega');
+      assert.equal(r.json.error.code, 'unavailable');
+      assert.ok(!r.buffer.equals(bytes), 'nenhum corpo de imagem é apresentado como válido');
+    } finally {
+      await env.sys((tx) => tx`update app.assets set size_bytes = ${bytes.length} where sha256 = ${fileSha}`);
+    }
+    assert.equal((await env.get(A, `/api/assets/${fileSha}`)).status, 200, 'a leitura se recupera após corrigir o metadado');
+  });
+  test('URL assinada não é devolvida se o objeto S3 está ausente ou difere dos metadados', async () => {
+    const fileSha = sha256Hex(Buffer.from('metadata-inconsistente-' + Date.now()));
+    const expected = 9 * 1024 * 1024;
+    await env.sys((tx) => tx`insert into app.assets(sha256, size_bytes, mime, kind, status, uploaded_by)
+      values (${fileSha}, ${expected}, 'application/pdf', 'attachment', 'ready', ${A.id})`);
+    env.hooks.signedGetUrl = async () => 'https://bucket.example/asset?token=ficticio';
+    try {
+      const absent = await env.get(A, `/api/assets/${fileSha}`);
+      assert.equal(absent.status, 503);
+      assert.equal(absent.headers.get('location'), null);
+      env.hooks.head = async () => ({ size: expected - 1 });
+      const mismatched = await env.get(A, `/api/assets/${fileSha}`);
+      assert.equal(mismatched.status, 503);
+      assert.equal(mismatched.headers.get('location'), null);
+      env.hooks.head = async () => ({ size: expected });
+      const consistent = await env.get(A, `/api/assets/${fileSha}`);
+      assert.equal(consistent.status, 302);
+      assert.equal(consistent.headers.get('cache-control'), 'private, no-store');
+    } finally {
+      delete env.hooks.head;
+      delete env.hooks.signedGetUrl;
+    }
+  });
   test('arquivo grande (> 8 MB) com URL assinada → 302 sem cache; sem URL assinada (driver local) transmite os bytes', async () => {
     const x = sha256Hex(Buffer.from('grande-' + Date.now())); const small = await tiny(122); const sm = sha256Hex(small);
     await env.sys(async (tx) => { await tx`insert into app.assets(sha256, size_bytes, mime, kind, status, uploaded_by) values (${x}, ${9 * 1024 * 1024}, 'application/pdf', 'attachment', 'ready', ${A.id})`; });
     env.hooks.signedGetUrl = async (s, o) => `https://bucket.example/${s}?sig=1&disp=${o.disposition}`;
+    env.hooks.head = async (s) => s === x ? { size: 9 * 1024 * 1024 } : null;
     try {
       const r = await env.get(A, `/api/assets/${x}`); assert.equal(r.status, 302); assert.equal(r.headers.get('location'), `https://bucket.example/${x}?sig=1&disp=attachment`); assert.equal(r.headers.get('cache-control'), 'private, no-store');
       assert.equal((await env.get(C, `/api/assets/${x}`)).status, 404, 'sem permissão não há redirecionamento');
       await putRaw(A, sm, small); assert.equal((await env.get(A, `/api/assets/${sm}`)).status, 200, 'pequeno continua transmitido pela API');
-    } finally { delete env.hooks.signedGetUrl; }
+    } finally { delete env.hooks.head; delete env.hooks.signedGetUrl; }
   });
 });
 

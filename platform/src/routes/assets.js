@@ -249,9 +249,21 @@ export function assetsRoutes(deps) {
     const inm = c.req.header('if-none-match');
     if (inm && inm.split(',').some((t) => t.trim().replace(/^W\//, '') === `"${v}"`)) return c.body(null, 304, headers);
     const size = Number(a.size_bytes);
+    const ensureStoredSize = (actual) => {
+      if (actual && Number.isSafeInteger(actual.size) && actual.size === size) return;
+      // Metadado "ready" sem objeto íntegro não pode ser entregue com 200/302:
+      // isso mascararia conteúdo perdido ou um arquivo parcialmente gravado.
+      log.error('asset_size_mismatch', { sha: v, expectedSize: size, actualSize: actual?.size ?? null });
+      throw E.unavailable('Este arquivo está temporariamente indisponível. Tente novamente mais tarde.');
+    };
     if (size > streamLimit) {
       const url = await storage.signedGetUrl(v, { ttlS: 300, disposition: image ? 'inline' : 'attachment', filename: image ? undefined : `${v.slice(0, 16)}.${EXT[a.mime] || 'bin'}`, mime: a.mime });
-      if (url) return c.body(null, 302, { Location: url, 'Cache-Control': 'private, no-store' });   // URL expira em 5 min: nunca cacheie o redirecionamento
+      if (url) {
+        // URLs assinadas fazem o navegador contornar a API. Conferir o objeto
+        // antes do 302 evita redirecionar para um arquivo ausente ou truncado.
+        ensureStoredSize(await storage.head(v));
+        return c.body(null, 302, { Location: url, 'Cache-Control': 'private, no-store' });
+      }
       if (config.onVercel) {
         log.warn('asset_too_large_for_function', { sha: v, size });
         throw E.tooLarge(`Este arquivo tem mais de ${fmtMb(streamLimit)} e não pode ser entregue por este servidor sem um link temporário do armazenamento. Fale com um administrador.`);
@@ -259,8 +271,13 @@ export function assetsRoutes(deps) {
     }
     const obj = await storage.getStream(v);
     if (!obj) { log.error('asset_object_missing', { sha: v }); throw E.notFound(); }                // metadado sem objeto: incidente de integridade (alerta em log)
-    if (obj.size !== size) log.warn('asset_size_mismatch', { sha: v, db: size, storage: obj.size });
-    return c.body(obj.stream, 200, { ...headers, 'Content-Length': String(obj.size) });
+    if (obj.size !== size) {
+      // Uma stream já foi aberta no S3/disco. Cancelá-la evita deixar um socket
+      // ocupado quando a resposta precisa falhar antes de enviar o primeiro byte.
+      await obj.stream.cancel().catch(() => {});
+      ensureStoredSize(obj);
+    }
+    return c.body(obj.stream, 200, { ...headers, 'Content-Length': String(size) });
   });
 
   return r;
