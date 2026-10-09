@@ -1,6 +1,6 @@
 # Status do MVP gratuito — Canteiro / AM Studio
 
-**Referência:** 08/10/2026. **Objetivo:** piloto pequeno, em serviços gratuitos, sem alterar o editor standalone.
+**Referência:** 09/10/2026. **Objetivo:** piloto pequeno, em serviços gratuitos, sem alterar o editor standalone.
 
 > **Maturidade técnica estimada: cerca de 85%** — leitura gerencial, **não** medição objetiva por tarefas. **Etapas de aceitação concluídas: 1/6**. O MVP ainda não está publicado em hospedagem real.
 
@@ -13,10 +13,10 @@
 | Testes completos de navegador / E2E | ✅ aprovados na main | [E2E da main 37856550988](https://github.com/VictorVitorino/designersystemA-M/actions/runs/37856550988) |
 | PR #2: infraestrutura gratuita Render + Supabase | ✅ integrado na main | [PR #2](https://github.com/VictorVitorino/designersystemA-M/pull/2) com CI e E2E aprovados |
 | PR #5: convite seguro de administrador + correção de Esc | ✅ integrado com CI, segurança e E2E aprovados | [PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5) |
-| Banco Supabase dedicado Canteiro | ✅ projeto criado em organização Free; 8 migrações de app aplicadas e verificadas | Supabase **canteiro-mvp**, região `sa-east-1`, banco PostgreSQL 17, 15 tabelas do schema `app` |
+| Banco Supabase dedicado Canteiro | ✅ projeto criado em organização Free; 9 migrações de app aplicadas e verificadas | Supabase **canteiro-mvp**, região `sa-east-1`, banco PostgreSQL 17, 15 tabelas do schema `app` |
 | Storage Supabase privado | ✅ criado, sem arquivos | Bucket `canteiro-mvp-files`, **private**, limite por arquivo de 50 MB; acesso público e políticas a validar no piloto |
 | Primeiro administrador/convite real | ⏳ ainda não enviado | Workflow no GitHub existe, mas requer desabilitar cadastro aberto e configurar credenciais por canal seguro |
-| Render Free publicado | ⏳ não configurado | Infraestrutura está preparada, sem serviço Render conectado ou URL pública |
+| Render Free publicado | ⏳ não configurado | Botão de implantação na README e Blueprint Free aprovados, mas nenhuma conta Render conectada ou URL validada |
 | Login/salvamento online com serviços reais | ⏳ não homologado | E2E prova o fluxo com ambiente de teste, não Render/Supabase reais |
 | Custo contratado | ✅ R$ 0 adicional | Nenhuma nova contratação realizada nesta atividade |
 
@@ -42,9 +42,12 @@
 - Integrados à main hospedagem gratuita, migrações controladas, testes HTTP externos e inicializador Windows ([PR #2](https://github.com/VictorVitorino/designersystemA-M/pull/2)).
 - Integrado verificador de segurança pré-inicialização no Render, isolamento de banco/Auth/Storage e bloqueio a acesso anônimo às apresentações ([PR #6](https://github.com/VictorVitorino/designersystemA-M/pull/6)).
 - Integrado fluxo manual seguro e testes do convite do primeiro administrador, com correção do painel de comentários ([PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5)).
-- Criado projeto exclusivo Supabase Free `canteiro-mvp` no Brasil após cotação de **US$ 0/mês**; aplicadas migrações de `0001` a `0008`, com históricos SHA-256, RLS e políticas; criado bucket privado `canteiro-mvp-files`.
+- Criado projeto exclusivo Supabase Free `canteiro-mvp` no Brasil após cotação de **US$ 0/mês**; aplicadas migrações de `0001` a `0009`, com históricos SHA-256, RLS e políticas; criado bucket privado `canteiro-mvp-files`.
 - Auditoria Supabase: **0 avisos WARN** depois de aplicar a migração 0008 ([PR #7](https://github.com/VictorVitorino/designersystemA-M/pull/7) aprovado e integrado). Permanece 1 INFO intencional: `public.schema_migrations` usa RLS deny-all sem políticas para não expor o histórico de migrações.
-- A correção de HTTPS dos provedores externos está em validação no [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4).
+- Integrado [PR #8](https://github.com/VictorVitorino/designersystemA-M/pull/8): dez índices de FK aplicados ao Supabase real e verificados; o Performance Advisor não aponta mais chaves estrangeiras sem índice. Restam apenas avisos INFO de índices ainda não usados em banco vazio.
+- Integrado [PR #9](https://github.com/VictorVitorino/designersystemA-M/pull/9): botão oficial para publicar no Render Free e URL APP_ORIGIN automática (sem copiar manualmente).
+- A correção de HTTPS dos provedores externos permanece em validação no [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4), com CodeQL e E2E anteriores aprovados e nova CI em andamento.
+- O próximo bloqueio externo é configurar uma conta **Render Free** com variáveis seguras, desabilitar cadastro público no Supabase e convidar o primeiro administrador. **Não há endereço do site publicado.**
 
 ## Limites e proteção de custo
 
