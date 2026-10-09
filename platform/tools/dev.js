@@ -14,6 +14,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { localDevAdminUrl } from './dev-admin-url.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.join(HERE, '..');
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith('--') ? [a.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : true] : []).filter(Boolean));
@@ -29,7 +30,8 @@ secrets.csrf ||= crypto.randomBytes(32).toString('base64url'); secrets.apiPw ||=
 fs.writeFileSync(secretsFile, JSON.stringify(secrets), { mode: 0o600 });
 
 const EXTERNAL_TEST_DB = process.env.E2E_EXTERNAL_POSTGRES === '1';
-let ADMIN_URL = process.env.DATABASE_ADMIN_URL || `postgres://postgres:postgres@127.0.0.1:5432/${DB}`;
+// Nunca usar uma URL administrativa remota em migrações/reinicializações locais.
+let ADMIN_URL = EXTERNAL_TEST_DB ? process.env.DATABASE_ADMIN_URL : localDevAdminUrl(process.env.DATABASE_ADMIN_URL, DB);
 function step(msg) { console.log('\n▶ ' + msg); }
 
 /* 1. banco */
