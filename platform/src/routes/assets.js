@@ -198,12 +198,25 @@ export function assetsRoutes(deps) {
     if (prom.mismatch) { const e = E.rejected('O arquivo enviado foi alterado depois de conferido.', { reasons: ['preparo_alterado'] }); await discard(e); throw e; }
     if (!prom.promoted && !prom.existed) { await dropStaging(); throw E.conflict('O arquivo ainda não foi enviado ao armazenamento.'); }   // preparo sumiu entre a conferência e a promoção
     if (!(await storage.head(want))) throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');              // nunca "ready" sem objeto
-    const status = await txAsUser(c, async (tx) => {
-      await grantOwnership(tx, user.id, want);
-      const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${cur.kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
-      if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true, deduplicated: prom.existed });
-      return m.status;
-    });
+    let status;
+    try {
+      status = await txAsUser(c, async (tx) => {
+        // Revalidar a cota na MESMA transação da promoção para ready: dois finalize
+        // paralelos podem passar pela verificação inicial antes que o outro
+        // atualize size_bytes (especialmente com tamanho declarado menor).
+        // O advisory lock de assertQuota serializa a soma e o mark_ready.
+        if (quota) await assertQuota(tx, user.id, { sha: want, size: info.size });
+        await grantOwnership(tx, user.id, want);
+        const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${cur.kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
+        if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true, deduplicated: prom.existed });
+        return m.status;
+      });
+    } catch (e) {
+      // Se a cota foi consumida por outro finalize, não deixar pendência
+      // no banco. O objeto canônico sem referência é coletado pelo GC.
+      if (e && e.code === 'quota_exceeded') await discard(e, { kind: cur.kind });
+      throw e;
+    }
     if (status !== 'ready') throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');
     return c.json(publicInfo({ sha: want, size: info.size, mime: info.mime, width: info.width, height: info.height }, prom.existed), 201);
   });
