@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
-import { ToolError, buildRedactor, parseArgs, fmtBytes, fmtMs, runCli, isMain, mapLimit } from './lib/common.js';
+import { ToolError, buildRedactor, safeEvidenceFailure, parseArgs, fmtBytes, fmtMs, runCli, isMain, mapLimit } from './lib/common.js';
 import { keyringFromEnv, createDecryptStream } from './lib/backup-crypto.js';
 import { openTarget } from './lib/targets.js';
 import { connect, isLocalHost, findPgBin, pgToolVersion } from './lib/pg.js';
@@ -57,7 +57,7 @@ export async function conferirArquivos({ target, keys, items, concorrencia = 6 }
       await pipeline(await target.get(chave), createDecryptStream(keys), v, async function* (src) { for await (const c of src) n += c.length; });
       rep.bytes += n;
       if (it.size != null && Number(it.size) !== n) rep.sizeMismatch.push(it.sha256); else rep.ok++;
-    } catch (e) { if (e?.code === 'hash_mismatch') rep.corrupt.push(it.sha256); else rep.errors.push({ sha: it.sha256, error: String(e?.message || e).slice(0, 160) }); }
+    } catch (e) { if (e?.code === 'hash_mismatch') rep.corrupt.push(it.sha256); else rep.errors.push({ sha: it.sha256, error: safeEvidenceFailure(e) }); }
   });
   rep.pass = !rep.missing.length && !rep.corrupt.length && !rep.sizeMismatch.length && !rep.errors.length;
   return rep;
@@ -101,7 +101,7 @@ export async function ensaiar({ env = process.env, target, keys, name = null, to
     if (au.present && !au.ok) rep.problemas.push(...au.problems.map((p) => `Auth: ${p}`));
     if (!au.present) rep.avisos = [...(rep.avisos || []), 'o backup não tem os dados do Supabase Auth (BACKUP_INCLUDE_AUTH=0): perder o projeto Supabase exigiria convidar todos de novo'];
   } catch (e) {
-    rep.problemas.push(`ensaio interrompido: ${String(e?.message || e).slice(0, 400)}`); rep.erro = String(e?.message || e).slice(0, 400);
+    rep.problemas.push(`ensaio interrompido: ${safeEvidenceFailure(e)}`); rep.erro = safeEvidenceFailure(e);
   }
   rep.duracaoMs = Date.now() - t0; rep.terminadoEm = new Date().toISOString(); rep.ok = !rep.problemas.length;
   return rep;
