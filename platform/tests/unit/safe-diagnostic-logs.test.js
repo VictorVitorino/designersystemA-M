@@ -32,6 +32,7 @@ test('SSO falhando com código externo arbitrário não registra segredo ou text
   const messages = [];
   const config = loadConfig({
     APP_ENV: 'test', SSO_ENABLED: 'true', SSO_DOMAINS: 'am.test',
+    SUPABASE_URL: 'http://localhost:9999', SUPABASE_ANON_KEY: 'test-anon-key-no-secret',
     CSRF_SECRET: 'f'.repeat(48), LOG_LEVEL: 'silent',
   });
   const deps = {
