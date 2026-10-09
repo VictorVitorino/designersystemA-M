@@ -14,5 +14,15 @@ export function loadAdminUrl(env, dbName) {
     throw new Error('runner exige DATABASE_ADMIN_URL local');
   }
   const localDefault = `postgres://postgres:postgres@127.0.0.1:5432/${dbName}`;
-  return externalTestDatabaseUrls(env.DATABASE_ADMIN_URL || localDefault, dbName).targetUrl;
+  const supplied = env.DATABASE_ADMIN_URL;
+  const targetUrl = externalTestDatabaseUrls(supplied || localDefault, dbName).targetUrl;
+  if (env.E2E_EXTERNAL_POSTGRES !== '1' && supplied) {
+    // O dev.js local aplica migrações no URL recebido sem substituí-lo.
+    // Exigir o banco correto antes de iniciar processos (mesma regra do dev local).
+    const configured = new URL(supplied);
+    if (configured.pathname !== '/' + dbName || configured.hash) {
+      throw new Error('carga local exige DATABASE_ADMIN_URL com banco descartável de mesmo nome');
+    }
+  }
+  return targetUrl;
 }
