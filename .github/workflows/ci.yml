@@ -118,12 +118,17 @@ jobs:
           DATABASE_ADMIN_URL: ''     # só a varredura do build; as verificações de banco rodam nos deploys
         run: node tools/verify-deploy.js --scan-dist dist/public
 
-      - name: Auditoria de dependências (relatório; não bloqueia)
-        continue-on-error: true
+      - name: Auditoria de dependências de produção (bloqueia alta/crítica)
         run: |
+          # O JSON é capturado mesmo quando npm audit sinaliza achados.
+          # O verificador define o portão por severidade e falha se não houver relatório íntegro.
           npm audit --omit=dev --json > "$RUNNER_TEMP/npm-audit.json" || true
-          npm audit --omit=dev || true
-          node -e 'const r=require(process.argv[1]);const v=(r.metadata&&r.metadata.vulnerabilities)||{};console.log("## npm audit (produção)\n\n"+Object.entries(v).map(([k,n])=>"- "+k+": "+n).join("\n"))' "$RUNNER_TEMP/npm-audit.json" >> "$GITHUB_STEP_SUMMARY" || true
+          set +e
+          node tools/enforce-audit.js "$RUNNER_TEMP/npm-audit.json" > "$RUNNER_TEMP/npm-audit-summary.md"
+          audit_exit=$?
+          set -e
+          cat "$RUNNER_TEMP/npm-audit-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$audit_exit"
 
       - name: Guardar relatórios (sempre) e saídas de falha
         if: always()
