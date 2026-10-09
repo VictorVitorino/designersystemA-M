@@ -27,6 +27,19 @@ test('PG17 de runner recusa Supabase remoto, URL ausente e banco fora do padrão
   }
 });
 
+test('modo local recusa endereços externos antes de iniciar o ensaio de carga', () => {
+  for (const address of [
+    'postgres://db.example.invalid:5432/postgres',
+    'postgres://10.23.4.5:5432/postgres',
+    'postgres://192.168.1.10:5432/postgres',
+    'https://127.0.0.1:5432/postgres',
+  ]) {
+    assert.throws(() => loadAdminUrl({ DATABASE_ADMIN_URL: address }, 'canteiro_t_load'), /loopback/);
+  }
+  const local = loadAdminUrl({ DATABASE_ADMIN_URL: maintenance }, 'canteiro_t_load');
+  assert.equal(new URL(local).pathname, '/canteiro_t_load');
+});
+
 test('execução local mantém fallback exclusivo ao banco de ensaio', () => {
   const selected = loadAdminUrl({}, 'canteiro_t_load');
   assert.equal(new URL(selected).hostname, '127.0.0.1');
