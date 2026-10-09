@@ -58,14 +58,18 @@ test('segurança dos workflows: ações fixadas por SHA, sem "latest", permissõ
   }
 });
 
-test('ci.yml: Postgres 16 e 17 do Supabase, Node 22, migrate, testes, build, lockfile, secret-scan, audit como relatório e artefatos de falha', (t) => {
+test('ci.yml: Postgres 16 e 17 do Supabase, Node 22, migrate, testes, build, lockfile, secret-scan, audit bloqueante e artefatos de falha', (t) => {
   const text = W('ci.yml');
   for (const re of [/image: postgres:16/, /node-version: 22/, /node tools\/migrate\.js\n\s+node tools\/migrate\.js --check/, /npm test/, /npm run test:security/, /tests\/ops\/\*\.test\.js/, /npm run build:web/, /secret-scan\.js/, /npm audit --omit=dev/, /upload-artifact/, /package-lock\.json/, /build-web\.js --check/]) assert.match(text, re);
   // PUB-11: o Supabase novo é Postgres 17 com "postgres" sem superusuário e privilégios padrão no schema public
   assert.match(text, /image: supabase\/postgres:17\.\d+\.\d+\.\d+\n/, 'imagem do Supabase com versão completa (sem tag móvel)');
   assert.match(text, /verify-deploy\.js --offline/); assert.match(text, /tests\/db\/\*\.test\.js/);
   if (!hasYaml) return t.skip('PyYAML ausente');
-  const audit = runs(wf['ci.yml']).find((x) => /npm audit/.test(x.step.run || '')); assert.equal(audit.step['continue-on-error'], true, 'audit é relatório: não bloqueia');
+  const audit = runs(wf['ci.yml']).find((x) => /npm audit/.test(x.step.run || ''));
+  assert.ok(audit, 'auditoria de produção deve existir');
+  assert.notEqual(audit.step['continue-on-error'], true, 'auditoria não pode ser não bloqueante');
+  assert.match(audit.step.run, /node tools\/enforce-audit\.js/, 'verificador bloqueante por severidade presente');
+  assert.match(audit.step.run, /exit "\$audit_exit"/, 'CI deve propagar status do verificador');
   const pg17 = wf['ci.yml'].jobs['postgres-17']; assert.ok(pg17, 'job postgres-17'); assert.match(pg17.services.postgres.image, /^supabase\/postgres:17\./);
   assert.match(JSON.stringify(pg17.steps), /node tools\/migrate\.js --check/);
 });
