@@ -23,7 +23,7 @@ export function onError(deps) {
         log.error('unhandled', { requestId, method: c.req.method, code });
         e = E.internal();
       }
-    } else if (e.status >= 500) log.error('http_error', { requestId, path: c.req.path, code: e.code });
+    } else if (e.status >= 500) log.error('http_error', { requestId, method: c.req.method, code: e.code });
     const body = { error: { code: e.code, message: e.message, ...(e.details ? { details: e.details } : {}), requestId } };
     return c.json(body, e.status, e.headers || {});
   };
