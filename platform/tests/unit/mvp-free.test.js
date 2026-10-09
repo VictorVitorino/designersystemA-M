@@ -45,6 +45,19 @@ test('Render Blueprint MVP Free não define plano pago nem credenciais em texto'
   assert.match(readme, /render\.com\/deploy\?repo=https:\/\/github\.com\/VictorVitorino\/designersystemA-M/);
   assert.match(yaml, /STORAGE_DRIVER\s*\n\s*value: s3/);
   assert.match(yaml, /DATABASE_SSL\s*\n\s*value: require/);
+  // O Render recebe dados PUBLICOS do projeto dedicado. NUNCA embutir senhas/chaves.
+  for (const [key, value] of [
+    ['SUPABASE_URL', 'https://fgdrjxuhzagmvqyhrqlf.supabase.co'],
+    ['SUPABASE_JWKS_URL', 'https://fgdrjxuhzagmvqyhrqlf.supabase.co/auth/v1/.well-known/jwks.json'],
+    ['S3_ENDPOINT', 'https://fgdrjxuhzagmvqyhrqlf.storage.supabase.co/storage/v1/s3'],
+    ['S3_REGION', 'sa-east-1'],
+    ['S3_BUCKET', 'canteiro-mvp-files'],
+  ]) {
+    assert.ok(yaml.includes('key: ' + key + '\n        value: ' + value), key + ' publico preconfigurado');
+  }
+  for (const key of ['SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'DATABASE_URL', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY']) {
+    assert.ok(yaml.includes('key: ' + key + '\n        sync: false'), key + ' deve ser configurado fora do GitHub');
+  }
   assert.doesNotMatch(yaml, /plan: (?:starter|pro|standard|business)/);
   for (const name of ['DATABASE_URL','SUPABASE_SERVICE_ROLE_KEY','S3_ACCESS_KEY_ID','S3_SECRET_ACCESS_KEY']) {
     assert.match(yaml, new RegExp('key: ' + name + '\\n\\s*sync: false'));

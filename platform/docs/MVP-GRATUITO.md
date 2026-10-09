@@ -31,19 +31,19 @@ A configuração do projeto pode exigir ajustes adicionais no Supabase que ainda
 
 1. Na página https://render.com/deploy?repo=https://github.com/VictorVitorino/designersystemA-M clique para implantar o Blueprint da `main` (ou selecione **New → Blueprint** no https://dashboard.render.com). O Blueprint cria **somente um Web Service `plan: free`**; não cria banco Render (o banco Render Free expira em 30 dias).
 2. O Render fará o build com `npm ci --omit=dev`, Python 3 já disponível no runtime, e executará a API Node que serve o editor e as páginas. `autoDeployTrigger: off` evita publicação automática de mudanças não aprovadas.
-3. **O endereço `APP_ORIGIN` é fornecido automaticamente pelo próprio Render**, via `fromService → RENDER_EXTERNAL_URL`. Antes de disponibilizar, preencha os demais campos `sync: false` no **Environment** do Render, sempre com os valores do projeto exclusivo Supabase:
+3. **O endereço `APP_ORIGIN` é fornecido automaticamente pelo Render**, via `fromService → RENDER_EXTERNAL_URL`. O Blueprint agora também pré-configura **cinco dados públicos verificados do projeto exclusivo**: `SUPABASE_URL`, `SUPABASE_JWKS_URL`, `S3_ENDPOINT`, `S3_REGION` e `S3_BUCKET`. Isso não contém nenhuma chave secreta. Antes de disponibilizar, preencha **somente as variáveis `sync: false` restantes** no Environment do Render, sempre com os valores do projeto exclusivo Supabase:
 
 | Variável | Valor / onde obter |
 |---|---|
 | `APP_ORIGIN` | **Automático no Blueprint**, por referência ao `RENDER_EXTERNAL_URL` do próprio serviço Render. Confira se coincide com o HTTPS atribuído. |
 | `DATABASE_URL` | URL PostgreSQL do papel restrito `app_api`, pooler Supabase, **TLS** |
-| `SUPABASE_URL` | Project URL do projeto `canteiro-mvp` |
+| `SUPABASE_URL` | **Pré-configurado no Blueprint**: URL pública do projeto dedicado |
 | `SUPABASE_ANON_KEY` | Chave pública/anon do projeto (backend); nunca usar a secreta no HTML |
 | `SUPABASE_SERVICE_ROLE_KEY` | Chave secreta **apenas no servidor** |
-| `SUPABASE_JWKS_URL` | `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`, conferir que o projeto usa JWT assimétrico |
-| `S3_ENDPOINT` | Exemplo: `https://<ref>.storage.supabase.co/storage/v1/s3` |
-| `S3_REGION` | Região **real** indicada no painel S3 do projeto |
-| `S3_BUCKET` | Nome do bucket **privado** |
+| `SUPABASE_JWKS_URL` | **Pré-configurado**: endpoint público de chaves JWT; conferir que o projeto usa JWT assimétrico |
+| `S3_ENDPOINT` | **Pré-configurado**: endpoint S3 do projeto exclusivo |
+| `S3_REGION` | **Pré-configurado**: `sa-east-1`, confirmar na tela S3 |
+| `S3_BUCKET` | **Pré-configurado**: bucket privado `canteiro-mvp-files` |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Credenciais S3 exclusivas do projeto; **somente no servidor** |
 
 O Blueprint já define `APP_ENV=staging`, `DATABASE_SSL=require`, `STORAGE_DRIVER=s3`, `S3_FORCE_PATH_STYLE=true`, `DB_POOL_MAX=2`, `STORAGE_QUOTA_USER_MB=100`, `NODE_VERSION=22.22.0` e gera `CSRF_SECRET`. Antes da API iniciar, o script `tools/mvp-preflight.js` bloqueia erros de configuração: só aceita HTTPS Render, banco como `app_api` via TLS, Auth/JWKS e S3 do mesmo projeto Supabase, cota limitada e nenhum segredo administrativo no Render. Ele não contata a rede nem imprime credenciais. `APP_ORIGIN` acompanha automaticamente a URL `*.onrender.com` atribuída pelo Render, sem copiar manualmente o endereço. Revise a URL no painel antes do piloto.
