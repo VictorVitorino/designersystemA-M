@@ -78,18 +78,35 @@ export async function awayFromWindowEdge(ops, windowS, needMs) {
 }
 
 export async function boot(opts = {}) {
+  // O atalho de sessão é estritamente de teste. Rejeitar ANTES de abrir conexões
+  // ou iniciar o GoTrue falso: uma configuração de staging/produção insegura não
+  // pode mascarar o veto nem deixar processos/handles ativos no runner do CI.
+  if (opts.deps?.sessionOverride && opts.env?.APP_ENV && opts.env.APP_ENV !== 'test') {
+    throw new Error('sessionOverride só é permitido em APP_ENV=test');
+  }
   const { mode = 'jwks', appOrigin = 'http://localhost:3000' } = opts;
   const { db, ops } = await setup();
-  const fake = await startFakeGoTrue({ mode, keyFormat: opts.keyFormat, appOrigin, accessTtl: opts.accessTtl, latency: opts.latency });
-  const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canteiro-test-'));
-  const config = loadConfig({
-    APP_ENV: 'test', APP_ORIGIN: appOrigin, DATABASE_URL: API_URL, LOG_LEVEL: opts.logLevel || 'silent',
-    SUPABASE_URL: fake.url, SUPABASE_ANON_KEY: fake.anonKey, SUPABASE_SERVICE_ROLE_KEY: fake.serviceKey,
-    ...(mode === 'jwks' ? { SUPABASE_JWKS_URL: fake.jwksUrl } : { SUPABASE_JWT_SECRET: fake.jwtSecret }),
-    CSRF_SECRET: crypto.randomBytes(32).toString('hex'), STORAGE_DRIVER: 'local', STORAGE_LOCAL_DIR: storageDir,
-    ...(opts.inviteDomains ? { INVITE_ALLOWED_DOMAINS: opts.inviteDomains } : {}), ...(opts.publicDir ? { PUBLIC_DIR: opts.publicDir } : {}), ...(opts.env || {}),
-  });
-  const storage = await loadStorage(config);
+  let fake, storageDir, config, storage;
+  try {
+    fake = await startFakeGoTrue({ mode, keyFormat: opts.keyFormat, appOrigin, accessTtl: opts.accessTtl, latency: opts.latency });
+    storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canteiro-test-'));
+    config = loadConfig({
+      APP_ENV: 'test', APP_ORIGIN: appOrigin, DATABASE_URL: API_URL, LOG_LEVEL: opts.logLevel || 'silent',
+      SUPABASE_URL: fake.url, SUPABASE_ANON_KEY: fake.anonKey, SUPABASE_SERVICE_ROLE_KEY: fake.serviceKey,
+      ...(mode === 'jwks' ? { SUPABASE_JWKS_URL: fake.jwksUrl } : { SUPABASE_JWT_SECRET: fake.jwtSecret }),
+      CSRF_SECRET: crypto.randomBytes(32).toString('hex'), STORAGE_DRIVER: 'local', STORAGE_LOCAL_DIR: storageDir,
+      ...(opts.inviteDomains ? { INVITE_ALLOWED_DOMAINS: opts.inviteDomains } : {}), ...(opts.publicDir ? { PUBLIC_DIR: opts.publicDir } : {}), ...(opts.env || {}),
+    });
+    storage = await loadStorage(config);
+  } catch (error) {
+    // Configuração inválida também deve desalocar o Postgres e o servidor Auth
+    // de teste; antes dessa proteção, o runner ficava com handles abertos.
+    await fake?.close().catch(() => {});
+    await db.end().catch(() => {});
+    await ops.end().catch(() => {});
+    if (storageDir) fs.rmSync(storageDir, { recursive: true, force: true });
+    throw error;
+  }
   const deps = { config, db, storage, gotrue: createGoTrue(config), authTiming: { failMinMs: 0, forgotMinMs: 0, ...(opts.authTiming || {}) }, ...(opts.identityTtlMs !== undefined ? { identityTtlMs: opts.identityTtlMs } : {}), ...(opts.deps || {}) };
   let made;
   try { made = await makeApp(deps); }

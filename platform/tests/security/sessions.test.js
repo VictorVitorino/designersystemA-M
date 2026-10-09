@@ -119,13 +119,30 @@ describe('segredos', () => {
   });
 });
 
+test('fixture libera GoTrue e Postgres quando staging recusa endpoints HTTP antes da API', async () => {
+  // O segredo aqui é o fechamento dos recursos abertos pela fixture no caminho de erro:
+  // se o GoTrue/DB continuarem ativos, o runner não terminará após os testes.
+  await assert.rejects(
+    () => boot({ env: { APP_ENV: 'staging', APP_ORIGIN: 'https://canteiro.example.invalid' } }),
+    /SUPABASE_URL precisa ser https:|SUPABASE_JWKS_URL precisa ser https:/,
+  );
+});
+
 describe('sessionOverride (atalho de teste)', () => {
   test('é aceito em APP_ENV=test (injeta o usuário) e RECUSADO em qualquer outro ambiente', async () => {
     const user = { id: '11111111-1111-4111-8111-111111111111', email: 'x@am.test', displayName: 'Injetado', role: 'member', status: 'active' };
     const ok = await boot({ deps: { sessionOverride: async (c, next) => { c.set('user', user); await next(); } } });
     try { const c = ok.anon(); const r = await c.get('/api/me'); assert.equal(r.status, 200); assert.equal(r.json.displayName, 'Injetado'); } finally { await ok.stop(); }
     for (const env of ['local', 'staging', 'production']) {
-      const extra = env === 'local' ? {} : { APP_ORIGIN: 'https://canteiro.exemplo.com.br', S3_BUCKET: 'b', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' };
+      // Para validar o veto ao sessionOverride, a fixture de staging/produção
+      // precisa ser HTTPS de ponta a ponta; o GoTrue falso do teste usa HTTP
+      // local e deve ser sobrescrito por endpoints fictícios seguros.
+      const extra = env === 'local' ? {} : {
+        APP_ORIGIN: 'https://canteiro.exemplo.com.br',
+        SUPABASE_URL: 'https://auth.example.invalid',
+        SUPABASE_JWKS_URL: 'https://auth.example.invalid/auth/v1/.well-known/jwks.json',
+        S3_BUCKET: 'b', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's',
+      };
       await assert.rejects(() => boot({ env: { APP_ENV: env, ...extra, ...(env === 'production' ? { STORAGE_DRIVER: 's3' } : {}), ...(env === 'staging' ? { STORAGE_DRIVER: 's3' } : {}) }, deps: { sessionOverride: async (c, next) => next() } }), /sessionOverride só é permitido em APP_ENV=test/, env);
     }
   });

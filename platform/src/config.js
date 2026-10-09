@@ -50,6 +50,16 @@ export function loadConfig(env = process.env) {
   const problems = [];
   const origin = new URL(e.APP_ORIGIN);
   if (secure && origin.protocol !== 'https:') problems.push('APP_ORIGIN precisa ser https:// em staging/produção');
+  // URLs externas são endpoints, nunca recipientes de usuário/senha embutidos.
+  // Mesmo em HTTPS, userinfo pode aparecer em redirecionamentos, proxies e logs.
+  if (secure) {
+    for (const k of ['APP_ORIGIN', 'SUPABASE_URL', 'SUPABASE_JWKS_URL', 'S3_ENDPOINT']) {
+      if (!e[k]) continue;
+      const endpoint = new URL(e[k]);
+      if (endpoint.protocol !== 'https:') problems.push(`${k} precisa ser https:// em staging/produção`);
+      if (endpoint.username || endpoint.password) problems.push(`${k} não pode incluir usuário ou senha na URL`);
+    }
+  }
   if (secure) {
     for (const k of ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'CSRF_SECRET']) if (!e[k]) problems.push(`${k} é obrigatório em ${e.APP_ENV}`);
     if (!e.SUPABASE_JWKS_URL && !e.SUPABASE_JWT_SECRET) problems.push('defina SUPABASE_JWKS_URL (preferível) ou SUPABASE_JWT_SECRET');
