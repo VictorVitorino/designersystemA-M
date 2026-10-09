@@ -13,7 +13,7 @@ export function localDevAdminUrl(value, database) {
   if (!['postgres:', 'postgresql:'].includes(url.protocol) ||
       !LOCAL_HOSTS.has(url.hostname) ||
       url.pathname !== '/' + database ||
-      url.hash) {
+      url.search || url.hash) {
     // Não incluir a URL nem o erro original: podem conter credenciais.
     throw new Error('DATABASE_ADMIN_URL de desenvolvimento exige PostgreSQL loopback e banco de mesmo nome');
   }
