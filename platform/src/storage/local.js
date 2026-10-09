@@ -74,7 +74,7 @@ export function createLocalStorage(localDir) {
 
     /** Idempotente: se o objeto já existe com o mesmo tamanho não reescreve. Confere o SHA dos bytes (verify=false só para chamadores
      *  que acabaram de calcular o hash); mime é validado mas o driver local não o guarda (o tipo fica no banco). */
-    async put(sha, bytes, { mime, verify = true } = {}) {
+    async put(sha, bytes, { mime, verify = true, overwrite = false } = {}) {
       assertSha(sha); assertMime(mime);
       const buf = toBuffer(bytes);
       if (buf.length === 0) throw new StorageIntegrityError('objeto vazio', 'empty');
@@ -83,7 +83,7 @@ export function createLocalStorage(localDir) {
       const cur = await fsp.lstat(loc.file).catch((e) => { if (e.code === 'ENOENT') return null; throw e; });
       if (cur) {
         if (cur.isSymbolicLink() || !cur.isFile()) throw new StorageIntegrityError('objeto é um symlink', 'unsafe_path');
-        if (cur.size === buf.length) return { created: false, size: buf.length };
+        if (cur.size === buf.length && !overwrite) return { created: false, size: buf.length };
         // mesmo sha mas tamanho diferente = objeto corrompido: cura regravando o conteúdo (já conferido acima)
       }
       const tmp = path.join(loc.dir, `.tmp-${process.pid}-${randomBytes(8).toString('hex')}`);

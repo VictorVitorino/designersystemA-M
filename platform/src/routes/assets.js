@@ -129,8 +129,11 @@ export function assetsRoutes(deps) {
     catch (e) { if (e && e.code === 'quota_exceeded') await auditReject(c, want, e, { size: info.size, kind }); throw e; }
     // grava ANTES de marcar pronto; objeto já presente com o mesmo tamanho = deduplicação (nada é regravado)
     const have = await storage.head(want);
-    const reused = !!have && have.size === bytes.length;
-    if (!reused) await storage.put(want, bytes, { mime: info.mime, verify: false });   // o hash acabou de ser conferido acima
+    // HEAD confirma somente o tamanho: um objeto corrompido pode ter os mesmos bytes.
+    // Antes de deduplicar, verificar o SHA real para não declarar um arquivo íntegro
+    // nem conceder posse de dados adulterados silenciosamente.
+    const reused = !!have && have.size === bytes.length && (await storage.verify(want)).ok;
+    if (!reused) await storage.put(want, bytes, { mime: info.mime, verify: false, overwrite: !!have });   // o hash acabou de ser conferido acima
     const status = await txAsUser(c, async (tx) => {
       const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
       if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind, deduplicated: !created && reused });

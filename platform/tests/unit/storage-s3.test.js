@@ -71,6 +71,15 @@ describe('s3 (moto): operações básicas', { skip }, () => {
     const [sha, b] = mk('cura-s3'); await raw.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey(sha), Body: Buffer.from('xx') }));
     assert.deepEqual(await st.put(sha, b, { mime: 'image/png' }), { created: true, size: b.length }); assert.equal((await st.verify(sha)).ok, true);
   });
+  test('overwrite explícito repara objeto corrompido do mesmo tamanho no S3', async () => {
+    const [sha, bytes] = mk('integridade-tamanho-s3');
+    const wrong = Buffer.from(bytes); wrong[0] ^= 0xff;
+    await raw.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey(sha), Body: wrong }));
+    assert.equal((await st.verify(sha)).ok, false);
+    assert.deepEqual(await st.put(sha, bytes, { mime: 'image/png', overwrite: true }), { created: true, size: bytes.length });
+    assert.equal((await st.verify(sha)).ok, true);
+    assert.deepEqual(await st.put(sha, bytes, { mime: 'image/png' }), { created: false, size: bytes.length });
+  });
   test('o SHA-256 vai como x-amz-checksum-sha256 (o servidor de objetos também confere)', async () => {
     const [sha, b] = mk('checksum-s3'); seen.length = 0; await st.put(sha, b, { mime: 'image/png' });
     const put = seen.find((r) => r.cmd === 'PutObjectCommand'); assert.equal(put.headers['x-amz-checksum-sha256'], Buffer.from(sha, 'hex').toString('base64'));

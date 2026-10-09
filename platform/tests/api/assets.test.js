@@ -48,6 +48,18 @@ describe('PUT /api/assets/:sha256 — envio pela API', () => {
     assert.equal(env.calls.put, puts, 'o armazenamento não foi tocado'); assert.deepEqual(await owners(sha), [A.id]);
     assert.equal((await env.sys((tx) => tx`select count(*)::int n from app.assets where sha256 = ${sha}`))[0].n, 1);
   });
+  test('reenvio repara objeto adulterado do mesmo tamanho antes de retornar deduplicated', async () => {
+    const buf = await tiny(113), sha = sha256Hex(buf);
+    assert.equal((await putRaw(A, sha, buf)).status, 201);
+    const bad = Buffer.from(buf); bad[bad.length - 1] ^= 0xff;
+    await env.storage.put(sha, bad, { mime: 'image/png', verify: false, overwrite: true });
+    assert.equal((await env.storage.verify(sha)).ok, false, 'corrompido, apesar do tamanho correto');
+    const result = await putRaw(A, sha, buf);
+    assert.equal(result.status, 200, result.text);
+    assert.equal(result.json.deduplicated, false, 'reparação não é deduplicação');
+    assert.deepEqual((await env.storage.get(sha)).body, buf, 'arquivo real voltou a corresponder ao SHA');
+    assert.equal((await env.storage.verify(sha)).ok, true);
+  });
   test('2ª pessoa com os MESMOS bytes: só ganha a posse (deduplicated, sem regravar); antes disso não enxerga o arquivo', async () => {
     const buf = await tiny(104); const sha = sha256Hex(buf);
     await putRaw(A, sha, buf);

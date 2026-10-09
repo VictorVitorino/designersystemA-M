@@ -70,6 +70,16 @@ describe('local: operações básicas', () => {
     assert.deepEqual(await st.put(sha, b, { mime: 'image/png' }), { created: false, size: b.length });
     const c = fs.statSync(f); assert.equal(c.ino, a.ino); assert.equal(c.mtimeMs, a.mtimeMs);
   });
+  test('overwrite explícito repara objeto de mesmo tamanho; put normal continua idempotente', async () => {
+    const [sha, bytes] = mk('integridade-mesmo-tamanho');
+    await st.put(sha, bytes, { mime: 'text/csv' });
+    const wrong = Buffer.from(bytes); wrong[0] ^= 0xff;
+    await st.put(sha, wrong, { mime: 'text/csv', verify: false, overwrite: true });
+    assert.equal((await st.verify(sha)).ok, false);
+    assert.deepEqual(await st.put(sha, bytes, { mime: 'text/csv', overwrite: true }), { created: true, size: bytes.length });
+    assert.equal((await st.verify(sha)).ok, true);
+    assert.deepEqual(await st.put(sha, bytes, { mime: 'text/csv' }), { created: false, size: bytes.length });
+  });
   test('put recusa bytes que não correspondem ao sha (envenenamento da dedup) e não grava nada', async () => {
     const [sha] = mk('verdadeiro'); await assert.rejects(() => st.put(sha, Buffer.from('falso'), { mime: 'image/png' }), (e) => e instanceof StorageIntegrityError && e.code === 'sha_mismatch');
     assert.deepEqual(files(root), []); assert.equal(await st.head(sha), null);
