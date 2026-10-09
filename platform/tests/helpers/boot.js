@@ -78,6 +78,12 @@ export async function awayFromWindowEdge(ops, windowS, needMs) {
 }
 
 export async function boot(opts = {}) {
+  // O atalho de sessão é estritamente de teste. Rejeitar ANTES de abrir conexões
+  // ou iniciar o GoTrue falso: uma configuração de staging/produção insegura não
+  // pode mascarar o veto nem deixar processos/handles ativos no runner do CI.
+  if (opts.deps?.sessionOverride && opts.env?.APP_ENV && opts.env.APP_ENV !== 'test') {
+    throw new Error('sessionOverride só é permitido em APP_ENV=test');
+  }
   const { mode = 'jwks', appOrigin = 'http://localhost:3000' } = opts;
   const { db, ops } = await setup();
   const fake = await startFakeGoTrue({ mode, keyFormat: opts.keyFormat, appOrigin, accessTtl: opts.accessTtl, latency: opts.latency });
