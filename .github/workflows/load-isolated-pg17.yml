@@ -1,0 +1,62 @@
+# Ensaio MANUAL de carga, sem conexões com Supabase/Render reais.
+# Não agendado: só é executado após acionamento explícito em Actions.
+name: Load PG17 isolado (50 usuários)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: 50 usuários · Postgres 17 descartável · pool 2
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: supabase/postgres:17.6.1.011
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      APP_ENV: test
+      E2E_EXTERNAL_POSTGRES: '1'
+      # Fictício e restrito ao service container descartável do runner.
+      DATABASE_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      DB_POOL_MAX: '2'
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - name: Baixar código sem persistir credenciais
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+      - name: Instalar dependências travadas
+        run: npm ci
+      - name: Revalidar isolamento do destino de carga
+        run: node --test tests/unit/load-database-url.test.js
+      - name: Carga 50 usuários — NAT compartilhado e salvamento íntegro
+        run: node tests/load/run.js --db canteiro_t_load --phases 50x180:keep --pool-max 2 --skip-browser --no-report
+      - name: Guardar medições (somente JSON sem credenciais)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: carga-pg17-${{ github.run_id }}
+          path: platform/.tmp/load/resultado-*.json
+          if-no-files-found: ignore
+          retention-days: 7
