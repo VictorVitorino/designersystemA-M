@@ -12,9 +12,11 @@
 | Testes de aplicação, segurança e PostgreSQL 17 | ✅ aprovados na main | [CI da main 37856550986](https://github.com/VictorVitorino/designersystemA-M/actions/runs/37856550986) |
 | Testes completos de navegador / E2E | ✅ aprovados na main | [E2E da main 37856550988](https://github.com/VictorVitorino/designersystemA-M/actions/runs/37856550988) |
 | PR #2: infraestrutura gratuita Render + Supabase | ✅ integrado na main | [PR #2](https://github.com/VictorVitorino/designersystemA-M/pull/2) com CI e E2E aprovados |
-| PR #5: convite seguro de administrador + correção de Esc | 🔄 teste E2E/CI em nova execução | [PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5) |
-| Banco Supabase dedicado Canteiro | ⏳ não criado | Consulta da organização Free em 08/10/2026: apenas projeto **Portfolio FE DEV** (não usar para este MVP) |
-| Render Free publicado | ⏳ não configurado | A infraestrutura está preparada, mas sem implantação real |
+| PR #5: convite seguro de administrador + correção de Esc | ✅ integrado com CI, segurança e E2E aprovados | [PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5) |
+| Banco Supabase dedicado Canteiro | ✅ projeto criado em organização Free; 7 migrações de app aplicadas e verificadas | Supabase **canteiro-mvp**, região `sa-east-1`, banco PostgreSQL 17, 15 tabelas do schema `app` |
+| Storage Supabase privado | ✅ criado, sem arquivos | Bucket `canteiro-mvp-files`, **private**, limite por arquivo de 50 MB; acesso público e políticas a validar no piloto |
+| Primeiro administrador/convite real | ⏳ ainda não enviado | Workflow no GitHub existe, mas requer desabilitar cadastro aberto e configurar credenciais por canal seguro |
+| Render Free publicado | ⏳ não configurado | Infraestrutura está preparada, sem serviço Render conectado ou URL pública |
 | Login/salvamento online com serviços reais | ⏳ não homologado | E2E prova o fluxo com ambiente de teste, não Render/Supabase reais |
 | Custo contratado | ✅ R$ 0 adicional | Nenhuma nova contratação realizada nesta atividade |
 
@@ -39,7 +41,10 @@
 - Incorporado o [PR #1](https://github.com/VictorVitorino/designersystemA-M/pull/1) à main.
 - Integrados à main hospedagem gratuita, migrações controladas, testes HTTP externos e inicializador Windows ([PR #2](https://github.com/VictorVitorino/designersystemA-M/pull/2)).
 - Integrado verificador de segurança pré-inicialização no Render, isolamento de banco/Auth/Storage e bloqueio a acesso anônimo às apresentações ([PR #6](https://github.com/VictorVitorino/designersystemA-M/pull/6)).
-- Implementados fluxo manual seguro e testes do convite do primeiro administrador ([PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5)).
+- Integrado fluxo manual seguro e testes do convite do primeiro administrador, com correção do painel de comentários ([PR #5](https://github.com/VictorVitorino/designersystemA-M/pull/5)).
+- Criado projeto exclusivo Supabase Free `canteiro-mvp` no Brasil após cotação de **US$ 0/mês**; aplicadas migrações de `0001` a `0007`, com históricos SHA-256, RLS e políticas; criado bucket privado `canteiro-mvp-files`.
+- Auditoria Supabase: sem avisos críticos; seis avisos WARN de `search_path` sendo tratados no [PR #7](https://github.com/VictorVitorino/designersystemA-M/pull/7); `public.schema_migrations` deliberadamente sem políticas (RLS deny-all).
+- A correção de HTTPS dos provedores externos está em validação no [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4).
 
 ## Limites e proteção de custo
 
