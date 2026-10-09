@@ -111,6 +111,12 @@ Não existe "apagar tudo" de um clique: as apresentações são do **acervo** da
 - Republicar uma versão (ex.: depois de corrigir uma chave): Actions → *Deploy produção* → **Run workflow** → em *Use workflow from* escolha **Tags → v1.2.3** → digite `PRODUCAO`.
 - Antes de publicar: o CI da `main` está verde; o staging foi testado com o **mesmo** commit; leia as migrações novas (`platform/db/migrations`): devem ser **aditivas** (criar/ampliar; nunca apagar/renomear de uma vez).
 
+### Encerramento seguro da API no Render (Node)
+
+Ao receber `SIGTERM` ou `SIGINT`, o processo **para de receber novas requisições** e aguarda até **12 segundos** para as ativas concluírem (por exemplo, um `PUT /api/presentations/:id/content`). Só depois fecha o pool de conexões do Postgres. Se o prazo terminar, o servidor força a desconexão restante e encerra o pool, para não ficar preso indefinidamente no desligamento. Chamadas repetidas de `stop()` não causam fechamento duplicado.
+
+Esse comportamento vale para o **servidor Node** (Render, contêiner, local). Na Vercel serverless, o ciclo de vida é controlado pela própria plataforma. O prazo de 12 segundos não substitui salvamento confirmado e não impede queda abrupta da máquina: nesse caso, o cliente mantém a fila local e volta a enviar quando a sessão/serviço retornar. Os testes simulam uma requisição HTTP ativa e a falha de fechamento.
+
 ### 5.2 Rollback de deploy (o site voltou a ter problema depois de publicar)
 1. **Mais rápido (segundos):** Vercel → Deployments → versão anterior estável → **Instant Rollback** (não mexe no banco). Ou `npx vercel@62.5.0 rollback`.
 2. **Pelo GitHub (refaz tudo com as verificações):** Actions → *Deploy produção* → **Run workflow** → *Use workflow from* → **Tags → a versão anterior** (ex.: `v1.2.2`) → digite `PRODUCAO`. Faz backup, confere e publica o código daquela versão.
