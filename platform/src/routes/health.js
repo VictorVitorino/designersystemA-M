@@ -3,15 +3,40 @@
 import { Hono } from 'hono';
 import { createLogger } from '../lib/log.js';
 
-const withTimeout = (p, ms) => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+const READY_TTL_MS = 5000;
+const READY_TIMEOUT_MS = 3000;
+
+/* Cancelar o temporizador depois da checagem evita milhares de timers pendentes sob carga.
+   A operação subjacente pode terminar depois do prazo, mas não altera o resultado publicado. */
+async function withTimeout(fn, ms) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'ready_timeout' })), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function healthRoutes(deps) {
   const { config, db, storage, gotrue } = deps;
   const log = deps.logger || createLogger(config);
   const r = new Hono();
   let cached = null;
+  let inflight = null;
 
-  async function check(name, fn) { try { return (await withTimeout(fn(), 3000)) === true; } catch (e) { log.warn('ready_check_failed', { check: name, err: String(e && e.message || e).slice(0, 120) }); return false; } }
+  async function check(name, fn) {
+    try { return (await withTimeout(fn, READY_TIMEOUT_MS)) === true; }
+    catch (e) {
+      // Nunca registrar e.message: drivers externos podem incluir URLs, senhas e tokens no erro.
+      log.warn('ready_check_failed', { check: name, kind: e?.code === 'ready_timeout' ? 'timeout' : 'dependency_error' });
+      return false;
+    }
+  }
 
   async function compute() {
     const [dbOk, storageOk, authOk, migOk] = await Promise.all([
@@ -29,10 +54,23 @@ export function healthRoutes(deps) {
     return { db: dbOk, storage: storageOk, auth: authOk, migrations: migOk };
   }
 
+  /* Single-flight: sondas paralelas compartilham UMA medição de DB/Auth/Storage/migrações.
+     O TTL começa na conclusão (não no começo) e inclui o estado indisponível, sem mascarar
+     falhas após o vencimento. Não mantemos uma Promise rejeitada presa no cache. */
+  async function readyState() {
+    if (cached && Date.now() - cached.at < READY_TTL_MS) return cached.value;
+    if (!inflight) {
+      inflight = compute().then((value) => {
+        cached = { at: Date.now(), value };
+        return value;
+      }).finally(() => { inflight = null; });
+    }
+    return inflight;
+  }
+
   r.get('/health', (c) => c.json({ ok: true, version: config.release, env: config.appEnv }));
   r.get('/ready', async (c) => {
-    if (!cached || Date.now() - cached.at > 5000) cached = { at: Date.now(), value: await compute() };
-    const v = cached.value;
+    const v = await readyState();
     return c.json(v, Object.values(v).every(Boolean) ? 200 : 503);
   });
   return r;

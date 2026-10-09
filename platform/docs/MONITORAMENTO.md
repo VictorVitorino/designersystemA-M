@@ -24,6 +24,12 @@ Objetivo: **saber antes dos usuários** que algo está errado, com o mínimo de 
 
 Gravidade → resposta: **crítica** (§1 do OPERACAO: 15 min), **alta** (mesmo dia útil), **média** (esta semana).
 
+### Readiness sob carga (API)
+
+A rota `GET /api/ready` executa verificações independentes de **banco, Storage, Auth e objetos das migrações**; cada uma tem prazo máximo de 3 segundos. Para poupar conexões do PostgreSQL/Supabase Free em picos de acessos ou retomadas após suspensão do Render, **sondas simultâneas compartilham uma única medição** (*single-flight*). O estado positivo **ou negativo** fica em cache por 5 segundos **contados da conclusão**. Se alguma dependência cair, a rota devolve HTTP 503 e apenas os quatro booleanos, não uma mensagem interna de erro. `GET /api/health` permanece independente e devolve 200 mesmo quando as dependências estão fora.
+
+A API registra `ready_check_failed` com `check` (nome da dependência) e `kind` (`timeout` ou `dependency_error`). **Nunca registra a mensagem original da exceção**, pois a biblioteca de banco ou Storage pode incluí-la junto de strings de conexão ou credenciais. O limite de 3 segundos é o tempo de espera da rota, não o cancelamento garantido da operação iniciada no fornecedor.
+
 ## 2. Configurar o monitor externo (grátis)
 
 Use o **Better Stack** (plano gratuito: 10 monitores, checagem a cada 3 min, alertas por e-mail, uso comercial permitido). O plano gratuito do **UptimeRobot** é restrito a uso pessoal/não comercial desde out/2024 — não serve para a A&M sem plano pago (custos e limites em `docs/pesquisa/monitoramento-backup-seguranca.md` §2).
