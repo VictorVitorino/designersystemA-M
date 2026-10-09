@@ -86,8 +86,15 @@ export function assetsRoutes(deps) {
   /** Caminho da API: os bytes já foram conferidos pelo chamador → registra (conferindo a cota se o arquivo é novo) e concede a posse de uma vez. */
   async function register(tx, userId, a) {
     const created = await registerPending(tx, userId, a);
-    if (created) await assertQuota(tx, userId, { sha: a.sha, size: a.size });
     await grantOwnership(tx, userId, a.sha);
+    // Um hash já cadastrado pode estar PENDENTE em nome de outra pessoa, que
+    // declarou um tamanho falso. Se este PUT o tornar ready, uploaded_by
+    // passará ao remetente e os bytes REAIS deverão caber na cota dele.
+    // Apenas objetos já ready são deduplicação gratuita.
+    if (quota) {
+      const [current] = await tx`select status from app.assets where sha256 = ${a.sha}`;
+      if (!current || current.status !== 'ready') await assertQuota(tx, userId, { sha: a.sha, size: a.size });
+    }
     return created;
   }
   const publicInfo = (a, deduplicated) => ({ sha256: a.sha, size: a.size, mime: a.mime, ...(a.width != null ? { width: a.width, height: a.height } : {}), deduplicated });
