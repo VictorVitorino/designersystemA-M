@@ -15,7 +15,14 @@ export function onError(deps) {
       else if (e && e.code === '42501') e = E.forbidden();
       else if (e && (e.type === 'entity.too.large' || e.name === 'PayloadTooLargeError')) e = E.tooLarge();
       else if (e instanceof SyntaxError) e = E.badRequest('JSON inválido.');
-      else { log.error('unhandled', { requestId, path: c.req.path, method: c.req.method, err: String(e && e.message || e).slice(0, 300), code: e && e.code, stack: process.env.APP_ENV === 'production' ? undefined : String(e && e.stack || '').split('\n').slice(0, 4).join(' | ') }); e = E.internal(); }
+      else {
+        // Logs do Render (APP_ENV=staging) são persistidos fora do processo. Erros de Postgres/TLS/Auth
+        // podem incluir URLs, senhas e tokens em message/stack; o caminho pedido também é entrada externa.
+        // O requestId permite correlacionar sem registrar valores enviados pelo cliente ou pelo driver.
+        const code = typeof e?.code === 'string' && /^[A-Za-z0-9_]{1,24}$/.test(e.code) ? e.code : 'unknown';
+        log.error('unhandled', { requestId, method: c.req.method, code });
+        e = E.internal();
+      }
     } else if (e.status >= 500) log.error('http_error', { requestId, path: c.req.path, code: e.code });
     const body = { error: { code: e.code, message: e.message, ...(e.details ? { details: e.details } : {}), requestId } };
     return c.json(body, e.status, e.headers || {});
