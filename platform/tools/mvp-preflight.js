@@ -33,10 +33,13 @@ export function validateMvpRuntime(env) {
     throw new Error('chaves de autenticação ausentes, trocadas ou idênticas');
   const csrf = String(env.CSRF_SECRET || '');
   if (csrf.length < 32) throw new Error('CSRF_SECRET precisa ser aleatório e ter ao menos 32 caracteres');
+  // Projeto MVP exclusivo: não aceitar bucket/região arbitrários. Sem esta checagem,
+  // um valor digitado incorretamente no Render passaria no preflight e falharia só ao enviar arquivos.
   if (env.STORAGE_DRIVER !== 's3' || env.S3_FORCE_PATH_STYLE !== 'true'
       || env.S3_ENDPOINT !== 'https://' + ref + '.storage.supabase.co/storage/v1/s3'
-      || !env.S3_REGION || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY)
-    throw new Error('Storage S3 precisa ser privado e pertencer ao mesmo projeto Supabase');
+      || env.S3_REGION !== 'sa-east-1' || env.S3_BUCKET !== 'canteiro-mvp-files'
+      || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY)
+    throw new Error('Storage S3 exige bucket canteiro-mvp-files e região sa-east-1 do projeto Supabase dedicado');
   // Number(undefined), Number('NaN') e Number('Infinity') passam por comparações
   // simples de faixa; rejeitar explicitamente evita configurar o MVP sem teto real.
   const poolMax = Number(env.DB_POOL_MAX);
