@@ -107,3 +107,10 @@ Atualização de checks: PR #4 já obteve sucesso no PostgreSQL17, CodeQL e Chro
 - Persistência real entre **dois computadores**, arquivos, convites, permissões e recuperação de backup ainda sem homologação de ponta a ponta com os serviços externos.
 
 **Resumo de aceite: permanece 1/6; etapa 2/6 em preparação.** Não tratar o `Deploy staging` do GitHub como evidência de um site Render publicado: o workflow pode ser concluído sem infraestrutura externa habilitada.
+
+### Auditoria de checks de 09/10/2026
+
+- PR #4 no SHA `898dd07100d35f74c5d4c97fd01e3f04a4dacff1`: PostgreSQL 17, CodeQL e E2E aprovados, mas CI cancelado após falha real em `tests/security/sessions.test.js` (fixture de staging/produção usa URLs HTTP do GoTrue falso, agora rejeitadas pela validação HTTPS). Não integrar até corrigir a fixture e aprovar nova execução completa.
+- PRs #19, #21 e #22: CI (incluindo PostgreSQL 17), CodeQL e E2E aprovados nos respectivos SHAs consultados; integração ainda pendente.
+- PR #23: CI, PostgreSQL 17, CodeQL e build Render Free aprovados; E2E falhou na inicialização da pilha por convite ausente. Reexecução do job E2E solicitada, aguardando resultado.
+- Nenhum deploy Render real comprovado. Maturidade técnica permanece **85% estimados** e aceite **1/6**.
