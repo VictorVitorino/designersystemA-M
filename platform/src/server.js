@@ -61,4 +61,10 @@ export async function start(env = process.env) {
   process.once('SIGINT', onSignal);
   return { server, deps, stop };
 }
-if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { console.error(JSON.stringify({ level: 'fatal', msg: String(e.message) })); process.exit(1); });
+// Configuração, drivers e provedores externos podem lançar erros com senhas em .message.
+// O log fatal é estável e não inclui dados de exceção; detalhes ficam nas verificações seguras de pré-deploy.
+export function logStartupFailure(_error, write = console.error) {
+  write(JSON.stringify({ level: 'fatal', msg: 'startup_failed' }));
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { logStartupFailure(e); process.exit(1); });
