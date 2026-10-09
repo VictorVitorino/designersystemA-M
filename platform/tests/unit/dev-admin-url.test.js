@@ -22,6 +22,7 @@ test('rejeita banco remoto, banco de manutenção e nomes divergentes antes de m
     'postgres://postgres:senha@localhost:5432/canteiro_dev',
     'ftp://localhost:5432/canteiro_t_load',
     'postgres://postgres:senha@localhost:5432/canteiro_t_load#unsafe',
+    'postgres://postgres:senha@localhost:5432/canteiro_t_load?host=db.remote.example',
   ]) {
     assert.throws(() => localDevAdminUrl(url, target), /DATABASE_ADMIN_URL de desenvolvimento/);
   }
