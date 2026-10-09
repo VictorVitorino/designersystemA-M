@@ -72,11 +72,16 @@ Este registro complementa a fotografia anterior; **não altera os critérios de 
 | Render Free — parâmetros públicos do Supabase | [PR #11](https://github.com/VictorVitorino/designersystemA-M/pull/11) | Pré-configura URL, JWKS, S3, região e bucket do projeto dedicado, preservando segredos fora do repositório; CI, E2E, Postgres17 e CodeQL aprovados no PR. |
 | Readiness concorrente e proteção de logs | [PR #14](https://github.com/VictorVitorino/designersystemA-M/pull/14) | Single-flight, TTL, timeout e mensagens seguras, com 4 regressões novas aprovadas; CI, Postgres17, CodeQL e E2E aprovados no PR. |
 | Encerramento seguro do Node | [PR #15](https://github.com/VictorVitorino/designersystemA-M/pull/15) | Requisições ativas terminam antes de fechar o pool PostgreSQL; timeout e idempotência cobertos, CI, Postgres17, CodeQL e E2E aprovados. |
+| Pré-deploy: pool e quota válidos | [PR #17](https://github.com/VictorVitorino/designersystemA-M/pull/17) | Rejeita valores ausentes, não inteiros ou inválidos no validador do Render Free; integrado com CI, PostgreSQL17, CodeQL e E2E aprovados. |
 
 ### Alterações em validação (ainda não estão na `main`)
 
+Atualização de checks: PR #4 já obteve sucesso no PostgreSQL17, CodeQL e Chromium; CI completo permanecia em execução na última consulta, portanto o merge está bloqueado.
+
 - [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4): exigir HTTPS para endpoints externos; reforçado para rejeitar URLs que contenham `userinfo` (usuário/senha) e com novos testes. **Novos checks ainda precisam concluir** após os commits mais recentes.
-- [PR #17](https://github.com/VictorVitorino/designersystemA-M/pull/17): rejeitar valores inválidos/não inteiros de pool e quota no validador de preflight do Render Free, com teste de regressão. **Checks em andamento; ainda não integrado.**
+- [PR #19](https://github.com/VictorVitorino/designersystemA-M/pull/19): impedir vazamento de segredos em logs de inicialização, erros internos da API e caminhos de acesso. Revisão adicional substituiu código arbitrário de erro por lista estrita de códigos técnicos (commits `f658286` e `cebfdbb`), com testes de regressão. **Aguarda CI/PG17/E2E completos no SHA final.**
+- [PR #18](https://github.com/VictorVitorino/designersystemA-M/pull/18): solução parcialmente sobreposta ao #19; não integrar duas versões da mesma correção.
+- [PR #20](https://github.com/VictorVitorino/designersystemA-M/pull/20): proposta duplicada **encerrada sem merge** em favor do #19.
 
 ### Verificação independente do ambiente Supabase dedicado
 
@@ -89,7 +94,7 @@ Este registro complementa a fotografia anterior; **não altera os critérios de 
 
 ### Próximas tarefas técnicas (somente após comprovar a necessidade)
 
-1. Corrigir qualquer falha dos PRs #4 e #17, registrar regressões e integrar após CI + Postgres17 + CodeQL aplicável + E2E.
+1. Finalizar os checks do PR #4 e do PR #19; corrigir falhas com testes de regressão e integrar somente depois de CI + PostgreSQL17 + CodeQL + E2E aprovados no commit vigente.
 2. Executar verificações de performance e concorrência contra **ambiente isolado de teste**, documentando p50/p95/p99, erro e throughput; não gerar carga sobre o Supabase Free ativo sem avaliação de cota.
 3. Exercitar importação, exportação, autorização e restauração com **dados fictícios**, preservando `studio/` e a prova de paridade.
 4. Revisar backups e procedimentos de recuperação com evidência, sem marcar como aprovado um restore que não foi realmente ensaiado.
