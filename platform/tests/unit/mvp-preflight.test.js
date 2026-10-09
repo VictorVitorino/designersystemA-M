@@ -47,6 +47,13 @@ test('MVP privado só aceita bucket dedicado e região real sa-east-1 no S3',()=
   {S3_ENDPOINT:good.S3_ENDPOINT.replace('.storage.', '.other-storage.')}
  ]) assert.throws(()=>validateMvpRuntime({...good,...patch}),/Storage S3/);
 });
+test('Render Free: TLS da DATABASE_URL não pode ter sslmode duplicado ou alias contraditório',()=>{
+ const base = good.DATABASE_URL;
+ for(const suffix of ['&sslmode=disable','&sslmode=require','&ssl=false','&ssl=true']) {
+  assert.throws(()=>validateMvpRuntime({...good,DATABASE_URL:base+suffix}),/TLS obrigatório/);
+ }
+ assert.equal(validateMvpRuntime(good).databaseRole,'app_api');
+});
 test('Render Free: rejeita pool e cota indefinidos, NaN, infinito, fracionário ou fora da faixa',()=>{
  for(const key of ['DB_POOL_MAX','STORAGE_QUOTA_USER_MB']) {
   for(const bad of [undefined,'NaN','Infinity','3.5','not-a-number','-1','0','']) {
