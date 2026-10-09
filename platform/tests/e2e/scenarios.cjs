@@ -408,7 +408,20 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
     check('11.1 sem am_at (' + names0.join(',') + '): a próxima gravação faz POST /api/auth/refresh e o PUT é refeito com sucesso; o editor continua na mesma página', !names0.includes('am_at') && seen.some((s) => /refresh 200/.test(s)) && seen.some((s) => /content 200/.test(s)) && names1.includes('am_at') && pA.url() === BASE + '/editor/' + id && JSON.stringify((await getPres(ctx.ana, id)).json.content).includes('Depois de apagar o cookie de acesso'), { names0, names1, seen });
     check('11.2 nenhum diálogo de sessão apareceu (renovação transparente)', !(await pA.$('.cl-dlg')) && (await pillState(pA)) === 'saved');
     /* logout no contexto B → /editor redireciona ao login com next */
-    const pB = S.pageB; await pB.goto(BASE + '/acervo'); await pB.waitForSelector('#btn-sair', { timeout: 20000 }); await Promise.all([pB.waitForURL(/\/entrar/, { timeout: 20000 }), pB.click('#btn-sair')]);
+    const pB = S.pageB; await pB.goto(BASE + '/acervo'); await pB.waitForSelector('#btn-sair', { timeout: 20000 });
+    // A limpeza do IndexedDB pode ser bloqueada por outra aba. Nesse caso o
+    // produto DEVE avisar antes de navegar; o teste antigo esperava navegação
+    // imediata e falhava apesar do comportamento de privacidade correto.
+    const cleanupNotice = pB.locator('dialog.dlg[open]').filter({ hasText: 'Não foi possível apagar todos os dados locais' });
+    const redirected = pB.waitForURL(/\\/entrar/, { timeout: 25000 }).then(() => 'redirected').catch(() => null);
+    const notified = cleanupNotice.waitFor({ state: 'visible', timeout: 25000 }).then(() => 'notified').catch(() => null);
+    await pB.click('#btn-sair');
+    const logoutOutcome = await Promise.race([redirected, notified]);
+    if (logoutOutcome === 'notified') {
+      check('11.2b logout avisa quando IndexedDB não confirma a limpeza local', /feche as outras abas|limpe os dados deste site/i.test(await cleanupNotice.innerText()));
+      await cleanupNotice.locator('[data-act=confirm]').click();
+    }
+    await pB.waitForURL(/\\/entrar/, { timeout: 20000 });
     const cookiesB = (await ctx.ana2.cookies(BASE)).map((c) => c.name);
     await pB.goto(BASE + '/editor/' + id); await pB.waitForURL(/\/entrar\?/, { timeout: 20000 });
     const nx = new URL(pB.url()).searchParams.get('next');
