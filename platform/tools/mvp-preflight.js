@@ -37,13 +37,17 @@ export function validateMvpRuntime(env) {
       || env.S3_ENDPOINT !== 'https://' + ref + '.storage.supabase.co/storage/v1/s3'
       || !env.S3_REGION || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY)
     throw new Error('Storage S3 precisa ser privado e pertencer ao mesmo projeto Supabase');
-  if (Number(env.DB_POOL_MAX) < 1 || Number(env.DB_POOL_MAX) > 5)
-    throw new Error('DB_POOL_MAX no piloto deve ficar entre 1 e 5');
-  if (Number(env.STORAGE_QUOTA_USER_MB) < 1 || Number(env.STORAGE_QUOTA_USER_MB) > 100)
-    throw new Error('STORAGE_QUOTA_USER_MB no piloto deve ficar entre 1 e 100');
+  // Number(undefined), Number('NaN') e Number('Infinity') passam por comparações
+  // simples de faixa; rejeitar explicitamente evita configurar o MVP sem teto real.
+  const poolMax = Number(env.DB_POOL_MAX);
+  const quotaMb = Number(env.STORAGE_QUOTA_USER_MB);
+  if (!Number.isInteger(poolMax) || poolMax < 1 || poolMax > 5)
+    throw new Error('DB_POOL_MAX no piloto deve ser inteiro entre 1 e 5');
+  if (!Number.isInteger(quotaMb) || quotaMb < 1 || quotaMb > 100)
+    throw new Error('STORAGE_QUOTA_USER_MB no piloto deve ser inteiro entre 1 e 100');
   for (const k of ['DATABASE_ADMIN_URL', 'DATABASE_OPS_URL', 'APP_OPS_DB_PASSWORD'])
     if (env[k]) throw new Error(k + ' não pode estar no ambiente do servidor Render');
-  return { projectRef: ref, hosting: 'render-free', databaseRole: 'app_api', quotaMb: Number(env.STORAGE_QUOTA_USER_MB) };
+  return { projectRef: ref, hosting: 'render-free', databaseRole: 'app_api', quotaMb };
 }
 
 if (process.argv[1] && import.meta.url === new URL('file://' + process.argv[1]).href) {
