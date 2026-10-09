@@ -39,6 +39,17 @@ test('Render Free: rejeitar banco de outro projeto, postgres admin, HTTP e sem T
  {DATABASE_OPS_URL:'postgres://ops-secret-not-allowed'}
  ]) assert.throws(()=>validateMvpRuntime({...good,...patch}));
 });
+test('Render Free: rejeita pool e cota indefinidos, NaN, infinito, fracionário ou fora da faixa',()=>{
+ for(const key of ['DB_POOL_MAX','STORAGE_QUOTA_USER_MB']) {
+  for(const bad of [undefined,'NaN','Infinity','3.5','not-a-number','-1','0','']) {
+   assert.throws(()=>validateMvpRuntime({...good,[key]:bad}),new RegExp(key));
+  }
+ }
+ for(const patch of [{DB_POOL_MAX:'6'},{STORAGE_QUOTA_USER_MB:'101'}])
+  assert.throws(()=>validateMvpRuntime({...good,...patch}));
+ for(const patch of [{DB_POOL_MAX:'1'},{DB_POOL_MAX:'5'},{STORAGE_QUOTA_USER_MB:'1'},{STORAGE_QUOTA_USER_MB:'100'}])
+  assert.equal(validateMvpRuntime({...good,...patch}).hosting,'render-free');
+});
 test('Blueprint inicia o preflight antes do servidor e aplica quota de 100 MB por usuário',()=>{
  const yaml=readFileSync(new URL('../../../render.yaml',import.meta.url),'utf8');
  assert.match(yaml,/startCommand: cd platform && node tools\/mvp-preflight\.js && npm start/);
