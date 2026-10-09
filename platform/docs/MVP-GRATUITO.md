@@ -29,13 +29,13 @@ A configuração do projeto pode exigir ajustes adicionais no Supabase que ainda
 
 ## 3. Preparar o Render Free
 
-1. No https://dashboard.render.com selecione **New → Blueprint** e escolha o repositório e o `render.yaml` da `main`. O Blueprint cria **somente um Web Service `plan: free`**; não cria banco Render (o banco Render Free expira em 30 dias).
+1. Na página https://render.com/deploy?repo=https://github.com/VictorVitorino/designersystemA-M clique para implantar o Blueprint da `main` (ou selecione **New → Blueprint** no https://dashboard.render.com). O Blueprint cria **somente um Web Service `plan: free`**; não cria banco Render (o banco Render Free expira em 30 dias).
 2. O Render fará o build com `npm ci --omit=dev`, Python 3 já disponível no runtime, e executará a API Node que serve o editor e as páginas. `autoDeployTrigger: off` evita publicação automática de mudanças não aprovadas.
-3. Antes de disponibilizar, preencher os campos `sync: false` no **Environment** do Render, sempre com os valores do novo projeto Supabase:
+3. **O endereço `APP_ORIGIN` é fornecido automaticamente pelo próprio Render**, via `fromService → RENDER_EXTERNAL_URL`. Antes de disponibilizar, preencha os demais campos `sync: false` no **Environment** do Render, sempre com os valores do projeto exclusivo Supabase:
 
 | Variável | Valor / onde obter |
 |---|---|
-| `APP_ORIGIN` | **URL HTTPS exata do seu serviço Render**, exemplo `https://<seu-servico>.onrender.com` (sem barra ao final) |
+| `APP_ORIGIN` | **Automático no Blueprint**, por referência ao `RENDER_EXTERNAL_URL` do próprio serviço Render. Confira se coincide com o HTTPS atribuído. |
 | `DATABASE_URL` | URL PostgreSQL do papel restrito `app_api`, pooler Supabase, **TLS** |
 | `SUPABASE_URL` | Project URL do projeto `canteiro-mvp` |
 | `SUPABASE_ANON_KEY` | Chave pública/anon do projeto (backend); nunca usar a secreta no HTML |
@@ -46,7 +46,7 @@ A configuração do projeto pode exigir ajustes adicionais no Supabase que ainda
 | `S3_BUCKET` | Nome do bucket **privado** |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Credenciais S3 exclusivas do projeto; **somente no servidor** |
 
-O Blueprint já define `APP_ENV=staging`, `DATABASE_SSL=require`, `STORAGE_DRIVER=s3`, `S3_FORCE_PATH_STYLE=true`, `DB_POOL_MAX=2`, `STORAGE_QUOTA_USER_MB=100`, `NODE_VERSION=22.22.0` e gera `CSRF_SECRET`. Antes da API iniciar, o script `tools/mvp-preflight.js` bloqueia erros de configuração: só aceita HTTPS Render, banco como `app_api` via TLS, Auth/JWKS e S3 do mesmo projeto Supabase, cota limitada e nenhum segredo administrativo no Render. Ele não contata a rede nem imprime credenciais. O campo `APP_ORIGIN` é preenchido depois de o serviço receber URL; atualize-o se o hostname mudar.
+O Blueprint já define `APP_ENV=staging`, `DATABASE_SSL=require`, `STORAGE_DRIVER=s3`, `S3_FORCE_PATH_STYLE=true`, `DB_POOL_MAX=2`, `STORAGE_QUOTA_USER_MB=100`, `NODE_VERSION=22.22.0` e gera `CSRF_SECRET`. Antes da API iniciar, o script `tools/mvp-preflight.js` bloqueia erros de configuração: só aceita HTTPS Render, banco como `app_api` via TLS, Auth/JWKS e S3 do mesmo projeto Supabase, cota limitada e nenhum segredo administrativo no Render. Ele não contata a rede nem imprime credenciais. `APP_ORIGIN` acompanha automaticamente a URL `*.onrender.com` atribuída pelo Render, sem copiar manualmente o endereço. Revise a URL no painel antes do piloto.
 
 4. Configurar **Supabase Auth → URL Configuration**: Site URL = `APP_ORIGIN` e Redirect URLs para o site e a página `/auth/confirmar` (confirmar o fluxo exato do Auth ao testar).
 5. **Primeiro administrador:** crie no ambiente GitHub `mvp` o Secret `DATABASE_OPS_URL` (conexão TLS como `app_ops`, sem usar `postgres`) e `SUPABASE_SERVICE_ROLE_KEY`, além da variável `SUPABASE_URL` com a URL HTTPS do mesmo projeto. Depois que as migrações forem concluídas, execute manualmente **Actions → Convidar administrador MVP Free**, preenchendo `ADMIN-MVP`, o ref do projeto, e-mail e nome. Confira o e-mail de convite e defina a senha; o SMTP padrão do Supabase Free pode restringir os destinatários. Nunca coloque `DATABASE_OPS_URL` no Render ou navegador. A chave `SUPABASE_SERVICE_ROLE_KEY` só pode existir como segredo no servidor Render e no ambiente protegido do GitHub, jamais no HTML/JavaScript público.
