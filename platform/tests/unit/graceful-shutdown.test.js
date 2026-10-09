@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { createGracefulStop } from '../../src/server.js';
+import { createGracefulStop, startupFailureEvent } from '../../src/server.js';
 
 test('stop é idempotente, suspende novos requests e aguarda fechamento antes do banco', async () => {
   const events = [];
@@ -80,4 +80,20 @@ test('requisição HTTP real pode completar antes do Postgres ser encerrado no d
     release();
     if (server.listening) await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('falha ao iniciar não envia URL, senha, token ou stack de drivers ao log', () => {
+  const raw = 'connection to postgres://app_api:example-secret@invalid.local/app failed; token=example-token';
+  const event = startupFailureEvent(new Error(raw));
+  assert.deepEqual(event, { level: 'fatal', msg: 'startup_failed', kind: 'runtime_failure' });
+  assert.ok(!JSON.stringify(event).includes('example-secret'));
+  assert.ok(!JSON.stringify(event).includes('example-token'));
+  assert.ok(!JSON.stringify(event).includes('invalid.local'));
+});
+
+test('erro de configuração conserva a categoria sem reproduzir valor sensível', () => {
+  const event = startupFailureEvent(new Error('Configuração insegura/incompleta: SUPABASE_URL=example-secret'));
+  assert.deepEqual(event, { level: 'fatal', msg: 'startup_failed', kind: 'invalid_configuration' });
+  assert.ok(!JSON.stringify(event).includes('example-secret'));
+  assert.deepEqual(startupFailureEvent(null), { level: 'fatal', msg: 'startup_failed', kind: 'runtime_failure' });
 });
