@@ -51,7 +51,23 @@ export function checkConfig(env = process.env, { needDb = true, needObjects = fa
   try { keyringFromEnv(env); } catch (e) { errors.push(e.message); }
   if (needDb && !env.DATABASE_ADMIN_URL) errors.push('DATABASE_ADMIN_URL não definido (conexão direta, papel dono do banco)');
   if (env.BACKUP_TARGET) { const sep = assertSeparateFromPrimary(env.BACKUP_TARGET, env); errors.push(...sep.errors); warnings.push(...sep.warnings); }
-  if (needDb && env.DATABASE_ADMIN_URL) { try { const u = new URL(env.DATABASE_ADMIN_URL); if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(u.hostname) && (u.searchParams.get('sslmode') || 'require') === 'disable') errors.push('DATABASE_ADMIN_URL com sslmode=disable em host remoto'); if (/pooler\.supabase\.com/.test(u.hostname) && u.port === '6543') warnings.push('DATABASE_ADMIN_URL aponta para o pooler (porta 6543): o backup precisa da conexão DIRETA (porta 5432) para usar snapshot'); } catch { errors.push('DATABASE_ADMIN_URL inválida'); } }
+  if (needDb && env.DATABASE_ADMIN_URL) {
+    try {
+      const dbUrl = new URL(env.DATABASE_ADMIN_URL);
+      const local = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(dbUrl.hostname);
+      const modes = dbUrl.searchParams.getAll('sslmode');
+      // A biblioteca usa TLS obrigatório em conexões remotas quando sslmode está ausente.
+      // Prefer/allow podem negociar conexão em texto claro; duplicatas são ambíguas.
+      if (!local && (modes.length > 1 || (modes.length === 1 && !['require', 'verify-ca', 'verify-full'].includes(modes[0])))) {
+        errors.push('DATABASE_ADMIN_URL remota exige TLS (sslmode=require, verify-ca ou verify-full; sem parâmetros duplicados)');
+      }
+      if (/(^|\.)pooler\.supabase\.com$/.test(dbUrl.hostname) && dbUrl.port === '6543') {
+        warnings.push('DATABASE_ADMIN_URL aponta para o pooler (porta 6543): o backup precisa da conexão DIRETA (porta 5432) para usar snapshot');
+      }
+    } catch {
+      errors.push('DATABASE_ADMIN_URL inválida');
+    }
+  }
   if (needObjects) { try { openPrimaryStore(env); } catch (e) { errors.push(e.message); } }
   return { errors, warnings };
 }
