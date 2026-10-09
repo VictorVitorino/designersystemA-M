@@ -50,11 +50,14 @@ export function loadConfig(env = process.env) {
   const problems = [];
   const origin = new URL(e.APP_ORIGIN);
   if (secure && origin.protocol !== 'https:') problems.push('APP_ORIGIN precisa ser https:// em staging/produção');
-  // HTTPS só para o site não basta: chaves de autenticação, JWKS e credenciais S3
-  // também transitam pelos endpoints externos configurados.
+  // URLs externas são endpoints, nunca recipientes de usuário/senha embutidos.
+  // Mesmo em HTTPS, userinfo pode aparecer em redirecionamentos, proxies e logs.
   if (secure) {
-    for (const k of ['SUPABASE_URL', 'SUPABASE_JWKS_URL', 'S3_ENDPOINT']) {
-      if (e[k] && new URL(e[k]).protocol !== 'https:') problems.push(`${k} precisa ser https:// em staging/produção`);
+    for (const k of ['APP_ORIGIN', 'SUPABASE_URL', 'SUPABASE_JWKS_URL', 'S3_ENDPOINT']) {
+      if (!e[k]) continue;
+      const endpoint = new URL(e[k]);
+      if (endpoint.protocol !== 'https:') problems.push(`${k} precisa ser https:// em staging/produção`);
+      if (endpoint.username || endpoint.password) problems.push(`${k} não pode incluir usuário ou senha na URL`);
     }
   }
   if (secure) {
