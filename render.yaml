@@ -40,19 +40,19 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
-        sync: false
+        value: https://fgdrjxuhzagmvqyhrqlf.supabase.co
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SUPABASE_JWKS_URL
-        sync: false
+        value: https://fgdrjxuhzagmvqyhrqlf.supabase.co/auth/v1/.well-known/jwks.json
       - key: S3_ENDPOINT
-        sync: false
+        value: https://fgdrjxuhzagmvqyhrqlf.storage.supabase.co/storage/v1/s3
       - key: S3_REGION
-        sync: false
+        value: sa-east-1
       - key: S3_BUCKET
-        sync: false
+        value: canteiro-mvp-files
       - key: S3_ACCESS_KEY_ID
         sync: false
       - key: S3_SECRET_ACCESS_KEY
