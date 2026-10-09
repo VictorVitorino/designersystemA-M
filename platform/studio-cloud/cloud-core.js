@@ -384,10 +384,25 @@
       return Promise.all([count('pending'), count('outbox')]).then(function (a) { db.close(); return a[0] + a[1]; });
     });
   }
-  function deleteDb(name) { return new Promise(function (res) { try { var r = root.indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; setTimeout(res, 2000); } catch (e) { res(); } }); }
+  /* onblocked/onerror NÃO significam exclusão concluída. A Promise informa
+     falha para que o logout alerte quem compartilha este computador. */
+  function deleteDb(name) {
+    return new Promise(function (res) {
+      var done = false, timer = null;
+      function finish(ok) { if (done) return; done = true; clearTimeout(timer); res(ok); }
+      try {
+        var r = root.indexedDB.deleteDatabase(name);
+        r.onsuccess = function () { finish(true); };
+        r.onerror = r.onblocked = function () { finish(false); };
+        timer = setTimeout(function () { finish(false); }, 2000);
+      } catch (e) { finish(false); }
+    });
+  }
   function clearLocalData() {
     ['localStorage', 'sessionStorage'].forEach(function (k) { var st = webStore(k); if (st) dropKeys(st, CLOUD_KEYS); });
-    return root.indexedDB ? Promise.all(['canteiro-cloud', 'canteiro'].map(deleteDb)) : Promise.resolve();   /* "canteiro" = Minhas obras do editor original nesta origem */
+    /* "canteiro" = Minhas obras do editor original nesta origem.
+       Só declarar limpeza completa quando os DOIS bancos confirmarem onsuccess. */
+    return root.indexedDB ? Promise.all(['canteiro-cloud', 'canteiro'].map(deleteDb)).then(function (results) { return results.every(Boolean); }) : Promise.resolve(true);
   }
 
   var api = {
