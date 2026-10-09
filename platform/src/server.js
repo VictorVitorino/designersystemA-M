@@ -61,4 +61,20 @@ export async function start(env = process.env) {
   process.once('SIGINT', onSignal);
   return { server, deps, stop };
 }
-if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { console.error(JSON.stringify({ level: 'fatal', msg: String(e.message) })); process.exit(1); });
+/* Mensagens de exceções de bibliotecas podem conter URLs e credenciais.
+   No log de partida, publicar somente categorias e códigos conhecidos. */
+const STARTUP_ERROR_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EHOSTUNREACH',
+  '28P01', '3D000', '53300', '57P03', '08001', '08006',
+]);
+export function startupErrorLog(error) {
+  const code = STARTUP_ERROR_CODES.has(error?.code) ? error.code : undefined;
+  const configError = error?.name === 'ZodError'
+    || (typeof error?.message === 'string' && error.message.startsWith('Configuração insegura/incompleta:'));
+  return JSON.stringify({
+    level: 'fatal', msg: 'startup_failed',
+    category: configError ? 'configuration' : code ? 'dependency' : 'unexpected',
+    ...(code ? { code } : {}),
+  });
+}
+if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { console.error(startupErrorLog(e)); process.exit(1); });
