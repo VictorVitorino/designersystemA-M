@@ -63,6 +63,27 @@ describe('cota por pessoa (1 MB neste teste)', () => {
     assert.equal(res.filter((r) => r.status === 201).length, 2, res.map((r) => r.status).join(',')); assert.equal(res.filter((r) => r.status === 413).length, 2);
     assert.ok(await usedBy(C) <= 1048576);
   });
+  test('PUT não burla a cota se outro usuário pré-registrou o hash como pending com tamanho falso', async () => {
+    const D = await env.mkUser({ name: 'Recebedor' });
+    const holder = await env.mkUser({ name: 'Pré-registro' });
+    const base = await pngOf(600);
+    const incoming = await pngOf(600);
+    const sha = sha256Hex(incoming);
+    assert.equal((await putRaw(D, base)).status, 201);
+    const before = await usedBy(D);
+    await env.sys((tx) => tx`insert into app.assets
+      (sha256, size_bytes, mime, kind, status, uploaded_by)
+      values (${sha}, 1000, 'image/png', 'image', 'pending', ${holder.id}::uuid)`);
+    const r = await putRaw(D, incoming);
+    assert.equal(r.status, 413, r.text);
+    assert.equal(r.json.error.code, 'quota_exceeded');
+    assert.equal(await usedBy(D), before, 'a cota do remetente não aumentou');
+    const [record] = await env.sys((tx) => tx`select status, uploaded_by from app.assets where sha256 = ${sha}`);
+    assert.equal(record.status, 'pending');
+    assert.equal(record.uploaded_by, holder.id);
+    assert.equal(await env.storage.head(sha), null, 'nenhum objeto foi promovido');
+  });
+
   test('admin: GET /api/admin/users devolve storageBytes por pessoa (mesmo critério da cota)', async () => {
     // o mini-app não monta /api/admin: compõe aqui só essa rota, com o mesmo onError e o usuário admin "logado"
     const h = new Hono(); h.use('*', async (c, next) => { c.set('deps', env.deps); c.set('user', { id: ADM.id, role: 'admin', status: 'active', email: 'adm@am.test', displayName: 'Admin' }); await next(); });
