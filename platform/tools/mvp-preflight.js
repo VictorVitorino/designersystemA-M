@@ -17,9 +17,13 @@ export function validateMvpRuntime(env) {
   if (!PROJECT_REF.test(ref) || auth.origin !== 'https://' + ref + '.supabase.co'
       || auth.pathname !== '/' || auth.search || auth.hash || auth.username || auth.password)
     throw new Error('SUPABASE_URL deve apontar ao projeto Supabase exclusivo do MVP');
+  // get('sslmode') retorna só a primeira ocorrência. Uma URL com parâmetros
+  // duplicados (ou alias ssl=false) seria aceita, embora o driver possa interpretar
+  // outro valor. Rejeitar configurações TLS ambíguas antes de iniciar a API.
+  const sslModes = db.searchParams.getAll('sslmode');
   if (!['postgres:', 'postgresql:'].includes(db.protocol) || db.pathname !== '/postgres'
-      || !['5432', '6543'].includes(db.port) || db.searchParams.get('sslmode') !== 'require'
-      || !db.password || db.hash || env.DATABASE_SSL !== 'require')
+      || !['5432', '6543'].includes(db.port) || sslModes.length !== 1 || sslModes[0] !== 'require'
+      || db.searchParams.has('ssl') || !db.password || db.hash || env.DATABASE_SSL !== 'require')
     throw new Error('DATABASE_URL precisa de usuário restrito, porta PostgreSQL válida e TLS obrigatório');
   const direct = db.hostname === 'db.' + ref + '.supabase.co' && db.username === 'app_api' && db.port === '5432';
   const pooler = POOLER.test(db.hostname) && db.username === 'app_api.' + ref;
