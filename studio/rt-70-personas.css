@@ -1,0 +1,136 @@
+/* ===== rt-70-personas.css — Personagens A&M (S35): rig em SVG, poses, animações e balões; keyframes com prefixo pz ===== */
+.pz{overflow:visible;font-family:Inter,Roboto,Arial,sans-serif;--kC:pzNone;--kB:pzNone;--kR:pzNone;--kL:pzNone;--kG:pzNone;--kG2:pzNone;--kM:pzNone;--kF:pzNone;--dur:1.6s;--gd:.5s;--ease:ease-in-out;--n1:1}
+.pz-svg{position:absolute;display:block;overflow:visible}
+.pz[data-face=l] .pz-svg{transform:scaleX(-1)}
+/* cores da marca (o kit “Cores do componente” recolore estas regras e o style do elemento) */
+.pz-b{fill:var(--c1,#4A6FA5)}.pz-o{fill:var(--c2,#002A46)}.pz-w{fill:#FFFFFF}.pz-n{fill:#002A46}.pz-or{fill:#F78C16}.pz-i{fill:#A3B8D6}.pz-g{fill:#3E4C5E}.pz-h{fill:#13315C}
+.pz-hand{fill:#FCD1A2}.pz-lg{fill:#13315C}.pz-sh{fill:#3E4C5E}.pz-shd{fill:#002A46;opacity:.12}.pz-ck{fill:#F78C16;opacity:.32}
+.pz-st{fill:none;stroke:#002A46;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}.pz-s2{stroke-width:2}.pz-s25{stroke-width:2.5}.pz-s3{stroke-width:3}.pz-zip{stroke-width:2}.pz-lash{stroke-width:2.5}
+.pz-arc{fill:none;stroke:#002A46;stroke-width:3.5;stroke-linecap:round}
+.pz-so{fill:none;stroke:#F78C16;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.5}
+.pz-sl{fill:none;stroke:#A3B8D6;stroke-width:2.5;stroke-linecap:round}.pz-sv{fill:none;stroke:#A3B8D6;stroke-width:2;stroke-linecap:round;opacity:.9}
+.pz-cir{fill:none;stroke:#F78C16;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.pz-dk{fill:#002A46;opacity:.22}.pz-hd{stroke:#A3B8D6;stroke-width:2}.pz-jl{stroke:#A3B8D6;stroke-width:2}
+.pz-hb{fill:none;stroke:#3E4C5E;stroke-width:7;stroke-linecap:round}.pz-hm{fill:none;stroke:#3E4C5E;stroke-width:4;stroke-linecap:round}
+.pz-gl{fill:none;stroke:#F78C16;stroke-width:3.5;stroke-linecap:round}.pz-gq{stroke:#002A46}.pz-vs rect{fill:#13315C;opacity:.3}
+.pz-lp{fill:#E3EAF2;stroke:#002A46;stroke-width:5}
+/* olhos: pálpebras (piscar), pupilas que seguem o mouse (--lx/--ly, player), expressões por data-mood */
+.pz-lid{fill:#FFFFFF;transform-box:fill-box;transform-origin:50% 0;scale:1 0}
+.am-play .pz-lid{animation:pzBlink 4.6s linear infinite}
+.am-play .pz-led{animation:pzLed 1.6s ease-in-out infinite}
+.pz-pupils{translate:var(--lx,0px) var(--ly,0px);transition:translate .18s ease-out}
+.pz [data-m]{display:none}
+.pz[data-mood=feliz] [data-m=feliz],.pz[data-mood=animado] [data-m=animado],.pz[data-mood=surpreso] [data-m=surpreso],.pz[data-mood=pensativo] [data-m=pensativo],.pz[data-mood=focado] [data-m=focado],.pz[data-mood=piscada] [data-m=piscada],.pz[data-mood=preocupado] [data-m=preocupado],.pz[data-mood=triste] [data-m=triste]{display:inline}
+.pz[data-mood=piscada] .pz-eR,.pz[data-mood=piscada] .pz-lidR,.pz[data-mood=animado] .pz-eye,.pz[data-mood=animado] .pz-lid{display:none}
+.pz[data-mood=pensativo] .pz-pupils,.pz[data-act=pensar] .pz-pupils{translate:calc(var(--lx,0px) + 3px) calc(var(--ly,0px) - 4px)}
+.pz-fing,.pz-conf{display:none}
+.pz[data-act=apontar] .pz-fing,.pz.pz-go[data-act2=apontar] .pz-fing{display:inline}
+.pz[data-act=comemorar] .pz-conf,.pz.pz-go[data-act2=comemorar] .pz-conf{display:inline}
+/* origens de giro (unidades do viewBox) */
+.pz-char,.pz-torso,.pz-arm,.pz-leg,.pz-mouth,.pz-conf circle{transform-box:view-box}
+.pz-char{transform-origin:100px 226px}.pz-torso{transform-origin:100px 214px}
+.pz-aL{transform-origin:36px 152px;rotate:16deg}.pz-aR{transform-origin:164px 152px;rotate:-16deg}
+.pz-lgL{transform-origin:84px 182px}.pz-lgR{transform-origin:116px 182px}
+.pz-mouth{transform-origin:100px 140px}
+.pz-conf circle:nth-child(1){--cx:-30px}.pz-conf circle:nth-child(2){--cx:26px}.pz-conf circle:nth-child(3){--cx:0px}.pz-conf circle:nth-child(4){--cx:-18px}.pz-conf circle:nth-child(5){--cx:22px}
+/* poses de repouso por movimento: é o que o editor, as miniaturas e o PDF/PowerPoint mostram, e onde cada animação termina */
+.pz[data-act=acenar] .pz-aR{rotate:-140deg}
+.pz[data-act=apontar] .pz-aR{rotate:var(--aim,-100deg)}
+.pz[data-act=pensar] .pz-aL{rotate:-118deg}
+.pz[data-act=comemorar] .pz-aL{rotate:160deg}.pz[data-act=comemorar] .pz-aR{rotate:-160deg}
+.pz[data-act=andar] .pz-lgL{rotate:-16deg}.pz[data-act=andar] .pz-lgR{rotate:16deg}.pz[data-act=andar] .pz-aL{rotate:-10deg}.pz[data-act=andar] .pz-aR{rotate:10deg}
+/* motor: cada parte toca a animação que o movimento pede (--kX) quando o gatilho a arma (--aX = var(--kX)); pzNone = nome sem keyframes (parado) */
+.pz-mv{position:absolute;inset:0}
+.pz-char{animation:var(--aC,pzNone) var(--cd,var(--dur,1.6s)) var(--cease,var(--ease,ease-in-out)) var(--d0,0ms) var(--cn,var(--n,1)) var(--cfill,both)}
+.pz-torso{animation:var(--aB,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
+.pz-aR{animation:var(--aR,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
+.pz-aL{animation:var(--aL,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
+.pz-lgL{animation:var(--aG,pzNone) var(--gd,.5s) linear var(--d0,0ms) var(--gn,var(--n,1)) both}
+.pz-lgR{animation:var(--aG2,pzNone) var(--gd,.5s) linear var(--d0,0ms) var(--gn,var(--n,1)) both}
+.pz-mouth{animation:var(--aM,pzNone) var(--dur,2s) ease-in-out var(--d0,0ms) var(--n,1) both}
+.pz-conf circle{animation:var(--aF,pzNone) 1.3s ease-out var(--d0,0ms) var(--n,1) both}
+.pz[data-act=acenar]{--kR:pzWave;--dur:1.8s}
+.pz[data-act=apontar]{--kR:pzPoint;--dur:2.4s}
+.pz[data-act=andar]{--kG:pzLegA;--kG2:pzLegB;--kB:pzBob;--kL:pzSwingL;--kR:pzSwingR;--dur:.5s;--gd:.5s;--ease:linear;--n1:4}
+.pz[data-act=pular]{--kC:pzJump;--kG:pzTuck;--kG2:pzTuck;--dur:.9s;--gd:.9s;--ease:cubic-bezier(.3,.7,.4,1)}
+.pz[data-act=pensar]{--kL:pzChin;--dur:2.2s}
+.pz[data-act=comemorar]{--kL:pzCheerL;--kR:pzCheerR;--kC:pzHop;--kF:pzConf;--dur:2.2s}
+.pz[data-act=falar]{--kM:pzTalk;--dur:2s}
+.pz[data-act=concordar]{--kB:pzNod;--dur:1.4s}
+.pz[data-act=negar]{--kB:pzShake;--dur:1.4s}
+/* gatilhos (só na apresentação e nas prévias: .am-play) */
+.am-play.am-in .pz[data-trig=in]{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:var(--n1,1);--d0:calc(var(--d,0ms) + var(--t,700ms) + 150ms)}
+.am-play.am-in .pz[data-trig=loop]{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:infinite;--d0:calc(var(--d,0ms) + var(--t,700ms) + 150ms)}
+.am-play .pz[data-trig=hover]:hover{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:infinite;--d0:0ms}
+/* andar até: balão e boneco (.pz-mv) deslizam até --wq (cqw) enquanto as pernas dão --wn passos (uma vez, ao entrar) */
+.am-play.am-in .pz[data-walk] .pz-mv{animation:pzWalkTo var(--wt,1.6s) linear var(--d0,0ms) 1 forwards}
+.am-play.am-in .pz[data-walk]{--aG:pzLegA;--aG2:pzLegB;--aB:pzBob;--aL:pzSwingL;--aR:pzSwingR;--gn:var(--wn,3);--n:var(--wn,3);--dur:.5s;--gd:.5s;--ease:linear;--d0:calc(var(--d,0ms) + var(--t,700ms) + 150ms)}
+/* clique (player): o movimento ao clicar (data-act2) toca uma vez, por cima do movimento normal */
+.am-stage .pz.pz-go[data-act2]{--kC:pzNone;--kB:pzNone;--kR:pzNone;--kL:pzNone;--kG:pzNone;--kG2:pzNone;--kM:pzNone;--kF:pzNone;--ease:ease-in-out;--gd:.5s;--n1:1;--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:var(--n1,1);--gn:var(--n1,1);--d0:0ms;--cd:var(--dur);--cease:var(--ease);--cn:1;--cfill:both}
+.am-stage .pz.pz-go[data-act2=acenar]{--kR:pzWave;--dur:1.8s}
+.am-stage .pz.pz-go[data-act2=apontar]{--kR:pzPoint;--dur:2.4s}
+.am-stage .pz.pz-go[data-act2=andar]{--kG:pzLegA;--kG2:pzLegB;--kB:pzBob;--kL:pzSwingL;--kR:pzSwingR;--dur:.5s;--ease:linear;--n1:4}
+.am-stage .pz.pz-go[data-act2=pular]{--kC:pzJump;--kG:pzTuck;--kG2:pzTuck;--dur:.9s;--gd:.9s;--ease:cubic-bezier(.3,.7,.4,1)}
+.am-stage .pz.pz-go[data-act2=pensar]{--kL:pzChin;--dur:2.2s}
+.am-stage .pz.pz-go[data-act2=comemorar]{--kL:pzCheerL;--kR:pzCheerR;--kC:pzHop;--kF:pzConf;--dur:2.2s}
+.am-stage .pz.pz-go[data-act2=falar]{--kM:pzTalk;--dur:2s}
+.am-stage .pz.pz-go[data-act2=concordar]{--kB:pzNod;--dur:1.4s}
+.am-stage .pz.pz-go[data-act2=negar]{--kB:pzShake;--dur:1.4s}
+/* elemento apontado, ao clicar no personagem: brilho laranja (além do efeito de mouse que ele tiver, via .am-hov) */
+.pz-hl>.am-rot{animation:pzHl 1.6s ease-out 1;border-radius:1cqh}
+@keyframes pzWave{0%{rotate:-16deg}15%{rotate:-140deg}30%{rotate:-112deg}45%{rotate:-145deg}60%{rotate:-112deg}75%{rotate:-145deg}100%{rotate:-140deg}}
+@keyframes pzPoint{0%{rotate:-16deg}30%{rotate:calc(var(--aim,-100deg) - 8deg)}42%,70%{rotate:var(--aim,-100deg)}80%{rotate:calc(var(--aim,-100deg) - 5deg)}90%,100%{rotate:var(--aim,-100deg)}}
+@keyframes pzLegA{0%,100%{rotate:-22deg}50%{rotate:22deg}}
+@keyframes pzLegB{0%,100%{rotate:22deg}50%{rotate:-22deg}}
+@keyframes pzSwingL{0%,100%{rotate:34deg}50%{rotate:-10deg}}
+@keyframes pzSwingR{0%,100%{rotate:-34deg}50%{rotate:10deg}}
+@keyframes pzBob{0%,50%,100%{translate:0 0}25%,75%{translate:0 -4px}}
+@keyframes pzWalkTo{to{translate:var(--wq,0cqw) 0}}
+@keyframes pzJump{0%{translate:0 0;scale:1 1}18%{scale:1.08 .9}40%{translate:0 -34px;scale:.96 1.06}62%{translate:0 0;scale:1.1 .88}80%{scale:1 1.02}100%{translate:0 0;scale:1 1}}
+@keyframes pzTuck{0%,100%{scale:1 1}40%{scale:1 .8}}
+@keyframes pzChin{0%{rotate:16deg}35%,100%{rotate:-118deg}60%{rotate:-112deg}80%{rotate:-120deg}}
+@keyframes pzCheerL{0%{rotate:16deg}25%{rotate:165deg}40%{rotate:150deg}55%{rotate:165deg}70%{rotate:150deg}85%,100%{rotate:160deg}}
+@keyframes pzCheerR{0%{rotate:-16deg}25%{rotate:-165deg}40%{rotate:-150deg}55%{rotate:-165deg}70%{rotate:-150deg}85%,100%{rotate:-160deg}}
+@keyframes pzHop{0%,100%{translate:0 0}25%{translate:0 -14px}45%{translate:0 0}65%{translate:0 -10px}85%{translate:0 0}}
+@keyframes pzConf{0%{translate:0 40px;opacity:0;scale:.4}20%{opacity:1}100%{translate:var(--cx,0px) -40px;opacity:0;scale:1}}
+@keyframes pzTalk{0%,22%,46%,70%,100%{scale:1 1}10%,34%,58%,84%{scale:1.05 .3}}
+@keyframes pzNod{0%,100%{translate:0 0}25%{translate:0 6px}50%{translate:0 0}75%{translate:0 6px}}
+@keyframes pzShake{0%,100%{rotate:0deg}20%{rotate:-7deg}40%{rotate:7deg}60%{rotate:-5deg}80%{rotate:5deg}}
+@keyframes pzBlink{0%,92%,100%{scale:1 0}95%,97%{scale:1 1}}
+@keyframes pzLed{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes pzHl{0%{box-shadow:0 0 0 0 rgba(247,140,22,.85)}100%{box-shadow:0 0 0 2.2cqh rgba(247,140,22,0)}}
+/* ===== balões (do personagem e do componente solto) ===== */
+.pz-bub{overflow:visible;font-family:Inter,Roboto,Arial,sans-serif}
+.pz-say{position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:.35em;padding:.5em .85em;text-align:center;line-height:1.22;font-weight:600;color:var(--c-ink,#002A46);background:var(--c-bub,#fff);border:.12em solid var(--c-line,#002A46);border-radius:1em}
+.pz-bub .pz-say{inset:0}
+.pz-bub .pz-say.pz-tl-b{bottom:1em}.pz-bub .pz-say.pz-tl-t{top:1em}.pz-bub .pz-say.pz-tl-l{left:1em}.pz-bub .pz-say.pz-tl-r{right:1em}
+.pz-s1,.pz-s2{max-width:100%;max-height:100%;overflow:hidden}
+.pz-txt{white-space:pre-line;overflow-wrap:anywhere}
+.pz-s2{display:none}.pz-on.pz-has2 .pz-s1{display:none}.pz-on.pz-has2 .pz-s2{display:block}
+.pz-chs{display:flex;flex-wrap:wrap;justify-content:center;gap:.3em;max-width:100%}
+.pz-ch{font:inherit;font-size:.78em;font-weight:600;line-height:1.2;padding:.28em .75em;border-radius:1em;border:.1em solid var(--c-line,#002A46);background:var(--c-line,#002A46);color:var(--c-bub,#fff);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pz-ch:hover,.pz-ch:focus-visible{filter:brightness(1.18);outline:none}
+.am-edit .pz-ch,.am-export .pz-ch{pointer-events:none}
+.pz-say::before,.pz-say::after{content:"";position:absolute;pointer-events:none}
+.pz-tl-n::before,.pz-tl-n::after{display:none}
+/* fala e nota: rabicho triangular (borda + preenchimento) */
+.pz-say-fala.pz-tl-b::before,.pz-say-nota.pz-tl-b::before{left:var(--tx,50%);top:100%;margin-left:-.75em;border:.75em solid transparent;border-top:.95em solid var(--c-line);border-bottom:0}
+.pz-say-fala.pz-tl-b::after,.pz-say-nota.pz-tl-b::after{left:var(--tx,50%);top:100%;margin-left:-.55em;margin-top:-.17em;border:.55em solid transparent;border-top:.7em solid var(--c-bub);border-bottom:0}
+.pz-say-fala.pz-tl-t::before,.pz-say-nota.pz-tl-t::before{left:var(--tx,50%);bottom:100%;margin-left:-.75em;border:.75em solid transparent;border-bottom:.95em solid var(--c-line);border-top:0}
+.pz-say-fala.pz-tl-t::after,.pz-say-nota.pz-tl-t::after{left:var(--tx,50%);bottom:100%;margin-left:-.55em;margin-bottom:-.17em;border:.55em solid transparent;border-bottom:.7em solid var(--c-bub);border-top:0}
+.pz-say-fala.pz-tl-l::before,.pz-say-nota.pz-tl-l::before{top:var(--ty,50%);right:100%;margin-top:-.75em;border:.75em solid transparent;border-right:.95em solid var(--c-line);border-left:0}
+.pz-say-fala.pz-tl-l::after,.pz-say-nota.pz-tl-l::after{top:var(--ty,50%);right:100%;margin-top:-.55em;margin-right:-.17em;border:.55em solid transparent;border-right:.7em solid var(--c-bub);border-left:0}
+.pz-say-fala.pz-tl-r::before,.pz-say-nota.pz-tl-r::before{top:var(--ty,50%);left:100%;margin-top:-.75em;border:.75em solid transparent;border-left:.95em solid var(--c-line);border-right:0}
+.pz-say-fala.pz-tl-r::after,.pz-say-nota.pz-tl-r::after{top:var(--ty,50%);left:100%;margin-top:-.55em;margin-left:-.17em;border:.55em solid transparent;border-left:.7em solid var(--c-bub);border-right:0}
+.pz-say-nota{border-radius:.25em;border-style:dashed;font-weight:500}
+/* pensamento: nuvem com duas bolinhas até a cabeça */
+.pz-say-pensa{border-radius:50%;padding:.9em 1.5em}
+.pz-say-pensa::before,.pz-say-pensa::after{border-radius:50%;background:var(--c-bub);border:.12em solid var(--c-line);box-sizing:border-box}
+.pz-say-pensa.pz-tl-b::before{width:1.1em;height:1.1em;left:var(--tx,50%);top:100%;margin:.15em 0 0 -.55em}.pz-say-pensa.pz-tl-b::after{width:.6em;height:.6em;left:var(--tx,50%);top:100%;margin:1.35em 0 0 -.1em}
+.pz-say-pensa.pz-tl-t::before{width:1.1em;height:1.1em;left:var(--tx,50%);bottom:100%;margin:0 0 .15em -.55em}.pz-say-pensa.pz-tl-t::after{width:.6em;height:.6em;left:var(--tx,50%);bottom:100%;margin:0 0 1.35em -.1em}
+.pz-say-pensa.pz-tl-l::before{width:1.1em;height:1.1em;right:100%;top:var(--ty,50%);margin:-.55em .15em 0 0}.pz-say-pensa.pz-tl-l::after{width:.6em;height:.6em;right:100%;top:var(--ty,50%);margin:.3em 1.35em 0 0}
+.pz-say-pensa.pz-tl-r::before{width:1.1em;height:1.1em;left:100%;top:var(--ty,50%);margin:-.55em 0 0 .15em}.pz-say-pensa.pz-tl-r::after{width:.6em;height:.6em;left:100%;top:var(--ty,50%);margin:.3em 0 0 1.35em}
+/* grito: estrela irregular na cor da linha, texto na cor do balão */
+.pz-say-grita{border:0;border-radius:0;padding:1.3em 2em;background:var(--c-sbg,#002A46);color:var(--c-sink,#fff);clip-path:polygon(50% 0%,59% 13%,74% 4%,76% 20%,93% 18%,86% 33%,100% 42%,88% 52%,98% 66%,82% 68%,86% 84%,70% 78%,66% 95%,54% 84%,42% 100%,36% 85%,20% 92%,24% 76%,6% 74%,16% 60%,0% 50%,14% 40%,4% 24%,22% 26%,20% 10%,36% 16%)}
+.pz-say-grita::before,.pz-say-grita::after{display:none}
+.pz-say-grita .pz-ch{background:var(--c-sink,#fff);color:var(--c-sbg,#002A46);border-color:var(--c-sink,#fff)}

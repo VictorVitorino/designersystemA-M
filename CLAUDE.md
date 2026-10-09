@@ -32,6 +32,7 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 - Capa: 6 `.cv-opt` (teclas 1–6); **6 projetos prontos** (7/7/6/6/6/7 slides; o 6º é “Apresentação institucional A&M”); cabe sem rolagem de 1024 a 1440; sem rolagem horizontal a 390. Manual (F1) com 17 linhas.
 - Barra de ferramentas sem estouro de 1180 a 1920 px (`#rib` e `#top`); `#bSave` dentro da viewport. Rótulos curtos até 1640 px; grupo de edição só com ícones até 1800 px; Gráficos só ícone ≤ 1300; “Apresentar deste slide” só ícone ≤ 1380; botão Institucional só ícone ≤ 1220.
 - Player: `hooks.show` só deve conter o gancho de navegação enquanto um player está aberto (extensões não registram `show` próprio; formulários e workshop armam no init do player). Cliques em `.am-ia` não navegam.
+- Menu **Inserir**: um só item “Personagens” (submenu com os 10 presets de `AMRT.personas.PRESETS`, na ordem, + “Balão de fala”).
 - Zero erros de console em todas as baterias.
 
 ## Marca e slides institucionais
@@ -40,6 +41,20 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 - Os 5 slides institucionais (capa “Somos a A&M Performance”, presença global, clientes, esferas de atuação, cadeia de valor) vêm de `studio/inst/*.json`, medidos contra `studio/inst/ref-*.png` com `node tools/inst-check.js spec.json ref.png out` (fidelidade mínima nos testes: capa 96,5 · mapa 97,5 · clientes 98 · esferas 93 · cadeia 99). Mapa, clientes e cadeia usam a arte oficial como fundo com textos editáveis por cima; **trocar pelos assets nativos quando o .pptx original chegar**.
 - A importação (.pptx/.pdf) reconhece esses slides pelo título e oferece “Usar os modelos oficiais” (`AMInst.scan/replace`, um Ctrl+Z).
 - Pontos de entrada do bloco: botão laranja `#bInst`, menu de contexto da miniatura, menu Slide, painel do slide (topo), tile do “Novo slide”, Marca A&M ▸ e cover › Projetos prontos › 6.
+
+## Personagens A&M (S35)
+
+- `rt-70-personas.js/.css` (runtime, vai no exportado) + `ed-46-personas.js` (só editor). `FX.persona`: SVG procedural (viewBox 200×240) com partes em
+  `AMRT.personas` (chapéus, cabelos, óculos, roupas, ferramentas, expressões) e 10 presets como **variantes**; cada campo de parte vazio = “Do personagem”
+  (`resolve(d, el)`). Cores só da paleta A&M; o kit de marca recolore (`palOk` true).
+- Movimentos/gatilhos são CSS: o `data-act` define `--kR/--kL/--kG/--kG2/--kB/--kC/--kM/--kF`, o `data-trig` arma (`--aX: var(--kX)`) com `--n` e `--d0`.
+  **Nunca** use `none` como nome de animação nessas variáveis (o atalho `animation` lê `none` como fill-mode): o nome inerte é `pzNone`. Loops, hover,
+  piscar e LED só sob `.am-play`; palco de edição, miniaturas e rasters mostram a pose de repouso do movimento.
+- Balão (`.pz-say`) é HTML por cima do SVG; `data.say` editável no lugar (`U.E`); botões de decisão `.pz-ch` inertes em `.am-edit/.am-export`.
+  Andar até X move o invólucro `.pz-mv` (balão + boneco) em **cqw** (`--wq`). Mira (`data.aim` = id) recalculada por `aimStage` depois de cada
+  `AMRT.renderSlide`, no player e após pointerup/keyup/input no editor (`AMPersonas.reaim`).
+- Tokens novos de `data.*` entram em `DATA_TOKENS` (editor.js) **e** em `NOTEXT_KEYS` (runtime.js); texto livre (`say`, `say2`, `choices`) fica fora e sai
+  sempre com `esc()`. A raiz leva `.am-ia`; o player não registra `hooks.show`.
 
 ## Convenções
 

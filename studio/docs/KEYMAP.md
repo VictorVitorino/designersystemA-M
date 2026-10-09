@@ -59,6 +59,8 @@ Slides de uma planilha (S33, editor): no new keys — Slide › Gerar slides de 
 
 Conectores presos (S32, editor): drag a line end near a shape to bind it (side midpoint or automatic); **Alt** while dragging = do not bind; **Shift** still snaps the angle; moving the line alone unbinds it. No new keys.
 
+Personagens A&M (S35): no new keys. Editor: Inserir › Personagens ▸ (10 presets + Balão de fala), presets as the “Personagem” chips of the panel, double click on the bubble text edits it in place, Ctrl+Z undoes any part change, dragging the aimed element re-aims the arm. Player: the mouse moves the eyes, a click on the character plays its reaction (expression, second line, movement, glow on the aimed element) and a second click reverts; the choice buttons in the bubble change the expression and jump to the slide they name; clicks on a character never advance the slide (`.am-ia`), ← → Space keep navigating.
+
 Workshop (S31, in the player): inside a post-it's text the player keys are off; **Enter/Space** on a focused +/−, Votar, colour dot, × or timer button activates it; dragging a note uses the pointer only (no keyboard move).
 
 Formulário (S30, in the player): inside an answer box the player keys are off (typing, Space, arrows); **Enter** in a short answer moves to the next field, **Shift+Enter** / Enter in a long answer breaks the line; **Enter/Space** on a focused option, rating or button activates it (never navigates); Esc still closes layers.

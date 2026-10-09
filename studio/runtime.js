@@ -624,7 +624,8 @@ window.AMRT = (function () {
     return real ? { list: out, secOf: secOf } : { list: [], secOf: [] };
   }
   /* textos livres de el.data (rótulos, valores), sem chaves de estilo/cor: alimenta o resumo automático */
-  var NOTEXT_KEYS = ['colors', 'style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort', 'kind', 'legend', 'panel', 'font', 'hl', 'highlight', 'bands', 'k', 'qs', 'sheet', 'tools']; /* qs/sheet/tools: codec e endereço do formulário (S30) */
+  var NOTEXT_KEYS = ['colors', 'style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort', 'kind', 'legend', 'panel', 'font', 'hl', 'highlight', 'bands', 'k', 'qs', 'sheet', 'tools',
+    'hat', 'hair', 'lashes', 'glasses', 'outfit', 'tool', 'mood', 'mood2', 'act', 'act2', 'dir', 'look', 'bubble', 'side', 'bcol', 'aim', 'tail']; /* qs/sheet/tools: codec e endereço do formulário (S30); o resto: partes e gatilhos dos personagens (S35) */
   var COLOR_LIKE = /^(#[0-9a-f]{3,8}|none|transparent|rgba?\([\d.,\s%]+\)|[a-z]{3,20})$/i;
   function dataStrings(d) {
     var out = [];

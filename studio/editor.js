@@ -316,7 +316,8 @@
   function redo() { if (editingId) endEdit(); flush(); if (!fut.length) return; hist.push(last); last = fut.pop(); rev++; restore(last); updUndo(); }
   function updUndo() { $('#bUndo').disabled = !hist.length; $('#bRedo').disabled = !fut.length; }
   /* ---------- validação de dados vindos de fora (arquivo, área de transferência) ---------- */
-  var COLOR_RE = /^(#[0-9a-f]{3,8}|none|transparent|rgba?\([\d.,\s%]+\)|[a-z]{3,20})$/i, TOKEN_RE = /^[\w\s.%-]{0,40}$/, DATA_TOKENS = ['style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort'];
+  var COLOR_RE = /^(#[0-9a-f]{3,8}|none|transparent|rgba?\([\d.,\s%]+\)|[a-z]{3,20})$/i, TOKEN_RE = /^[\w\s.%-]{0,40}$/, DATA_TOKENS = ['style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort',
+    'hat', 'hair', 'lashes', 'glasses', 'outfit', 'tool', 'mood', 'mood2', 'act', 'act2', 'dir', 'look', 'bubble', 'side', 'bcol', 'aim', 'tail']; /* S35: personagens (partes, movimentos, balão, alvo) */
   /* DATA_TOKENS: data.* que viram classe/atributo (ícones, SmartArt, gráficos). Só texto simples (TOKEN_RE) ou cor; texto livre usa outras chaves e sai com esc().
      EL_TOKENS: campos do elemento com valores fechados (linhas e cards); os booleanos antigos dash/headStart/headEnd continuam valendo */
   var HEADS = ['arrow', 'open', 'dot', 'diamond', 'bar'], EL_TOKENS = { curve: ['straight', 'elbow', 'curve'], dashS: ['dash', 'dot', 'dashdot', 'long'], headS: HEADS, headE: HEADS, look: ['flat', 'outline', 'lift', 'accent', 'topbar', 'header', 'gradient', 'ice'] };
@@ -587,7 +588,7 @@
     }
     if (el && editingId !== el.id) {
       var FDx = el.type === 'fx' ? RT.FX[el.kind] : null, lbl, bx = aabb(el);
-      if (FDx && FDx.variants) { var vv = el.variant || FDx.variant; lbl = (FDx.gal === 'icon' ? 'Movimento' : 'Efeito') + ': <b>' + esc((FDx.variants.find(function (x) { return x[0] === vv; }) || FDx.variants[0])[1]) + '</b>'; }
+      if (FDx && FDx.variants) { var vv = el.variant || FDx.variant; lbl = (FDx.vlabel || (FDx.gal === 'icon' ? 'Movimento' : 'Efeito')) + ': <b>' + esc((FDx.variants.find(function (x) { return x[0] === vv; }) || FDx.variants[0])[1]) + '</b>'; }
       else { var ai = (el.anim && el.anim.in) || 'none'; lbl = 'Animação: <b>' + esc((ANIM_IN.find(function (x) { return x[0] === ai; }) || ANIM_IN[0])[1]) + '</b>'; }
       var ax = Math.min(bx.x + bx.w, W - 10), ay = Math.max(bx.y, 40);
       html += '<button class="fxarrow" id="fxArrow" style="left:' + pc(ax, W) + ';top:' + pc(ay, H) + ';transform:translate(-100%,calc(-100% - 8px))" title="Escolher o efeito deste elemento"><svg viewBox="0 0 24 24" style="stroke:#F78C16"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>' + lbl + '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>';
@@ -867,6 +868,7 @@
     'rot-0': '<path d="M3 20h18"/><rect x="6" y="9" width="12" height="8" rx="1.5"/><path d="M12 3v3"/>',
     side: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
     form: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    persona: '<path d="M12 3c4.4 0 7 3.6 7 8.5V16c0 2.5-3 4-7 4s-7-1.5-7-4v-4.5C5 6.6 7.6 3 12 3z"/><circle cx="9.5" cy="11" r="1"/><circle cx="14.5" cy="11" r="1"/><path d="M9.5 14.5c1.5 1.2 3.5 1.2 5 0"/>', bubble: '<path d="M4 5h16v10h-9l-4 4v-4H4z"/>',
     note: '<path d="M4 4h16v11l-5 5H4z"/><path d="M15 20v-5h5"/>',
     csv: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
     unlink: '<path d="M10 14a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7L11.5 6.8"/><path d="M14 10a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.3-1.3"/><path d="M4 4l16 16"/>',
@@ -2771,7 +2773,7 @@
   function icTrigNote(els) { var tr = (els[0].data && els[0].data.trig) || 'in-hover', o = (RT.IC_TRIGS || []).filter(function (x) { return x[0] === tr; })[0]; return 'na apresentação: ' + (o ? o[1].toLowerCase() : 'ao entrar'); }
   var GX_TAG = { in: 'Entrada', emph: 'Ênfase', loop: 'Contínuo', hover: 'Mouse', tr: 'Transição' };
   var GX_PATH = { in: 'in', emph: 'emph', loop: 'loop', hover: 'hover' };
-  var GX_WHEN = { counter: 'Um KPI que conta até o valor diante da plateia.', progress: 'Meta × realizado, em barra ou anel.', beacon: 'Chamar atenção para um risco ou uma pendência.', headline: 'Título de abertura que entra palavra a palavra.', card: 'Iniciativas, pilares ou serviços em blocos.', holo: 'Destaque nobre que inclina com o mouse.', glass: 'Mensagem sobre foto ou fundo colorido.', quote: 'A mensagem-chave que o comitê deve levar.', amlines: 'Assinatura visual A&M em capas e encerramentos.' };
+  var GX_WHEN = { counter: 'Um KPI que conta até o valor diante da plateia.', progress: 'Meta × realizado, em barra ou anel.', beacon: 'Chamar atenção para um risco ou uma pendência.', headline: 'Título de abertura que entra palavra a palavra.', card: 'Iniciativas, pilares ou serviços em blocos.', holo: 'Destaque nobre que inclina com o mouse.', glass: 'Mensagem sobre foto ou fundo colorido.', quote: 'A mensagem-chave que o comitê deve levar.', amlines: 'Assinatura visual A&M em capas e encerramentos.', persona: 'Um personagem A&M que fala, aponta, anda e reage ao clique na apresentação.', bubble: 'Fala, pensamento ou grito ao lado de quem fala; prende-se a conectores.' };
   var GX_SAMPLE = { 'in:draw': 'line', 'in:words': 'text', 'in:iris': 'photo', 'in:grow': 'bar', 'loop:flow': 'line', 'loop:beacon': 'badge', 'loop:wiggle': 'badge', 'hover:spot': 'trio', 'hover:uline': 'text', 'hover:inzoom': 'photo', 'hover:zoom': 'photo' };
   var GX_DUR = { draw: 1000, iris: 900, land: 950, flip: 850, grow: 800 };
   var GX_IMG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0B3A63"/><stop offset="1" stop-color="#7EA1C3"/></linearGradient></defs><rect width="640" height="400" fill="url(#s)"/><circle cx="462" cy="140" r="48" fill="#F78C16"/><path d="M0 270L120 186L232 252L352 164L474 258L566 206L640 246V400H0Z" fill="#43698F"/><path d="M0 326L152 250L304 314L436 240L640 322V400H0Z" fill="#002A46"/></svg>');
@@ -2784,7 +2786,7 @@
     Object.keys(RT.FX).forEach(function (k) {
       var d = RT.FX[k], fam = d.model ? 'model' : 'cmp';
       /* ícones: uma caixa de componente por tipo; cada movimento do ícone vira uma caixa da família “Ícones animados” */
-      if (d.gal) { L.push({ id: 'cmp:' + k, fam: 'cmp', kind: k, name: d.name, tip: d.tip || '', when: d.gal === 'icon' ? '54 ícones que se desenham e se movem; escolha o ícone no painel.' : 'Dois estados que se alternam: problema → solução, queda → alta…', cat: d.cat });
+      if (d.gal) { L.push({ id: 'cmp:' + k, fam: 'cmp', kind: k, name: d.name, tip: d.tip || '', when: d.gal === 'icon' ? '54 ícones que se desenham e se movem; escolha o ícone no painel.' : GX_WHEN[k] || 'Dois estados que se alternam: problema → solução, queda → alta…', cat: d.cat });
         if (d.gal === 'icon') d.variants.forEach(function (v) { L.push({ id: 'icon:' + v[0], fam: 'icon', kind: k, variant: v[0], name: v[1], host: d.name, tip: v[2] || '', when: v[2] || '', cat: d.cat }); });
         return; }
       if (d.variants && d.variants.length) d.variants.forEach(function (v) { L.push({ id: fam + ':' + k + ':' + v[0], fam: fam, kind: k, variant: v[0], name: v[1], host: d.name, tip: v[2] || '', when: d.name + ' · ' + (v[2] || ''), cat: d.cat || GX_CHIP[fam] }); });
@@ -3251,6 +3253,12 @@
     ['board', 'Quadro inserido. Defina as colunas e as notas iniciais no painel; na apresentação, cada coluna ganha “+ Nota”.', 'note'],
     ['vote', 'Votação inserida. Escreva as opções e os pontos por pessoa no painel; na apresentação, cada um distribui os pontos e vota.', 'vote'],
     ['timer', 'Cronômetro inserido. Defina minutos e segundos no painel; na apresentação, Iniciar/Pausar, Reiniciar e ±1 min.', 'timer']];
+  /* S35: personagens A&M (rt-70-personas.js): um item por preset do elenco + o balão solto */
+  function personaItems() {
+    var P = RT.personas; if (!P || !RT.FX.persona) return [];
+    return P.PRESETS.map(function (p) { return { t: p[1], ic: 'persona', tip: p[3], fn: function () { insertFx('persona', null, null, p[0]); toast('Personagem inserido. Roupa, ferramenta, expressão, fala e movimento ficam no painel à direita; na apresentação ele reage ao clique.'); } }; })
+      .concat(RT.FX.bubble ? [{ sep: 1 }, { t: 'Balão de fala', ic: 'bubble', fn: function () { insertFx('bubble'); toast('Balão inserido: duplo clique escreve; prenda uma linha a ele para ligar a quem fala.'); } }] : []);
+  }
   function interactiveItems() { return INTERACTIVE.filter(function (o) { return RT.FX[o[0]]; }).map(function (o) { return { t: RT.FX[o[0]].name, ic: o[2] || 'form', fn: function () { insertFx(o[0]); toast(o[1]); } }; }); }
   function cardItems() { return $$('#mCard button').map(function (b) { return { t: b.textContent, ic: 'card', fn: function () { insertFx(b.dataset.fx, b.dataset.style || (b.dataset.fx === 'card' && dark() ? 'dark' : null)); } }; }); }
   function alignItems() {
@@ -3301,7 +3309,7 @@
         RT.ICONS ? { t: 'Ícone animado', ic: 'icons', sub: iconItems } : null,
         { t: 'Gráfico', ic: 'chart', sub: chartItems },
         RT.SMART_LAYOUTS ? { t: 'SmartArt', ic: 'smart', sub: smartItems } : null,
-        { t: 'Cards', ic: 'card', sub: cardItems }, RT.FX.form ? { t: 'Interativo', ic: 'form', sub: interactiveItems } : null, { t: 'Marca A&M', ic: 'brand', sub: brandItems }, { sep: 1 },
+        { t: 'Cards', ic: 'card', sub: cardItems }, RT.FX.form ? { t: 'Interativo', ic: 'form', sub: interactiveItems } : null, RT.FX.persona ? { t: 'Personagens', ic: 'persona', sub: personaItems } : null, { t: 'Marca A&M', ic: 'brand', sub: brandItems }, { sep: 1 },
         { t: 'Modelos…', ic: 'models', fn: function () { openDrawer(true, 'models'); } }, { t: 'Efeitos…', ic: 'fx', fn: function () { openDrawer(true, 'fx'); } }];
     },
     slide: function () {
