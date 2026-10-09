@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateMvpRuntime } from '../../tools/mvp-preflight.js';
-const ref='abcdefghijklmnopqrst';
+const ref='fgdrjxuhzagmvqyhrqlf';
 const fakeDbPassword='local'+'-demo';
 const good={
  APP_ENV:'staging', APP_ORIGIN:'https://canteiro-mvp-piloto.onrender.com',
@@ -21,6 +21,26 @@ test('Render Free: banco, Auth e S3 são do mesmo Supabase e credenciais restrit
  assert.deepEqual(validateMvpRuntime(good),{projectRef:ref,hosting:'render-free',databaseRole:'app_api',quotaMb:100});
  const direct={...good,DATABASE_URL:'postgres://app_api:'+fakeDbPassword+'@db.'+ref+'.supabase.co:5432/postgres?sslmode=require'};
  assert.equal(validateMvpRuntime(direct).databaseRole,'app_api');
+});
+test('Render Free: recusa OUTRO Supabase mesmo quando Auth, banco, JWKS e Storage concordam entre si',()=>{
+ const other='abcdefghijklmnopqrst';
+ const changed={
+  ...good,
+  SUPABASE_URL:'https://'+other+'.supabase.co',
+  SUPABASE_JWKS_URL:'https://'+other+'.supabase.co/auth/v1/.well-known/jwks.json',
+  DATABASE_URL:good.DATABASE_URL.replaceAll(ref,other),
+  S3_ENDPOINT:'https://'+other+'.storage.supabase.co/storage/v1/s3',
+ };
+ assert.throws(()=>validateMvpRuntime(changed),/projeto Supabase exclusivo do MVP/);
+ assert.equal(validateMvpRuntime(good).projectRef,ref);
+});
+test('Blueprint de produção e preflight apontam ao mesmo projeto dedicado do Canteiro',()=>{
+ const blueprint=readFileSync(new URL('../../../render.yaml',import.meta.url),'utf8');
+ for(const endpoint of [
+  'https://'+ref+'.supabase.co',
+  'https://'+ref+'.supabase.co/auth/v1/.well-known/jwks.json',
+  'https://'+ref+'.storage.supabase.co/storage/v1/s3',
+ ]) assert.ok(blueprint.includes('value: '+endpoint),'Blueprint divergente da referência do projeto MVP');
 });
 test('Render Free: rejeitar banco de outro projeto, postgres admin, HTTP e sem TLS',()=>{
  for(const patch of [
