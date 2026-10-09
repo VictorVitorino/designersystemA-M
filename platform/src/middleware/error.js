@@ -2,8 +2,16 @@
 import { HttpError, E } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 
+// Mensagens/stacks de drivers podem incluir DATABASE_URL, tokens ou credenciais.
+// Só códigos técnicos reconhecidos são permitidos em logs de exceções imprevistas.
+const NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE']);
+function safeErrorCode(error) {
+  const code = error?.code;
+  return typeof code === 'string' && (/^[A-Z0-9]{5}$/.test(code) || NETWORK_CODES.has(code)) ? code : undefined;
+}
+
 export function onError(deps) {
-  const log = createLogger(deps.config);
+  const log = deps.logger || createLogger(deps.config);
   return (err, c) => {
     const requestId = c.get('requestId');
     let e = err;
@@ -15,7 +23,7 @@ export function onError(deps) {
       else if (e && e.code === '42501') e = E.forbidden();
       else if (e && (e.type === 'entity.too.large' || e.name === 'PayloadTooLargeError')) e = E.tooLarge();
       else if (e instanceof SyntaxError) e = E.badRequest('JSON inválido.');
-      else { log.error('unhandled', { requestId, path: c.req.path, method: c.req.method, err: String(e && e.message || e).slice(0, 300), code: e && e.code, stack: process.env.APP_ENV === 'production' ? undefined : String(e && e.stack || '').split('\n').slice(0, 4).join(' | ') }); e = E.internal(); }
+      else { log.error('unhandled', { requestId, route: c.req.routePath, method: c.req.method, kind: 'internal_error', code: safeErrorCode(e) }); e = E.internal(); }
     } else if (e.status >= 500) log.error('http_error', { requestId, path: c.req.path, code: e.code });
     const body = { error: { code: e.code, message: e.message, ...(e.details ? { details: e.details } : {}), requestId } };
     return c.json(body, e.status, e.headers || {});
