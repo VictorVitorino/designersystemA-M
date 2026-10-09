@@ -336,3 +336,47 @@ test('dados locais da nuvem: outra pessoa → apaga respostas/votos/notas/prefer
     const N = mk({}); globalThis.localStorage = N; assert.equal(cc.switchLocalUser('C'), false, 'primeiro uso: só marca quem está'); assert.equal(N.getItem('amCloud.user'), 'C');
   } finally { delete globalThis.localStorage; delete globalThis.sessionStorage; }
 });
+
+test('logout: IndexedDB só declara limpeza completa após onsuccess em ambos os bancos', async () => {
+  const previous = globalThis.indexedDB;
+  const requests = [];
+  function fakeDb(behavior) {
+    return {
+      deleteDatabase(name) {
+        requests.push(name);
+        const r = {};
+        queueMicrotask(() => { const callback = r['on' + behavior]; if (callback) callback({ target: r }); });
+        return r;
+      },
+    };
+  }
+  try {
+    globalThis.indexedDB = fakeDb('success');
+    assert.equal(await cc.clearLocalData(), true, 'exclusão concluída nos dois bancos');
+    assert.deepEqual(requests.splice(0), ['canteiro-cloud', 'canteiro']);
+
+    globalThis.indexedDB = fakeDb('blocked');
+    assert.equal(await cc.clearLocalData(), false, 'exclusão bloqueada por outra aba não é sucesso');
+    assert.deepEqual(requests.splice(0), ['canteiro-cloud', 'canteiro']);
+
+    globalThis.indexedDB = fakeDb('error');
+    assert.equal(await cc.clearLocalData(), false, 'falha de IndexedDB não é sucesso');
+    assert.deepEqual(requests.splice(0), ['canteiro-cloud', 'canteiro']);
+
+    globalThis.indexedDB = {
+      deleteDatabase(name) {
+        if (name === 'canteiro-cloud') throw new Error('Acesso bloqueado');
+        const r = {};
+        queueMicrotask(() => { if (r.onsuccess) r.onsuccess({ target: r }); });
+        return r;
+      },
+    };
+    assert.equal(await cc.clearLocalData(), false, 'erro síncrono não deve aparentar limpeza');
+
+    delete globalThis.indexedDB;
+    assert.equal(await cc.clearLocalData(), true, 'sem suporte a IndexedDB não existem esses bancos');
+  } finally {
+    if (previous === undefined) delete globalThis.indexedDB;
+    else globalThis.indexedDB = previous;
+  }
+});
