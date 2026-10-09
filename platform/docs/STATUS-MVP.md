@@ -2,7 +2,7 @@
 
 **Referência:** 09/10/2026. **Objetivo:** piloto pequeno, em serviços gratuitos, sem alterar o editor standalone.
 
-> **Maturidade técnica estimada: cerca de 85%** — leitura gerencial, **não** medição objetiva por tarefas. **Etapas de aceitação concluídas: 1/6**. O MVP ainda não está publicado em hospedagem real.
+> **Maturidade técnica percentual: não mensurada.** **Etapas de aceitação concluídas: 1/6.** O MVP ainda não foi homologado em hospedagem real. Testes automatizados não equivalem a publicação e aceite com usuários.
 
 ## Indicadores com evidências
 
@@ -57,7 +57,7 @@
 - CI verde não equivale a hospedagem real em produção: os passos 2–6 dependem de validações adicionais.
 - Nunca alterar `studio/` para implementar plataforma/infraestrutura.
 
-**Regra de atualização:** só mudar status de uma etapa com evidência reproduzível e verificada; indicar links dos testes e da implantação. O percentual de 85% é estimativo e não deve ser aumentado automaticamente ao criar documentação ou infraestrutura.
+**Regra de atualização:** só mudar status de uma etapa com evidência reproduzível e verificada; indicar links dos testes e da implantação. Não atribuir percentuais de maturidade sem definição formal do denominador e medição auditável.
 
 ## Atualização do desenvolvimento — 09/10/2026 (PRs e qualidade)
 
@@ -73,15 +73,16 @@ Este registro complementa a fotografia anterior; **não altera os critérios de 
 | Readiness concorrente e proteção de logs | [PR #14](https://github.com/VictorVitorino/designersystemA-M/pull/14) | Single-flight, TTL, timeout e mensagens seguras, com 4 regressões novas aprovadas; CI, Postgres17, CodeQL e E2E aprovados no PR. |
 | Encerramento seguro do Node | [PR #15](https://github.com/VictorVitorino/designersystemA-M/pull/15) | Requisições ativas terminam antes de fechar o pool PostgreSQL; timeout e idempotência cobertos, CI, Postgres17, CodeQL e E2E aprovados. |
 | Pré-deploy: pool e quota válidos | [PR #17](https://github.com/VictorVitorino/designersystemA-M/pull/17) | Rejeita valores ausentes, não inteiros ou inválidos no validador do Render Free; integrado com CI, PostgreSQL17, CodeQL e E2E aprovados. |
+| Logs seguros de erros da API e inicialização | [PR #19](https://github.com/VictorVitorino/designersystemA-M/pull/19) | Remove mensagens, stacks e valores arbitrários de erro dos logs; oculta parâmetros de URLs nos logs de acesso. CI, PostgreSQL17, CodeQL e E2E aprovados no SHA integrado. |
+| Concorrência de upload e cota | [PR #21](https://github.com/VictorVitorino/designersystemA-M/pull/21) | Confere a cota na transação que conclui o upload e bloqueia bypass por arquivo pendente; regressões com concorrência. CI, PostgreSQL17, CodeQL e E2E aprovados. |
+| Logs seguros de autenticação | [PR #22](https://github.com/VictorVitorino/designersystemA-M/pull/22) | Limita códigos externos de erro do Auth a valores conhecidos e preserva o tratamento funcional. CI, PostgreSQL17, CodeQL e E2E aprovados. |
+| Bucket S3 exclusivo do piloto | [PR #23](https://github.com/VictorVitorino/designersystemA-M/pull/23) | Valida bucket `canteiro-mvp-files` e região `sa-east-1` antes de inicializar. CI, PostgreSQL17, CodeQL, E2E e build Render aprovados. |
 
 ### Alterações em validação (ainda não estão na `main`)
 
-Atualização de checks: PR #4 já obteve sucesso no PostgreSQL17, CodeQL e Chromium; CI completo permanecia em execução na última consulta, portanto o merge está bloqueado.
-
-- [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4): exigir HTTPS para endpoints externos; reforçado para rejeitar URLs que contenham `userinfo` (usuário/senha) e com novos testes. **Novos checks ainda precisam concluir** após os commits mais recentes.
-- [PR #19](https://github.com/VictorVitorino/designersystemA-M/pull/19): impedir vazamento de segredos em logs de inicialização, erros internos da API e caminhos de acesso. Revisão adicional substituiu código arbitrário de erro por lista estrita de códigos técnicos (commits `f658286` e `cebfdbb`), com testes de regressão. **Aguarda CI/PG17/E2E completos no SHA final.**
-- [PR #18](https://github.com/VictorVitorino/designersystemA-M/pull/18): solução parcialmente sobreposta ao #19; não integrar duas versões da mesma correção.
-- [PR #20](https://github.com/VictorVitorino/designersystemA-M/pull/20): proposta duplicada **encerrada sem merge** em favor do #19.
+- [PR #4](https://github.com/VictorVitorino/designersystemA-M/pull/4): exige HTTPS e rejeita credenciais em URLs de Auth/JWKS/S3 em staging/produção. CI identificou falha concreta na fixture `tests/security/sessions.test.js` que usava URLs HTTP locais sob `staging`. A fixture foi ajustada na branch do PR e os testes de CI/PostgreSQL17/CodeQL/E2E do último commit estão em execução. **Não integrar sem aprovação total da nova execução.**
+- [PR #16](https://github.com/VictorVitorino/designersystemA-M/pull/16): este relatório segue em revisão, sem mudança de critério de aceite nem deploy real.
+- [PRs #18](https://github.com/VictorVitorino/designersystemA-M/pull/18) e [#20](https://github.com/VictorVitorino/designersystemA-M/pull/20): soluções sobrepostas encerradas sem merge em favor do PR #19.
 
 ### Verificação independente do ambiente Supabase dedicado
 
@@ -94,7 +95,7 @@ Atualização de checks: PR #4 já obteve sucesso no PostgreSQL17, CodeQL e Chro
 
 ### Próximas tarefas técnicas (somente após comprovar a necessidade)
 
-1. Finalizar os checks do PR #4 e do PR #19; corrigir falhas com testes de regressão e integrar somente depois de CI + PostgreSQL17 + CodeQL + E2E aprovados no commit vigente.
+1. Finalizar os novos checks do PR #4 no SHA vigente, corrigir falhas reais e integrar somente após CI + PostgreSQL17 + CodeQL + E2E aprovados; reexecutar checks de `main` após integrar.
 2. Executar verificações de performance e concorrência contra **ambiente isolado de teste**, documentando p50/p95/p99, erro e throughput; não gerar carga sobre o Supabase Free ativo sem avaliação de cota.
 3. Exercitar importação, exportação, autorização e restauração com **dados fictícios**, preservando `studio/` e a prova de paridade.
 4. Revisar backups e procedimentos de recuperação com evidência, sem marcar como aprovado um restore que não foi realmente ensaiado.
@@ -110,10 +111,10 @@ Atualização de checks: PR #4 já obteve sucesso no PostgreSQL17, CodeQL e Chro
 
 ### Auditoria de checks de 09/10/2026
 
-- PR #4 no SHA `898dd07100d35f74c5d4c97fd01e3f04a4dacff1`: PostgreSQL 17, CodeQL e E2E aprovados, mas CI cancelado após falha real em `tests/security/sessions.test.js` (fixture de staging/produção usa URLs HTTP do GoTrue falso, agora rejeitadas pela validação HTTPS). Não integrar até corrigir a fixture e aprovar nova execução completa.
-- PRs #19, #21 e #22: CI (incluindo PostgreSQL 17), CodeQL e E2E aprovados nos respectivos SHAs consultados; integração ainda pendente.
-- PR #23: CI, PostgreSQL 17, CodeQL e build Render Free aprovados; E2E falhou na inicialização da pilha por convite ausente. Reexecução do job E2E solicitada, aguardando resultado.
-- Nenhum deploy Render real comprovado. Maturidade técnica permanece **85% estimados** e aceite **1/6**.
+- PR #4: execução inicial mostrou falha real da fixture de `sessionOverride` com endpoints HTTP sob `staging`/`production`. Nova alteração na branch corrigiu a fixture sem dispensar HTTPS e disparou nova verificação no GitHub. Aprovação do último SHA ainda pendente.
+- PRs #19, #21 e #22: CI (incluindo PostgreSQL 17), CodeQL e E2E aprovados nos SHAs integrados à `main` em 09/10/2026.
+- PR #23: reexecução do E2E Chromium aprovada; CI, PostgreSQL 17, CodeQL e build Render Free também aprovados. PR integrado à `main`.
+- Nenhum deploy Render real comprovado. Maturidade técnica **não mensurada**; aceite permanece **1/6**.
 
 ## Atualização de execução — 09/10/2026, manhã
 
