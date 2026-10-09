@@ -3,7 +3,6 @@
    Banco real (RLS) + armazenamento local temporário (mini-app). Arquivo próprio: makeEnv recria o banco, então a cota ligada não afeta os outros testes. */
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
 import sharp from 'sharp';
 import { makeEnv, sha256Hex } from '../helpers/mini-app.js';
 import { loadConfig } from '../../src/config.js';
@@ -19,14 +18,25 @@ before(async () => {
 after(async () => { await env.stop(); });
 
 /** PNG válido com ~n bytes (ruído não comprime). */
-async function pngOf(kb) { const side = Math.ceil(Math.sqrt((kb * 1024) / 3)); return sharp(randomBytes(side * side * 3), { raw: { width: side, height: side, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer(); }
+let imageSeed = 0;
+async function pngOf(kb) {
+  const side = Math.ceil(Math.sqrt((kb * 1024) / 3));
+  const seed = ++imageSeed;
+  // A cota mede bytes, não entropia: PNG RGB sem compressão mantém o tamanho
+  // e evita dados aleatórios que podem imitar magic bytes ou markup ativo.
+  return sharp({ create: {
+    width: side, height: side, channels: 3,
+    background: { r: (seed * 29) % 256, g: (seed * 71) % 256, b: (seed * 127) % 256 },
+  } }).png({ compressionLevel: 0, palette: false }).toBuffer();
+}
 const putRaw = (u, buf) => env.put(u, `/api/assets/${sha256Hex(buf)}`, { body: buf, headers: { 'content-type': 'application/octet-stream', 'x-asset-kind': 'image' } });
 const usedBy = async (u) => Number((await env.sys((tx) => tx`select coalesce(sum(size_bytes), 0)::bigint n from app.assets where uploaded_by = ${u.id} and status in ('ready', 'pending')`))[0].n);
 
 describe('cota por pessoa (1 MB neste teste)', () => {
   let first;
   test('dentro da cota passa; o arquivo novo que estoura → 413 quota_exceeded, mensagem amigável, nada gravado e rejeição auditada', async () => {
-    first = await pngOf(600); assert.equal((await putRaw(A, first)).status, 201);
+    first = await pngOf(600); const initialUpload = await putRaw(A, first);
+    assert.equal(initialUpload.status, 201, initialUpload.text);
     const second = await pngOf(600); const puts = env.calls.put;
     const r = await putRaw(A, second);
     assert.equal(r.status, 413, r.text); assert.equal(r.json.error.code, 'quota_exceeded');
