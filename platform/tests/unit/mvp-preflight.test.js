@@ -39,6 +39,14 @@ test('Render Free: rejeitar banco de outro projeto, postgres admin, HTTP e sem T
  {DATABASE_OPS_URL:'postgres://ops-secret-not-allowed'}
  ]) assert.throws(()=>validateMvpRuntime({...good,...patch}));
 });
+test('MVP privado só aceita bucket dedicado e região real sa-east-1 no S3',()=>{
+ assert.equal(validateMvpRuntime(good).hosting,'render-free');
+ for(const patch of [
+  {S3_BUCKET:'bucket-errado'}, {S3_BUCKET:'outro-projeto'}, {S3_BUCKET:''},
+  {S3_REGION:'us-east-1'}, {S3_REGION:'sa-east-2'}, {S3_REGION:undefined},
+  {S3_ENDPOINT:good.S3_ENDPOINT.replace('.storage.', '.other-storage.')}
+ ]) assert.throws(()=>validateMvpRuntime({...good,...patch}),/Storage S3/);
+});
 test('Render Free: rejeita pool e cota indefinidos, NaN, infinito, fracionário ou fora da faixa',()=>{
  for(const key of ['DB_POOL_MAX','STORAGE_QUOTA_USER_MB']) {
   for(const bad of [undefined,'NaN','Infinity','3.5','not-a-number','-1','0','']) {
