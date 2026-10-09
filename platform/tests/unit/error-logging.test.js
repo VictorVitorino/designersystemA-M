@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { Hono } from 'hono';
 import { onError } from '../../src/middleware/error.js';
 import { accessLog } from '../../src/middleware/access-log.js';
+import { E } from '../../src/lib/errors.js';
 
 test('erro imprevisto no Render retorna HTTP 500 genérico e log sem dados sensíveis', async () => {
   const app = new Hono();
@@ -46,4 +47,20 @@ test('log de acesso registra padrão da rota, nunca o identificador sensível no
   assert.equal(recorded[0].message, 'http');
   assert.equal(recorded[0].fields.route, '/presentations/:id');
   assert.ok(!JSON.stringify(recorded).includes('example-sensitive-value'));
+});
+
+test('erro HTTP 503 conhecido não registra parâmetro da URL nos logs', async () => {
+  const app = new Hono();
+  app.get('/probe/:secret', () => { throw E.unavailable(); });
+  app.onError(onError({ config: { appEnv: 'staging', logLevel: 'error', release: 'unit' } }));
+  const lines = [];
+  const oldWrite = process.stderr.write;
+  process.stderr.write = function (chunk) { lines.push(String(chunk)); return true; };
+  let response;
+  try { response = await app.request('http://localhost/probe/sensitive-token'); }
+  finally { process.stderr.write = oldWrite; }
+  assert.equal(response.status, 503);
+  const log = lines.join('');
+  assert.match(log, /"msg":"http_error"/);
+  assert.ok(!log.includes('sensitive-token'));
 });
