@@ -50,6 +50,13 @@ export function loadConfig(env = process.env) {
   const problems = [];
   const origin = new URL(e.APP_ORIGIN);
   if (secure && origin.protocol !== 'https:') problems.push('APP_ORIGIN precisa ser https:// em staging/produção');
+  // HTTPS só para o site não basta: chaves de autenticação, JWKS e credenciais S3
+  // também transitam pelos endpoints externos configurados.
+  if (secure) {
+    for (const k of ['SUPABASE_URL', 'SUPABASE_JWKS_URL', 'S3_ENDPOINT']) {
+      if (e[k] && new URL(e[k]).protocol !== 'https:') problems.push(`${k} precisa ser https:// em staging/produção`);
+    }
+  }
   if (secure) {
     for (const k of ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'CSRF_SECRET']) if (!e[k]) problems.push(`${k} é obrigatório em ${e.APP_ENV}`);
     if (!e.SUPABASE_JWKS_URL && !e.SUPABASE_JWT_SECRET) problems.push('defina SUPABASE_JWKS_URL (preferível) ou SUPABASE_JWT_SECRET');

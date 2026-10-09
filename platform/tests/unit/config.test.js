@@ -17,6 +17,21 @@ test('config de produção válida: HTTPS, prefixo __Host-, cookies Secure', () 
   assert.equal(c.cookiePrefix, '__Host-'); assert.equal(c.cookieSecure, true); assert.equal(c.isProd, true); assert.equal(c.db.ssl, 'require');
 });
 test('produção rejeita APP_ORIGIN http', () => reject({ APP_ORIGIN: 'http://canteiro.exemplo.com.br' }, /https/));
+test('staging e produção recusam endpoints HTTP que transmitiriam chaves e credenciais sem TLS', () => {
+  for (const appEnv of ['staging', 'production']) {
+    reject({ APP_ENV: appEnv, SUPABASE_URL: 'http://auth.exemplo.com' }, /SUPABASE_URL.*https/);
+    reject({ APP_ENV: appEnv, SUPABASE_JWKS_URL: 'http://chaves.exemplo.com/jwks' }, /SUPABASE_JWKS_URL.*https/);
+    reject({ APP_ENV: appEnv, S3_ENDPOINT: 'http://objetos.exemplo.com' }, /S3_ENDPOINT.*https/);
+    const c = loadConfig({ ...PROD, APP_ENV: appEnv, S3_ENDPOINT: 'https://objetos.exemplo.com' });
+    assert.equal(c.storage.s3.endpoint, 'https://objetos.exemplo.com');
+  }
+});
+test('HTTP externo continua permitido somente no desenvolvimento/testes locais', () => {
+  const c = loadConfig({ APP_ENV: 'test', SUPABASE_URL: 'http://localhost:9999',
+    SUPABASE_JWKS_URL: 'http://localhost:9999/jwks', S3_ENDPOINT: 'http://localhost:9000' });
+  assert.equal(c.supabase.url, 'http://localhost:9999');
+  assert.equal(c.storage.s3.endpoint, 'http://localhost:9000');
+});
 test('produção rejeita CSRF_SECRET ausente ou curto', () => { reject({ CSRF_SECRET: undefined }, /CSRF_SECRET/); reject({ CSRF_SECRET: 'curto' }, /inválida|CSRF_SECRET/); });
 test('produção rejeita GOTRUE_FAKE', () => reject({ GOTRUE_FAKE: '1' }, /GOTRUE_FAKE/));
 test('produção rejeita DATABASE_ADMIN_URL / DATABASE_OPS_URL no ambiente da API', () => {
