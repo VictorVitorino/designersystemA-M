@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import postgres from 'postgres';
 import { contentHash } from '../../src/lib/canonical.js';
+import { loadAdminUrl } from './database-url.js';
 
 const require = createRequire(import.meta.url);
 const { Client } = require('./client.cjs');
@@ -42,7 +43,7 @@ const PASSWORD = 'Carga-Teste-Senha-2026!x';
 const OUT = path.join(ROOT, '.tmp', 'load'); fs.mkdirSync(OUT, { recursive: true });
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const OBJECTS_DIR = path.join(ROOT, '.data', 'objects');
-const ADMIN_URL = process.env.DATABASE_ADMIN_URL || `postgres://postgres:postgres@127.0.0.1:5432/${DB}`;
+const ADMIN_URL = loadAdminUrl(process.env, DB);
 if (!/^canteiro_t_[a-z0-9_]+$/.test(DB) || /canteiro_t_(a\d*|b\d*|c)$/.test(DB)) { console.error('banco de carga inválido (use canteiro_t_load):', DB); process.exit(2); }
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
