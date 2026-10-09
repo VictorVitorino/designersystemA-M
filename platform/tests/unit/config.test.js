@@ -26,6 +26,20 @@ test('staging e produção recusam endpoints HTTP que transmitiriam chaves e cre
     assert.equal(c.storage.s3.endpoint, 'https://objetos.exemplo.com');
   }
 });
+test('staging e produção recusam userinfo em URLs externas', () => {
+  for (const appEnv of ['staging', 'production']) {
+    for (const key of ['APP_ORIGIN', 'SUPABASE_URL', 'SUPABASE_JWKS_URL', 'S3_ENDPOINT']) {
+      for (const suffix of ['u:p@host.example.invalid/path', 'u@host.example.invalid/path']) {
+        assert.throws(() => loadConfig({ ...PROD, APP_ENV: appEnv, [key]: 'https://' + suffix }), /não pode incluir usuário ou senha/);
+      }
+    }
+  }
+});
+test('produção recusa protocolos inseguros em todos os provedores', () => {
+  for (const key of ['APP_ORIGIN', 'SUPABASE_URL', 'SUPABASE_JWKS_URL', 'S3_ENDPOINT']) {
+    assert.throws(() => loadConfig({ ...PROD, [key]: 'ftp://host.example.invalid/path' }), /https/);
+  }
+});
 test('HTTP externo continua permitido somente no desenvolvimento/testes locais', () => {
   const c = loadConfig({ APP_ENV: 'test', SUPABASE_URL: 'http://localhost:9999',
     SUPABASE_JWKS_URL: 'http://localhost:9999/jwks', S3_ENDPOINT: 'http://localhost:9000' });
