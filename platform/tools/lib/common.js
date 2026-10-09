@@ -28,6 +28,25 @@ export function buildRedactor(env = process.env, extra = []) {
   };
 }
 
+/** Artefatos de QA podem ser publicados/anexados a issues: nunca persistir
+    messages/stacks de erros externos neles, nem confiar em error.code arbitrário.
+    Categorias de diagnóstico são constantes locais, não texto do provedor. */
+const EVIDENCE_FAILURE_CODES = Object.freeze({
+  manifest_mac: 'chave de backup ou MAC inválido',
+  sha_mismatch: 'integridade do backup: SHA-256 divergente',
+  hash_mismatch: 'integridade dos arquivos: SHA-256 divergente',
+  bad_manifest: 'manifesto de backup inválido',
+  no_key: 'chave de backup ausente',
+  no_auth_data: 'backup sem dados de autenticação',
+});
+export function safeEvidenceFailure(error) {
+  const code = error?.code;
+  if (typeof code === 'string' && Object.hasOwn(EVIDENCE_FAILURE_CODES, code)) {
+    return EVIDENCE_FAILURE_CODES[code];
+  }
+  return 'falha operacional (detalhes omitidos por segurança)';
+}
+
 /** Log estruturado (uma linha JSON por evento em --json, texto legível caso contrário). Sempre redigido. */
 export function makeLogger({ json = false, redact = buildRedactor(), out = process.stderr, quiet = false } = {}) {
   const emit = (level, msg, fields) => {

@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { ToolError, buildRedactor, parseArgs, fmtBytes, fmtMs, runCli, isMain } from './lib/common.js';
+import { ToolError, buildRedactor, safeEvidenceFailure, parseArgs, fmtBytes, fmtMs, runCli, isMain } from './lib/common.js';
 import { connect, withDatabase, dbNameOf, isLocalHost, pgToolVersion, findPgBin } from './lib/pg.js';
 import { FileStore, openTarget } from './lib/targets.js';
 import { keyringFromEnv } from './lib/backup-crypto.js';
@@ -41,7 +41,7 @@ export async function runDrill({ adminUrl, outDir = path.join(HERE, '..', 'docs'
   if (!/^canteiro_(test|t_[a-z0-9]+)$/.test(srcDb)) throw new ToolError(`o ensaio só roda em bancos canteiro_test ou canteiro_t_<nome> (recebi ${srcDb}): ele DESTRÓI o banco de origem de propósito`, { exit: 2, code: 'unsafe_db' });
   if (!isLocalHost(u.hostname)) throw new ToolError('o ensaio só roda em Postgres local/descartável', { exit: 2, code: 'unsafe_host' });
   const t0 = performance.now(); const steps = []; const now = () => performance.now();
-  const step = async (name, fn) => { const s = now(); log(`▶ ${name}`); try { const r = await fn(); steps.push({ name, ms: Math.round(now() - s), ok: true }); return r; } catch (e) { steps.push({ name, ms: Math.round(now() - s), ok: false, error: String(e.message).slice(0, 300) }); throw e; } };
+  const step = async (name, fn) => { const s = now(); log(`▶ ${name}`); try { const r = await fn(); steps.push({ name, ms: Math.round(now() - s), ok: true }); return r; } catch (e) { steps.push({ name, ms: Math.round(now() - s), ok: false, error: safeEvidenceFailure(e) }); throw e; } };
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'canteiro-drill-')); const objDir = path.join(work, 'arquivos-origem'), bkDir = path.join(work, 'backup-externo'), newObjDir = path.join(work, 'arquivos-restaurados'), s3ObjDir = path.join(work, 'arquivos-restaurados-s3');
   fs.mkdirSync(objDir, { recursive: true, mode: 0o750 }); fs.chmodSync(objDir, 0o750);
   const key = crypto.randomBytes(32).toString('base64'); const restoreUrl = withDatabase(adminUrl, `${srcDb}_restore`), restoreS3Url = withDatabase(adminUrl, `${srcDb}_restore_s3`);
@@ -145,7 +145,7 @@ export async function runDrill({ adminUrl, outDir = path.join(HERE, '..', 'docs'
       if (!ev.restore.s3.ok) throw new ToolError('a restauração a partir do S3 falhou', { code: 's3_restore' });
     }
     ev.ok = true; ev.finishedAt = new Date().toISOString(); ev.totalMs = Math.round(now() - t0); ev.steps = steps;
-  } catch (e) { ev.ok = false; ev.error = String(e.message).slice(0, 500); ev.steps = steps; ev.finishedAt = new Date().toISOString(); ev.totalMs = Math.round(now() - t0); throw Object.assign(e, { evidence: ev }); }
+  } catch (e) { ev.ok = false; ev.error = safeEvidenceFailure(e); ev.steps = steps; ev.finishedAt = new Date().toISOString(); ev.totalMs = Math.round(now() - t0); throw Object.assign(e, { evidence: ev }); }
   finally {
     try { if (moto) await moto.stop(); } catch { /* já parado */ }
     if (!keep) { for (const n of created) await maint.unsafe(`drop database if exists ${n} with (force)`).catch(() => {}); fs.rmSync(work, { recursive: true, force: true }); } else log(`arquivos mantidos em ${work}`);
