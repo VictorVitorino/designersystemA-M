@@ -119,6 +119,15 @@ describe('segredos', () => {
   });
 });
 
+test('fixture libera GoTrue e Postgres quando staging recusa endpoints HTTP antes da API', async () => {
+  // O segredo aqui é o fechamento dos recursos abertos pela fixture no caminho de erro:
+  // se o GoTrue/DB continuarem ativos, o runner não terminará após os testes.
+  await assert.rejects(
+    () => boot({ env: { APP_ENV: 'staging', APP_ORIGIN: 'https://canteiro.example.invalid' } }),
+    /SUPABASE_URL precisa ser https:|SUPABASE_JWKS_URL precisa ser https:/,
+  );
+});
+
 describe('sessionOverride (atalho de teste)', () => {
   test('é aceito em APP_ENV=test (injeta o usuário) e RECUSADO em qualquer outro ambiente', async () => {
     const user = { id: '11111111-1111-4111-8111-111111111111', email: 'x@am.test', displayName: 'Injetado', role: 'member', status: 'active' };
