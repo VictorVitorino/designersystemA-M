@@ -21,7 +21,7 @@ test('erro inesperado devolve 500 genérico e nunca registra mensagem, stack ou 
   ]) {
     const result = handler(err, c);
     assert.equal(result.status, 500);
-    assert.equal(result.body.error.code, 'internal_error');
+    assert.equal(result.body.error.code, 'internal');
     assert.doesNotMatch(JSON.stringify(result), /do-not-log|db\\.example\\.test/);
   }
   assert.equal(logs.length, 3);
