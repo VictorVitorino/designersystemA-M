@@ -64,3 +64,34 @@ test('erro HTTP 503 conhecido não registra parâmetro da URL nos logs', async (
   assert.match(log, /"msg":"http_error"/);
   assert.ok(!log.includes('sensitive-token'));
 });
+
+test('código externo com aparência válida não é aceito como diagnóstico de log', async () => {
+  const secret = 'SECRET_TOKEN_12345'; // antes passava no filtro alfanumérico de 24 caracteres
+  const logs = [];
+  const app = new Hono();
+  app.get('/probe', () => { throw Object.assign(new Error('private provider value'), { code: secret }); });
+  app.onError(onError({
+    config: { appEnv: 'staging', logLevel: 'error', release: 'unit' },
+    logger: { error: (message, fields) => logs.push({ message, fields }) },
+  }));
+  const response = await app.request('/probe');
+  assert.equal(response.status, 500);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].message, 'unhandled');
+  assert.equal(logs[0].fields.code, 'unknown');
+  assert.ok(!JSON.stringify(logs).includes(secret));
+  assert.ok(!(await response.text()).includes(secret));
+});
+
+test('códigos técnicos reconhecidos mantêm diagnóstico sem mensagem do provedor', async () => {
+  const logs = [];
+  const app = new Hono();
+  app.get('/probe', () => { throw Object.assign(new Error('private provider value'), { code: 'ECONNREFUSED' }); });
+  app.onError(onError({
+    config: { appEnv: 'staging', logLevel: 'error' },
+    logger: { error: (message, fields) => logs.push({ message, fields }) },
+  }));
+  assert.equal((await app.request('/probe')).status, 500);
+  assert.equal(logs[0].fields.code, 'ECONNREFUSED');
+  assert.ok(!JSON.stringify(logs).includes('private provider value'));
+});
