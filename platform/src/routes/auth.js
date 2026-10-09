@@ -9,7 +9,7 @@
      /entrar?motivo=<código> (not_invited, suspended, sso_email, sso_dominio, sso_indisponivel, sso_expirou, sso_falhou, sso_limite). */
 import { Hono } from 'hono';
 import { E, HttpError } from '../lib/errors.js';
-import { createLogger } from '../lib/log.js';
+import { createLogger, safeExceptionKind } from '../lib/log.js';
 import { requireUser, audit, auditAnon, limit } from '../lib/request.js';
 import { cookieNames, ssoCookieName, readCookie, setSessionCookies, clearSessionCookies, setCsrfCookie, setNeedsPasswordCookie, setSsoCookie } from '../auth/cookies.js';
 import { CSRF_TOKEN_RE, newCsrfToken, padTo, sha256hex, hmacHex, safeEqual } from '../auth/hash.js';
@@ -46,7 +46,7 @@ export function authRoutes(deps) {
     if (rotate || !t || !CSRF_TOKEN_RE.test(t)) { t = newCsrfToken(); setCsrfCookie(c, config, t); }
     return t;
   }
-  const bestEffort = async (fn) => { try { await fn(); } catch (e) { log.warn('auth_best_effort_failed', { code: e && e.code }); } };
+  const bestEffort = async (fn) => { try { await fn(); } catch (e) { log.warn('auth_best_effort_failed', { kind: safeExceptionKind(e) }); } };
   const auditUser = (c, user, action, meta = {}) => bestEffort(() => db.asUser(user.id, (tx) => audit(tx, c, action, 'user', user.id, meta)));
 
   /** Verifica o access token recém-emitido pelo GoTrue (não confiamos no corpo da resposta: o mesmo verificador do middleware decide). */
@@ -242,7 +242,7 @@ export function authRoutes(deps) {
     try { url = await gotrue.ssoUrl({ domain, redirectTo: `${config.origin}/api/auth/sso/callback`, codeChallenge: challenge }); }
     catch (e) {
       if (!(e instanceof HttpError)) throw e;
-      log.warn('sso_start_failed', { code: e.code });
+      log.warn('sso_start_failed', { kind: safeExceptionKind(e) });
       return toLogin(c, e.code === 'rate_limited' ? 'sso_limite' : 'sso_indisponivel', next);
     }
     setSsoCookie(c, config, sealState(config, { verifier, next }), SSO_TTL_S);   // o verifier fica só aqui (HttpOnly) e no servidor; o IdP vê o desafio
@@ -272,12 +272,12 @@ export function authRoutes(deps) {
       if (!(e instanceof HttpError)) throw e;
       if (e.code === 'link_invalid') return refuse('sso_expirou', 'codigo');
       if (e.code === 'suspended') return refuse('suspended', 'banido');
-      log.warn('sso_exchange_failed', { code: e.code });
+      log.warn('sso_exchange_failed', { kind: safeExceptionKind(e) });
       return toLogin(c, e.code === 'rate_limited' ? 'sso_limite' : 'sso_indisponivel', next);
     }
     let claims;
     try { claims = await kit.verifier.verify(tokens.accessToken); }
-    catch (e) { if (e instanceof JwtRejected && e.reason === 'invalid') return refuse('sso_falhou', 'token', tokens); log.warn('sso_verify_failed', { reason: e && e.reason }); return toLogin(c, 'sso_indisponivel', next); }
+    catch (e) { if (e instanceof JwtRejected && e.reason === 'invalid') return refuse('sso_falhou', 'token', tokens); log.warn('sso_verify_failed', { kind: safeExceptionKind(e) }); return toLogin(c, 'sso_indisponivel', next); }
     if (!isSsoProvider(claims.provider)) return refuse('sso_falhou', 'provedor', tokens);                   // a sessão tem de vir do SSO
     if (!ssoDomainAllowed(config, domainOf(claims.email))) return refuse('sso_dominio', 'dominio_idp', tokens);   // o IdP afirmou e-mail de outro domínio
     if (!claims.emailVerified) return refuse('sso_falhou', 'email_nao_verificado', tokens);
