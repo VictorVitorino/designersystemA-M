@@ -36,8 +36,10 @@ test('modo local recusa endereços externos antes de iniciar o ensaio de carga',
   ]) {
     assert.throws(() => loadAdminUrl({ DATABASE_ADMIN_URL: address }, 'canteiro_t_load'), /loopback/);
   }
-  const local = loadAdminUrl({ DATABASE_ADMIN_URL: maintenance }, 'canteiro_t_load');
+  const local = loadAdminUrl({ DATABASE_ADMIN_URL: maintenance.replace('/postgres', '/canteiro_t_load') }, 'canteiro_t_load');
   assert.equal(new URL(local).pathname, '/canteiro_t_load');
+  assert.throws(() => loadAdminUrl({ DATABASE_ADMIN_URL: maintenance }, 'canteiro_t_load'), /banco descartável de mesmo nome/);
+  assert.throws(() => loadAdminUrl({ DATABASE_ADMIN_URL: local + '#invalido' }, 'canteiro_t_load'), /banco descartável de mesmo nome/);
 });
 
 test('execução local mantém fallback exclusivo ao banco de ensaio', () => {
