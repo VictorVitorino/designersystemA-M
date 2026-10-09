@@ -104,6 +104,48 @@ describe('upload direto (driver s3 falso): cota pelo tamanho declarado em /uploa
     staged.set(`${D.id}/${sha}`, buf); const f = await env.post(D, `/api/assets/${sha}/finalize`); assert.equal(f.status, 201, f.text);
     assert.equal(await usedBy(D), buf.length);
   });
+
+  test('dois finalize em paralelo não ultrapassam cota quando o tamanho declarado é menor que o real', async () => {
+    const D = await env.mkUser({ name: 'Concorrência direta' });
+    const a = await pngOf(600), b = await pngOf(600);
+    const shas = [sha256Hex(a), sha256Hex(b)];
+    for (const [i, buf] of [a, b].entries()) {
+      const up = await env.post(D, '/api/assets/uploads', {
+        json: { sha256: shas[i], size: 1000, mime: 'image/png', kind: 'image' },
+      });
+      assert.equal(up.status, 200, up.text);
+      staged.set(`${D.id}/${shas[i]}`, buf);
+    }
+
+    // Barreira controlada: ambos passaram pelo primeiro assertQuota e
+    // chegaram ao armazenamento antes de concluir a transação de ready.
+    // Sem a segunda conferência transacional, os dois retornariam 201.
+    const promote = env.hooks.promoteStaging;
+    let entered = 0;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    env.hooks.promoteStaging = async function (...args) {
+      if (++entered === 2) release();
+      await gate;
+      return promote.apply(this, args);
+    };
+    try {
+      const responses = await Promise.all(shas.map((sha, i) =>
+        env.post(D, `/api/assets/${sha}/finalize`, { ip: `198.51.100.${60 + i}` })));
+      assert.equal(entered, 2, 'ambas as requisições chegaram ao mesmo ponto');
+      assert.deepEqual(responses.map((r) => r.status).sort((x, y) => x - y), [201, 413],
+        responses.map((r) => r.text).join(' | '));
+      assert.equal(responses.find((r) => r.status === 413).json.error.code, 'quota_exceeded');
+      assert.ok(await usedBy(D) <= 1048576, 'uma só promoção ready dentro da cota');
+      const [row] = await env.sys((tx) => tx`select count(*)::int n from app.assets
+        where sha256 = any(${shas}::text[]) and status = 'ready'`);
+      assert.equal(row.n, 1, 'nenhuma segunda promoção foi persistida');
+    } finally {
+      env.hooks.promoteStaging = promote;
+      release(); // libera a barreira mesmo se algum assert anterior falhar
+    }
+  });
+
 });
 
 describe('configuração', () => {
