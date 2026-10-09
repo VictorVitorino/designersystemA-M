@@ -61,4 +61,4 @@ export async function start(env = process.env) {
   process.once('SIGINT', onSignal);
   return { server, deps, stop };
 }
-if (import.meta.url === `file://${process.argv[1]}`) start().catch(() => { console.error(JSON.stringify({ level: 'fatal', msg: 'startup_failed' })); process.exit(1); });
+if (import.meta.url === `file://${process.argv[1]}`) start().catch((e) => { console.error(JSON.stringify({ level: 'fatal', msg: String(e.message) })); process.exit(1); });
