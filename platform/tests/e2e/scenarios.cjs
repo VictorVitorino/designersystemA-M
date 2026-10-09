@@ -413,7 +413,7 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
     // produto DEVE avisar antes de navegar; o teste antigo esperava navegação
     // imediata e falhava apesar do comportamento de privacidade correto.
     const cleanupNotice = pB.locator('dialog.dlg[open]').filter({ hasText: 'Não foi possível apagar todos os dados locais' });
-    const redirected = pB.waitForURL(/\\/entrar/, { timeout: 25000 }).then(() => 'redirected').catch(() => null);
+    const redirected = pB.waitForURL(/entrar/, { timeout: 25000 }).then(() => 'redirected').catch(() => null);
     const notified = cleanupNotice.waitFor({ state: 'visible', timeout: 25000 }).then(() => 'notified').catch(() => null);
     await pB.click('#btn-sair');
     const logoutOutcome = await Promise.race([redirected, notified]);
@@ -421,7 +421,7 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
       check('11.2b logout avisa quando IndexedDB não confirma a limpeza local', /feche as outras abas|limpe os dados deste site/i.test(await cleanupNotice.innerText()));
       await cleanupNotice.locator('[data-act=confirm]').click();
     }
-    await pB.waitForURL(/\\/entrar/, { timeout: 20000 });
+    await pB.waitForURL(/entrar/, { timeout: 20000 });
     const cookiesB = (await ctx.ana2.cookies(BASE)).map((c) => c.name);
     await pB.goto(BASE + '/editor/' + id); await pB.waitForURL(/\/entrar\?/, { timeout: 20000 });
     const nx = new URL(pB.url()).searchParams.get('next');
