@@ -1,0 +1,99 @@
+# O piloto Render Free executa npm ci --omit=dev. Prove este caminho num runner limpo.
+# Não depende de banco, chave, conta Render nem de serviços externos.
+name: Build Render Free (sem devDependencies)
+
+on:
+  pull_request:
+    paths:
+      - render.yaml
+      - platform/package.json
+      - platform/package-lock.json
+      - platform/tools/build-web.js
+      - platform/tools/build-cloud-editor.js
+      - platform/tools/mvp-preflight.js
+      - platform/tools/mvp-smoke.js
+      - platform/studio-cloud/**
+      - studio/**
+      - .github/workflows/render-free-build.yml
+  push:
+    branches: [main]
+    paths:
+      - render.yaml
+      - platform/package.json
+      - platform/package-lock.json
+      - platform/tools/build-web.js
+      - platform/tools/build-cloud-editor.js
+      - platform/tools/mvp-preflight.js
+      - platform/tools/mvp-smoke.js
+      - platform/studio-cloud/**
+      - studio/**
+      - .github/workflows/render-free-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-free-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-bundle:
+    name: Instalação produção, editor, CSP e pré-publicação
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - name: Checkout sem persistir credenciais
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node 22 (igual ao Render)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - name: Python 3 disponível para montar o editor
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Instalar exatamente como o Render, SEM dependências de teste
+        run: npm ci --omit=dev
+
+      - name: Verificar que o navegador de testes não está no bundle
+        run: |
+          node -e "try { require.resolve('playwright'); console.error('playwright não deve estar instalado na imagem de produção'); process.exit(1) } catch (e) { if (e.code !== 'MODULE_NOT_FOUND') throw e; console.log('Bundle de produção sem playwright') }"
+
+      - name: Verificar hashes CSP versionados antes do build
+        run: node tools/build-web.js --check
+
+      - name: Construir o site real com dependências de produção
+        run: npm run build:web
+
+      - name: Conferir arquivos e proibir divergência do vercel.json
+        run: |
+          test -f dist/public/editor/index.html
+          test -f dist/public/entrar/index.html
+          test -f dist/public/js/cloud-core.js
+          test -f dist/csp.json
+          git diff --exit-code -- vercel.json
+
+      - name: Testar configuração do Render Free e smoke sem serviços reais
+        run: node --test tests/unit/mvp-free.test.js tests/unit/mvp-preflight.test.js tests/unit/mvp-smoke.test.js
+
+      - name: Garantir que o editor público não contém segredos
+        run: node tools/verify-deploy.js --scan-dist dist/public
+
+      - name: Comprovante do build de produção
+        run: |
+          echo '### Render Free: build de produção aprovado' >> "$GITHUB_STEP_SUMMARY"
+          echo '- npm ci --omit=dev (sem Playwright)' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Editor completo e CSP versionada sem divergência' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Testes do Blueprint, pré-publicação e smoke' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Nenhuma publicação ou segredo do Supabase foi utilizado' >> "$GITHUB_STEP_SUMMARY"
