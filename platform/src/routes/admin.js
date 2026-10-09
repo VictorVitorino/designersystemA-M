@@ -5,7 +5,7 @@
    • Nada de e-mail em claro na auditoria: usa-se o id do convite/usuário e o HMAC do e-mail. */
 import { Hono } from 'hono';
 import { E } from '../lib/errors.js';
-import { createLogger } from '../lib/log.js';
+import { createLogger, safeExceptionKind } from '../lib/log.js';
 import { requireAdmin, audit, limit } from '../lib/request.js';
 import { getAuthKit } from '../auth/kit.js';
 import { readJson, emailField, displayNameField, uuidField, z } from '../auth/body.js';
@@ -53,7 +53,7 @@ export function adminRoutes(deps) {
   const r = new Hono();
   r.use('*', async (c, next) => { requireAdmin(c); await next(); });   // membro → 403 em TUDO (inclusive caminhos inexistentes)
 
-  const bestEffort = async (fn) => { try { return await fn(); } catch (e) { log.warn('admin_best_effort_failed', { code: e && e.code }); return undefined; } };
+  const bestEffort = async (fn) => { try { return await fn(); } catch (e) { log.warn('admin_best_effort_failed', { kind: safeExceptionKind(e) }); return undefined; } };
   const domainAllowed = (email) => !config.inviteDomains.length || config.inviteDomains.includes(email.split('@')[1]);
   async function inviteTtlDays(tx) {
     const [s] = await tx`select value from app.settings where key = 'invites.ttl_days'`;
@@ -68,7 +68,7 @@ export function adminRoutes(deps) {
       true = sincronizado (ou nada a fazer); false = falhou. */
   async function syncBan(email, banned) {
     try { for (const id of await gotrue.findUserIdsByEmail(email)) await gotrue.ban(id, banned); return true; }
-    catch (e) { log.warn('gotrue_ban_failed', { code: e && e.code, banned }); return false; }
+    catch (e) { log.warn('gotrue_ban_failed', { kind: safeExceptionKind(e), banned }); return false; }
   }
 
   // ------------------------------------------------------------------------------------------------ usuários
