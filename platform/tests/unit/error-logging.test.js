@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
 import { onError } from '../../src/middleware/error.js';
+import { accessLog } from '../../src/middleware/access-log.js';
 
 test('erro imprevisto no Render retorna HTTP 500 genérico e log sem dados sensíveis', async () => {
   const app = new Hono();
@@ -31,4 +32,18 @@ test('erro imprevisto no Render retorna HTTP 500 genérico e log sem dados sens�
   for (const sensitive of ['example-secret', 'example-token', 'invalid.local', 'postgres://', 'path-example-token']) {
     assert.ok(!log.includes(sensitive), 'log expôs entrada sensível');
   }
+});
+
+test('log de acesso registra padrão da rota, nunca o identificador sensível no path', async () => {
+  const recorded = [];
+  const logger = { info: (message, fields) => recorded.push({ message, fields }), error: (message, fields) => recorded.push({ message, fields }) };
+  const app = new Hono();
+  app.use('*', accessLog({ logger }));
+  app.get('/presentations/:id', (c) => c.text('ok'));
+  const response = await app.request('http://localhost/presentations/example-sensitive-value');
+  assert.equal(response.status, 200);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].message, 'http');
+  assert.equal(recorded[0].fields.route, '/presentations/:id');
+  assert.ok(!JSON.stringify(recorded).includes('example-sensitive-value'));
 });
