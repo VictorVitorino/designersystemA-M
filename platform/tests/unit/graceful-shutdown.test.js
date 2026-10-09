@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { createGracefulStop } from '../../src/server.js';
+import { createGracefulStop, startupErrorLog } from '../../src/server.js';
 
 test('stop é idempotente, suspende novos requests e aguarda fechamento antes do banco', async () => {
   const events = [];
@@ -80,4 +80,23 @@ test('requisição HTTP real pode completar antes do Postgres ser encerrado no d
     release();
     if (server.listening) await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('log fatal de inicialização não vaza credenciais nem mensagens de dependências', () => {
+  const secret = 'postgres://app_api:super-secret@db.example.test:5432/postgres';
+  for (const err of [
+    new Error('connection failed: ' + secret),
+    Object.assign(new Error('timeout ' + secret), { code: 'ECONNREFUSED' }),
+    Object.assign(new Error('malicious ' + secret), { code: 'SECRET_' + secret }),
+    new Error('Configuração insegura/incompleta: ' + secret),
+  ]) {
+    const line = startupErrorLog(err);
+    assert.doesNotMatch(line, /super-secret|db\\.example\\.test|SECRET_/);
+    assert.equal(JSON.parse(line).msg, 'startup_failed');
+    assert.ok(['configuration', 'dependency', 'unexpected'].includes(JSON.parse(line).category));
+  }
+  const connection = JSON.parse(startupErrorLog(Object.assign(new Error('private'), { code: 'ECONNREFUSED' })));
+  assert.deepEqual(connection, { level: 'fatal', msg: 'startup_failed', category: 'dependency', code: 'ECONNREFUSED' });
+  const config = JSON.parse(startupErrorLog(new Error('Configuração insegura/incompleta: PRIVATE')));
+  assert.equal(config.category, 'configuration');
 });
