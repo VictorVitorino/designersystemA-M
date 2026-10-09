@@ -142,3 +142,31 @@ test('findUserIdsByEmail: todas as contas com o e-mail (a de senha e a do SSO), 
   assert.equal(await g.findUserIdByEmail('alvo@x.co'), 'p5');
   assert.deepEqual(await mk(() => reply(200, { users: [] })).g.findUserIdsByEmail('n@x.co'), []);
 });
+
+test('códigos de erro GoTrue desconhecidos não são registrados como texto arbitrário', async () => {
+  const previous = process.stderr.write;
+  const lines = [];
+  process.stderr.write = function (line) { lines.push(String(line)); return true; };
+  try {
+    const noisy = createGoTrue({ ...config, logLevel: 'warn' }, {
+      fetchImpl: async () => reply(400, {
+        error_code: 'sb_' + 'secret_' + 'fake_value_that_must_not_be_logged',
+        error: 'sensitive debug contents',
+      }),
+    });
+    await rejects(noisy.login({ email: 'test@example.test', password: 'fake' }), 'invalid_credentials');
+    assert.equal(lines.length, 1);
+    const item = JSON.parse(lines[0]);
+    assert.equal(item.msg, 'gotrue_error');
+    assert.equal(item.errorCode, 'unclassified');
+    assert.doesNotMatch(lines.join(''), /fake_value_that_must_not_be_logged|sensitive debug contents/);
+
+    const known = createGoTrue({ ...config, logLevel: 'warn' }, {
+      fetchImpl: async () => reply(403, { error_code: 'user_banned' }),
+    });
+    await rejects(known.login({ email: 'test@example.test', password: 'fake' }), 'suspended');
+    assert.equal(JSON.parse(lines[1]).errorCode, 'user_banned');
+  } finally {
+    process.stderr.write = previous;
+  }
+});

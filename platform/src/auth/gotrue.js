@@ -44,7 +44,20 @@ export function createGoTrue(config, { fetchImpl } = {}) {
   const codeOf = (b) => String(b?.error_code || (typeof b?.code === 'string' ? b.code : '') || b?.error || '').toLowerCase();
   const textOf = (b) => String(b?.msg || b?.message || b?.error_description || '').toLowerCase();
   const ok = (r) => r.status >= 200 && r.status < 300;
-  const fail = (op, r) => { log.warn('gotrue_error', { op, status: r.status, errorCode: codeOf(r.body).slice(0, 60) }); };
+  // Código de erro do provedor é dado externo e pode conter texto arbitrário.
+  // Só códigos técnicos conhecidos vão para os logs; o corpo nunca é registrado.
+  const LOGGABLE_AUTH_CODES = new Set([
+    'invalid_credentials', 'email_not_confirmed', 'user_not_found', 'invalid_grant',
+    'user_banned', 'over_request_rate_limit', 'email_exists', 'otp_expired',
+    'refresh_token_not_found', 'refresh_token_already_used', 'weak_password',
+    'same_password', 'bad_jwt', 'session_not_found', 'reauthentication_needed',
+    'reauthentication_not_valid', 'sso_provider_not_found', 'validation_failed',
+    'bad_code_verifier', 'flow_state_not_found', 'flow_state_expired',
+  ]);
+  const fail = (op, r) => {
+    const code = codeOf(r.body);
+    log.warn('gotrue_error', { op, status: r.status, errorCode: LOGGABLE_AUTH_CODES.has(code) ? code : 'unclassified' });
+  };
   const common = (op, r) => {            // mapeamentos que valem para qualquer chamada
     fail(op, r);
     if (r.status === 429) return E.rateLimited(60);
