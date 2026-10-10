@@ -2,7 +2,19 @@
 
 O editor (`studio/`) é um arquivo HTML único montado por `studio/assemble.py`. **Esta pasta não altera `studio/`**: o build cloud copia as
 fontes para `platform/.tmp/cloud-build`, acrescenta a extensão daqui, aplica uma lista curta de patches de texto e roda o `assemble.py` da cópia.
-Sem `window.AM_CLOUD` o resultado se comporta como o editor original (modo inerte) — é assim que o portão de 35 baterias de `studio/` prova a preservação.
+Sem `window.AM_CLOUD` o resultado se comporta como o editor autônomo (modo inerte) — é assim que o portão de «PREENCHER» baterias de `studio/` prova a preservação.
+
+## Original × build publicado (duas garantias separadas)
+
+- **`original/`** = a cópia preservada do arquivo enviado (S34b): `original/Canteiro-AM (3).html`, conferida contra `original/SHA256SUMS`
+  (`ORIGINAL_SHA256` = `dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099` em `tools/build-cloud-editor.js`). Não muda nunca e **não** precisa
+  ser igual ao build atual.
+- **Build publicado** = `AM-Studio-Editor.html` e `Canteiro-AM.html` na raiz do repositório. Cada etapa de `studio/` atualiza os dois depois do portão
+  (`./qa-gate.sh` → `GATE PASS`; regra 5 do processo no `CLAUDE.md`). O build autônomo (`python3 studio/assemble.py`) tem de ser **byte-idêntico** a ele,
+  e o build em nuvem e a prova de paridade (`npm run test:parity`, lado A = `../AM-Studio-Editor.html`) seguem esse build — não o `original/`.
+- Uma etapa nova em `studio/` não quebra a plataforma por mudar o SHA-256: basta passar o portão, publicar o build na raiz e rodar de novo
+  `--verify-standalone`, `tests/cloud/preservacao.test.js` e a paridade. Se o build publicado ficar para trás, `--verify-standalone` falha e diz o que fazer.
+- Build autônomo publicado hoje: sha256 `«PREENCHER»`; build em nuvem: «PREENCHER» KB (orçamento 2000 KB).
 
 | Arquivo | Para quê |
 |---|---|
@@ -16,7 +28,8 @@ Sem `window.AM_CLOUD` o resultado se comporta como o editor original (modo inert
 ```bash
 cd platform
 node tools/build-cloud-editor.js                 # só o editor  → .tmp/cloud-build/cloud-editor.html
-node tools/build-cloud-editor.js --verify-standalone   # + prova que o build autônomo segue idêntico (sha256 dc93ceac…5099)
+node tools/build-cloud-editor.js --verify-standalone   # + prova que o autônomo de studio/ = o build publicado na raiz (AM-Studio-Editor.html e
+                                                       #   Canteiro-AM.html) e que original/ confere com original/SHA256SUMS
 node tools/build-web.js                          # o site inteiro → dist/public, dist/csp.json e vercel.json
 node tools/build-web.js --check                  # CI: falha se vercel.json (CSP com hashes) estiver desatualizado
 ```
@@ -47,7 +60,7 @@ Na página do editor existe `window.AMCloud` (somente leitura + `saveNow()`/`sav
 ```bash
 node --test tests/cloud/cloud-core.test.js     # cloud-core (Node)
 node tests/cloud/editor-cloud.test.js          # editor em nuvem (Chromium real + mock da API, CSP real)   ONLY=03,07 filtra cenários
-node tests/cloud/preservacao.test.js           # prova de preservação   PRESERVE_FULL=1 roda o portão completo de 35 baterias
+node tests/cloud/preservacao.test.js           # prova de preservação   PRESERVE_FULL=1 roda o portão completo («PREENCHER» baterias)
 node tests/cloud/mock-api.js [porta]           # sobe o mock + o site (platform/dist/public) para ver o editor em nuvem à mão
 ```
 

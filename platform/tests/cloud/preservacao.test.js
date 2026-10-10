@@ -1,18 +1,22 @@
-/* Preservação do editor original (B2). Prova que o editor em nuvem NÃO alterou o editor atual:
+/* Preservação do editor (B2). Prova que o editor em nuvem NÃO alterou o editor atual e separa as duas garantias:
      1. studio/ e original/ ficam intactos (hash de todos os arquivos antes/depois do build; git sem diferenças);
-     2. o build autônomo (python3 studio/assemble.py) continua BYTE-IDÊNTICO ao original (SHA-256 dc93ceac…5099);
-     3. o build cloud = o autônomo + (os 5 patches de patches.json) + (extensão de nuvem e script de boot): a diferença textual é só essa;
+     2. BUILD PUBLICADO: o build autônomo (python3 studio/assemble.py) é BYTE-IDÊNTICO ao build publicado na raiz (AM-Studio-Editor.html =
+        Canteiro-AM.html, e = studio/AM-Studio-Editor.html quando existir) — cada etapa de studio/ publica o build que passou no portão
+        (regra 5 do CLAUDE.md) e o build em nuvem segue esse build;
+        ORIGINAL: original/Canteiro-AM (3).html é a cópia preservada do arquivo enviado (S34b) e confere com original/SHA256SUMS
+        (ORIGINAL_SHA256 = dc93ceac…5099); ele NÃO precisa ser igual ao build atual;
+     3. o build cloud = o autônomo + (os patches de patches.json) + (extensão de nuvem e script de boot): a diferença textual é só essa;
      4. cada patch precisa existir exatamente uma vez — se studio/ mudar, o build falha (testado com patches errados);
      5. o build cloud cabe no orçamento de 2000 KB do test-s90-perf;
-     6. SEM window.AM_CLOUD o build cloud é o editor original: roda o portão rápido de studio/ (test.js, test2.js, test-s34, test-s29)
+     6. SEM window.AM_CLOUD o build cloud é o editor atual: roda o portão rápido de studio/ (test.js, test2.js, test-s34, test-s29)
         sobre uma cópia platform/.tmp/preserve com AM-Studio-Editor.html trocado pelo build cloud.
-   Variáveis: PRESERVE_FULL=1 roda o portão COMPLETO (35 baterias, ~10 min) em vez do rápido.   Uso: node platform/tests/cloud/preservacao.test.js */
+   Variáveis: PRESERVE_FULL=1 roda o portão COMPLETO (todas as baterias do qa-gate.sh, ~10 min) em vez do rápido.   Uso: node platform/tests/cloud/preservacao.test.js */
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildCloudEditor, verifyStandalone, applyPatches, loadPatches, STUDIO, REPO, PLATFORM, STANDALONE_SHA256, BOOT_JS } from '../../tools/build-cloud-editor.js';
+import { buildCloudEditor, verifyStandalone, originalSums, applyPatches, loadPatches, STUDIO, REPO, PLATFORM, ORIGINAL_SHA256, ORIGINAL_NAME, ORIGINAL_FILE, STANDALONE_CHECK, BOOT_JS } from '../../tools/build-cloud-editor.js';
 
 const PRE = path.join(PLATFORM, '.tmp', 'preserve');
 const results = []; let failed = 0, passed = 0;
@@ -26,11 +30,12 @@ function treeHash(dir, skip) {
 const SKIP = /^(shots|\.gate|qa|__pycache__)([\\/]|$)|saved[^\\/]*\.html$|[\\/]__pycache__[\\/]/;
 const before = treeHash(STUDIO, SKIP), beforeOrig = treeHash(path.join(REPO, 'original'));
 
-/* 1 + 2: standalone */
+/* 2: build autônomo = build publicado na raiz (o original/ é conferido à parte, em PR-11/PR-11b) */
 const v = verifyStandalone();
-check('PR-01 build autônomo (python3 studio/assemble.py) é BYTE-IDÊNTICO ao original: ' + v.built, v.ok && v.built === STANDALONE_SHA256 && v.original === STANDALONE_SHA256, v);
-const standalone = readFileSync(path.join(PLATFORM, '.tmp', 'standalone-check.html'), 'utf8');
-check('PR-02 AM-Studio-Editor.html e Canteiro-AM.html da raiz = o mesmo build (sha256)', sha(readFileSync(path.join(REPO, 'AM-Studio-Editor.html'))) === STANDALONE_SHA256 && sha(readFileSync(path.join(REPO, 'Canteiro-AM.html'))) === STANDALONE_SHA256 && sha(readFileSync(path.join(STUDIO, 'AM-Studio-Editor.html'))) === STANDALONE_SHA256);
+check('PR-01 build autônomo (python3 studio/assemble.py) é BYTE-IDÊNTICO ao build publicado na raiz (AM-Studio-Editor.html e Canteiro-AM.html): ' + v.built, !!v.built && v.built === v.published && v.built === v.canteiro, v);
+const standalone = readFileSync(STANDALONE_CHECK, 'utf8');
+const studioHtml = path.join(STUDIO, 'AM-Studio-Editor.html'), studioSha = existsSync(studioHtml) ? sha(readFileSync(studioHtml)) : null;
+check('PR-02 AM-Studio-Editor.html e Canteiro-AM.html da raiz são o mesmo arquivo (sha256 ' + String(v.published).slice(0, 8) + '…)' + (studioSha ? ' e = studio/AM-Studio-Editor.html' : ' (studio/AM-Studio-Editor.html ausente: não comparado)'), !!v.published && v.published === v.canteiro && (studioSha === null || studioSha === v.published), { published: v.published, canteiro: v.canteiro, studio: studioSha });
 
 /* 3: o que o cloud muda */
 const cloud = buildCloudEditor();
@@ -63,7 +68,9 @@ rmSync(T, { recursive: true, force: true });
 const after = treeHash(STUDIO, SKIP), afterOrig = treeHash(path.join(REPO, 'original'));
 const changed = Object.keys({ ...before, ...after }).filter((k) => before[k] !== after[k]);
 check('PR-10 studio/ intacto depois de construir o cloud e o autônomo (' + Object.keys(after).length + ' arquivos, hash antes = depois)', changed.length === 0, changed);
-check('PR-11 original/ intacto', JSON.stringify(beforeOrig) === JSON.stringify(afterOrig));
+check('PR-11 original/ intacto (cópia preservada do upload S34b: hash de cada arquivo antes = depois)', JSON.stringify(beforeOrig) === JSON.stringify(afterOrig));
+const origSha = existsSync(ORIGINAL_FILE) ? sha(readFileSync(ORIGINAL_FILE)) : null, sums = originalSums();
+check('PR-11b original/' + ORIGINAL_NAME + ' confere com original/SHA256SUMS: sha256 ' + ORIGINAL_SHA256.slice(0, 8) + '…' + ORIGINAL_SHA256.slice(-4) + ' (não precisa ser igual ao build atual)', origSha === ORIGINAL_SHA256 && sums[ORIGINAL_NAME] === ORIGINAL_SHA256 && v.original === ORIGINAL_SHA256 && v.originalOk === true, { arquivo: origSha, sha256sums: sums[ORIGINAL_NAME] || null, verify: { original: v.original, originalOk: v.originalOk } });
 const git = spawnSync('git', ['status', '--porcelain', '--', 'studio', 'original', 'AM-Studio-Editor.html', 'Canteiro-AM.html', 'am'], { cwd: REPO, encoding: 'utf8' });
 check('PR-12 git: nenhuma alteração em studio/, original/, am/ nem nos HTML da raiz', git.status === 0 && git.stdout.trim() === '', git.stdout);
 

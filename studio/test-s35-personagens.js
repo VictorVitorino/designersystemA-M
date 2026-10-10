@@ -3,6 +3,9 @@
    elemento; andar até um X; na apresentação os olhos seguem o mouse, o clique reage e acende o alvo, os botões de decisão
    navegam. Editor: Inserir › Personagens ▸, painel (presets como variantes, partes, “Aponta para” dinâmico), edição no lugar,
    mira ao mover, vitrine, raster/PDF, Ctrl+Z, salvar/reabrir, balão solto preso a conector.
+   Correções da revisão adversarial (S35-24…41): fora do kit de cores, arquivo editado à mão, “Andar até” vazio, alvo nas cópias e no
+   Redefinir, rótulos, efeitos que não servem, PowerPoint editável, caminhada + mira + linha presa, poses finais, gesto do clique,
+   decisões (foco, salto cancelado), ponteiro só no desenho, giro, alvo acima da cabeça, texto que cabe, vitrine e Marca ▾.
    Uso: python3 assemble.py && node test-s35-personagens.js */
 process.env.NODE_PATH='/opt/node22/lib/node_modules'; require('module').Module._initPaths();
 const {chromium}=require('playwright'); const path=require('path'); const fs=require('fs');
@@ -103,7 +106,7 @@ async function open(ctx, url, tag){ const p=await ctx.newPage(); await fonts(p);
       bR:cs(B,'.pz-aR').animationName, bN:cs(B,'.pz-aR').animationIterationCount, bC:cs(B,'.pz-char').animationName, conf:cs(B,'.pz-conf').display, bChs:B.querySelectorAll('.pz-ch').length, bPensa:!!B.querySelector('.pz-say-pensa'),
       cM:cs(C,'.pz-mouth[data-m=focado]').animationName, cFace:C.dataset.face, cGrita:!!C.querySelector('.pz-say-grita'), cTxt:getComputedStyle(C.querySelector('.pz-say-grita')).color, cBg:getComputedStyle(C.querySelector('.pz-say-grita')).backgroundColor,
       lid:cs(A,'.pz-lid').animationName, led:getComputedStyle(B.querySelector('.pz-hat .pz-led')).animationName, s1:getComputedStyle(A.querySelector('.pz-s1')).display, s2:getComputedStyle(A.querySelector('.pz-s2')).display}; }, ids);
-  check('S35-15: player: 3 personagens; A aponta uma vez (pzPoint ×1, mira para o gráfico, olha à direita); B comemora sem parar (pzCheer ∞, pula, confete); C espera o mouse (boca parada), olha à esquerda, grito laranja com texto navy legível; pálpebras piscam, antena da IA pulsa; só a fala 1 aparece', pl.n===3 && pl.aR==='pzPoint' && pl.aN==='1' && /deg/.test(pl.aim) && pl.face==='r' && pl.bR==='pzCheerR' && pl.bN==='infinite' && pl.bC==='pzHop' && pl.conf==='inline' && pl.bChs===2 && pl.bPensa && pl.cM==='pzNone' && pl.cFace==='l' && pl.cGrita && pl.cTxt==='rgb(0, 42, 70)' && pl.cBg==='rgb(247, 140, 22)' && pl.lid==='pzBlink' && pl.led==='pzLed' && pl.s1!=='none' && pl.s2==='none', pl);
+  check('S35-15: player: 3 personagens; A aponta uma vez (pzPoint ×1, mira para o gráfico, olha à direita); B comemora sem parar (trilha cíclica pzCheerRL ∞, pula, confete); C espera o mouse (boca parada), olha à esquerda, grito laranja com texto navy legível; pálpebras piscam, antena da IA pulsa; só a fala 1 aparece', pl.n===3 && pl.aR==='pzPoint' && pl.aN==='1' && /deg/.test(pl.aim) && pl.face==='r' && pl.bR==='pzCheerRL' && pl.bN==='infinite' && pl.bC==='pzHop' && pl.conf==='inline' && pl.bChs===2 && pl.bPensa && pl.cM==='pzNone' && pl.cFace==='l' && pl.cGrita && pl.cTxt==='rgb(0, 42, 70)' && pl.cBg==='rgb(247, 140, 22)' && pl.lid==='pzBlink' && pl.led==='pzLed' && pl.s1!=='none' && pl.s2==='none', pl);
   await q.screenshot({path:SH('player')});
   const eyeA=await q.evaluate(id=>{ const r=document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz-eyes').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; }, ids.a);
   await q.mouse.move(eyeA.x-300, eyeA.y); await sleep(250); const lx1=await q.evaluate(id=>parseFloat(document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz').style.getPropertyValue('--lx')), ids.a);
@@ -130,15 +133,17 @@ async function open(ctx, url, tag){ const p=await ctx.newPage(); await fonts(p);
   const ds=await q.evaluate(id=>({mood:document.querySelector('.amp-slide:not(.on) .am-el[data-id="'+id+'"] .pz').dataset.mood, pos:document.querySelector('.amp-pos').textContent}), ids.b);
   check('S35-19: decisões no balão: “Não” deixa a IA preocupada no mesmo slide; “Sim” a anima e leva ao slide 2', dn.mood==='preocupado' && /^01/.test(dn.pos) && ds.mood==='animado' && /^02/.test(ds.pos), {dn,ds});
   await sleep(600); await q.screenshot({path:SH('walk-mid')});
+  const wmid=await q.evaluate(id=>{ const z=document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz'); return {legs:getComputedStyle(z.querySelector('.pz-lgL')).animationName, arr:z.classList.contains('pz-arr'), wf:z.dataset.wf}; }, ids.w);
   await sleep(3400);
   const wk=await q.evaluate(ids=>{ const z=document.querySelector('.amp-slide.on .am-el[data-id="'+ids.w+'"] .pz'); const mv=z.querySelector('.pz-mv'); const st=document.querySelector('.amp-slide.on .am-stage').getBoundingClientRect(); const tr=getComputedStyle(mv).translate; const px=parseFloat(tr); const exp=(900-40)/1280*st.width;
     const er=z.closest('.am-el').getBoundingClientRect(), br=z.querySelector('.pz-say').getBoundingClientRect(); return {tr, px, exp, ok:Math.abs(px-exp)<2, wq:z.style.getPropertyValue('--wq'), legs:getComputedStyle(z.querySelector('.pz-lgL')).animationName, bubbleMoved:br.x-er.x>exp-40, an:getComputedStyle(mv).animationName}; }, ids);
-  check('S35-20: “Andar até 900”: o personagem e o balão deslizam juntos até o X pedido (translate = (900−40)/1280 da largura do palco) com as pernas andando', wk.ok && wk.legs==='pzLegA' && wk.bubbleMoved && wk.an==='pzWalkTo', wk);
+  const arr=await q.evaluate(id=>document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz').classList.contains('pz-arr'), ids.w);
+  check('S35-20: “Andar até 900”: no caminho as pernas andam (pzLegA) e ele olha para a direita; na chegada o personagem e o balão estão juntos no X pedido (translate = (900−40)/1280 da largura do palco), as pernas param e .pz-arr marca a chegada', wmid.legs==='pzLegA' && !wmid.arr && wmid.wf==='r' && wk.ok && wk.legs==='pzNone' && arr && wk.bubbleMoved && wk.an==='pzWalkTo', {wmid, wk, arr});
   await q.screenshot({path:SH('walk-end')});
   const kB=await q.evaluate(id=>{ const z=document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz'); const r=z.querySelector('.pz-svg').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2, before:getComputedStyle(z.querySelector('.pz-aR')).animationName, lx:z.style.getPropertyValue('--lx')}; }, ids.k);
   await q.mouse.click(kB.x,kB.y); await sleep(200);
   const kA=await q.evaluate(id=>{ const z=document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz'); return {an:getComputedStyle(z.querySelector('.pz-aR')).animationName, n:getComputedStyle(z.querySelector('.pz-aR')).animationIterationCount, pos:document.querySelector('.amp-pos').textContent}; }, ids.k);
-  check('S35-21: “só ao clicar”: o apresentador fica parado até o clique, que faz o aceno uma vez (sem avançar o slide); olhos fixos não recebem --lx', kB.before==='pzNone' && kB.lx==='' && kA.an==='pzWave' && kA.n==='1' && /^02/.test(kA.pos), {kB,kA});
+  check('S35-21: “só ao clicar”: o apresentador fica parado até o clique, que faz o aceno uma vez como gesto (pzWaveG, parte e volta à pose; sem avançar o slide); olhos fixos não recebem --lx', kB.before==='pzNone' && kB.lx==='' && kA.an==='pzWaveG' && kA.n==='1' && /^02/.test(kA.pos), {kB,kA});
   await q.keyboard.press('ArrowLeft'); await sleep(400);
   check('S35-22: as setas continuam navegando (← volta ao slide 1)', await q.evaluate(()=>/^01/.test(document.querySelector('.amp-pos').textContent)));
   /* ---------- 7. salvar/reabrir e saneamento ---------- */
@@ -149,9 +154,145 @@ async function open(ctx, url, tag){ const p=await ctx.newPage(); await fonts(p);
     return {a:{v:a.variant, aim:a.data.aim===ids.chart, say2:a.data.say2, mood2:a.data.mood2, act:a.data.act}, b:{ch:bb.data.choices.length, go:bb.data.choices[0].go, m:bb.data.choices[0].m, side:bb.data.side, bubble:bb.data.bubble}, w:{walk:w.data.walk}, ln:ln.a1&&ln.a1.id===ids.sb&&ln.a2&&ln.a2.id===ids.b,
       bad:{variant:bad.variant||'', hat:bad.data.hat, aim:bad.data.aim, r:r.hat+'/'+r.mood, esc:/&lt;b&gt;oi&lt;\/b&gt;/.test(html2)&&!/<b>oi/.test(html2), choices:AMRT.personas.choices(bad.data.choices)[0]}}; }, ids);
   check('S35-23: salvar/reabrir mantém preset, alvo, fala/expressão ao clicar, decisões (botão, slide, expressão), posição do balão, Andar até e as pontas presas; peças inválidas são descartadas (chapéu “x<y”, alvo com “!”, variante desconhecida) e o preset responde; a fala sai escapada', re.a.v==='consultora' && re.a.aim && re.a.say2==='Foi o maior salto do ano!' && re.a.mood2==='animado' && re.a.act==='apontar' && re.b.ch===2 && re.b.go===2 && re.b.m==='animado' && re.b.side==='right' && re.b.bubble==='pensa' && re.w.walk===900 && re.ln && re.bad.variant==='' && re.bad.hat===undefined && re.bad.aim===undefined && re.bad.r==='capW/surpreso' && re.bad.esc && re.bad.choices.go===3 && re.bad.choices.m==='', re);
-  /* kit de marca: as cores do personagem acompanham “Cores do componente” */
-  const pal=await p.evaluate(ids=>{ const A=AMStudio; const a=A.deck.slides[0].els.find(e=>e.id===ids.a); const before=document.querySelector('#cv .am-edit .am-el[data-id="'+ids.a+'"] .pz').style.getPropertyValue('--c1'); a.pal={p:'#1F66A8',a:'#2BB673'}; A.renderAll(); A.commit(); const n=document.querySelector('#cv .am-edit .am-el[data-id="'+ids.a+'"]'); const z=n.querySelector('.pz'); return {palOk:A.brand.palOk(a), tag:!!n.dataset.pal, before, after:z.style.getPropertyValue('--c1')}; }, ids);
-  check('S35-24: “Cores do componente” vale para o personagem: data-pal no elemento e a cor do corpo recolorida', pal.palOk && pal.tag && pal.before!==pal.after && /^#/.test(pal.after), pal);
+  { /* ---------- 8. correções da revisão adversarial (bloco próprio: nomes locais) ---------- */
+  const W8=ms=>new Promise(r=>setTimeout(r,ms));
+  const kit=await p.evaluate(ids=>{ const A=AMStudio; const a=A.deck.slides[0].els.find(e=>e.id===ids.a); A.selectMany([a.id]); A.renderAll();
+    const secs=[...document.querySelectorAll('#props .sec h3')].map(h=>h.textContent);
+    const bad=A.safeDeck({slides:[{id:'s1',els:[{id:'p1',type:'fx',kind:'persona',x:0,y:0,w:300,h:380,variant:'mestre',pal:{p:'#C2185B',a:'#00A651'},data:{}}]}]}).slides[0].els[0];
+    return {palOk:A.brand.palOk(a), secs, palKept:!!bad.pal}; }, ids);
+  check('S35-24: personagens ficam fora do kit “Cores do componente” (só cores A&M): palOk falso, o painel não oferece a seção e uma cor de fora gravada no arquivo é descartada ao abrir', !kit.palOk && !kit.secs.some(t=>/Cores do componente/i.test(t)) && !kit.palKept, kit);
+  /* arquivo editado à mão: decisões em texto/objeto/número, fala numérica, bcol com nome do protótipo, walk inválido */
+  const hand=await p.evaluate(async()=>{ const A=AMStudio;
+    const dk={title:'Mão',slides:[{id:'s1',bg:'#FFFFFF',els:[{id:'pA',type:'fx',kind:'persona',x:40,y:40,w:300,h:380,variant:'eng',data:{say:'Escolha',choices:'Sim | 2 | feliz\nNão | 0 | triste',bcol:'__proto__',walk:'abc'}},
+      {id:'pB',type:'fx',kind:'persona',x:400,y:40,w:300,h:380,variant:'ia',data:{choices:[null,{t:'ok',go:1},5,'x'],say:7,bcol:'constructor'}},{id:'pC',type:'fx',kind:'persona',x:800,y:40,w:300,h:380,data:{choices:{t:'x'},say2:{a:1}}}]}]};
+    A.loadDeck(A.safeDeck(dk),'mao'); await new Promise(r=>setTimeout(r,250)); const s=A.deck.slides[0];
+    const pan=id=>{ A.selectMany([id]); const t=document.querySelector('#props textarea[data-p="data.choices"]'); return {h2:(document.querySelector('#props h2')||{}).textContent||'', ch:t?t.value:null}; };
+    const a=pan('pA'), b=pan('pB'), c=pan('pC'); const bg=id=>getComputedStyle(document.querySelector('#cv .am-edit .am-el[data-id="'+id+'"] .pz-say')).backgroundColor;
+    return {a, b, c, ca:s.els[0].data.choices, cb:s.els[1].data.choices, cc:s.els[2].data.choices, sayB:s.els[1].data.say, say2C:s.els[2].data.say2, walkA:s.els[0].data.walk, bgA:bg('pA'), bgB:bg('pB')}; });
+  check('S35-25: arquivo editado à mão: decisões em texto viram lista (Sim→2 feliz, Não→0 triste), lista com lixo fica só com os itens válidos, objeto vira lista vazia; o painel abre nos três; fala numérica vira texto, fala-objeto some; bcol “__proto__”/“constructor” cai no balão branco; walk inválido fica vazio',
+    /Personagem/.test(hand.a.h2) && hand.a.ch==='Sim | 2 | feliz\nNão | 0 | triste' && /Personagem/.test(hand.b.h2) && hand.b.ch==='ok | 1 | ' && /Personagem/.test(hand.c.h2) && hand.c.ch==='' && hand.ca.length===2 && hand.ca[0].go===2 && hand.cb.length===1 && Array.isArray(hand.cc) && hand.cc.length===0 && hand.sayB==='7' && hand.say2C==='' && hand.walkA==='' && hand.bgA==='rgb(255, 255, 255)' && hand.bgB==='rgb(255, 255, 255)', hand);
+  const wf=await p.evaluate(async()=>{ const A=AMStudio; A.selectMany(['pA']); await new Promise(r=>setTimeout(r,120)); const q=()=>document.querySelector('#props input[data-p="data.walk"]'); const v0=q().value;
+    q().value='700'; q().dispatchEvent(new Event('input',{bubbles:true})); q().dispatchEvent(new Event('change',{bubbles:true})); await new Promise(r=>setTimeout(r,150)); const w1=A.deck.slides[0].els[0].data.walk, at1=!!document.querySelector('#cv .am-edit .am-el[data-id="pA"] .pz[data-walk]');
+    q().value=''; q().dispatchEvent(new Event('input',{bubbles:true})); q().dispatchEvent(new Event('change',{bubbles:true})); await new Promise(r=>setTimeout(r,150));
+    return {v0, w1, at1, w2:A.deck.slides[0].els[0].data.walk, v2:q().value, at2:!!document.querySelector('#cv .am-edit .am-el[data-id="pA"] .pz[data-walk]')}; });
+  check('S35-26: “Andar até” começa vazio (não 0), aceita 700 e volta a vazio ao apagar (o personagem deixa de andar)', wf.v0==='' && wf.w1===700 && wf.at1 && wf.w2==='' && wf.v2==='' && !wf.at2, wf);
+  /* duplicar slide, Ctrl+D e a base do “Redefinir” levam o alvo para as cópias */
+  const rm=await p.evaluate(async()=>{ const A=AMStudio; const dk=A.newDeck(); A.loadDeck(dk,null);
+    A.appendSlides([{id:'sx',bg:'#FFFFFF',els:[{id:'c0',type:'fx',kind:'bars',x:620,y:100,w:600,h:300},{id:'p0',type:'fx',kind:'persona',variant:'consultor',x:40,y:100,w:300,h:380,data:Object.assign(JSON.parse(JSON.stringify(AMRT.FX.persona.data)),{aim:'c0',act:'apontar',bcol:'gelo',side:'top',bubble:'pensa',say:'Base'})}]}], 1);
+    await new Promise(r=>setTimeout(r,200)); const s1=A.deck.slides[1], ch=s1.els.find(e=>e.kind==='bars'), pz=s1.els.find(e=>e.kind==='persona');
+    const base1=Object.values(s1.base.els).map(sn=>sn.dsel&&sn.dsel.aim).filter(Boolean)[0];
+    A.dupSlide(1); await new Promise(r=>setTimeout(r,200)); const s2=A.deck.slides[2], ch2=s2.els.find(e=>e.kind==='bars'), pz2=s2.els.find(e=>e.kind==='persona');
+    const base2=Object.values(s2.base.els).map(sn=>sn.dsel&&sn.dsel.aim).filter(Boolean)[0];
+    A.goSlide(1); A.selectMany([ch.id, pz.id]); return {pzAim:pz.data.aim===ch.id, base1:base1===ch.id, dup:pz2.data.aim===ch2.id && ch2.id!==ch.id, base2:base2===ch2.id, nkeys:Object.keys(Object.values(s1.base.els).find(sn=>sn.dsel&&sn.dsel.aim).dsel).length}; });
+  await p.keyboard.press('Control+d'); await sleep(250);
+  const cd=await p.evaluate(()=>{ const s=AMStudio.deck.slides[1]; const cps=s.els.slice(2); const c=cps.find(e=>e.kind==='bars'), z=cps.find(e=>e.kind==='persona'); return {n:cps.length, ok:!!(c&&z&&z.data.aim===c.id)}; });
+  check('S35-27: o alvo acompanha as cópias: slide colado já aponta para o gráfico novo (inclusive na base do Redefinir, que guarda as 19 escolhas), “Duplicar slide” e Ctrl+D (personagem + gráfico) apontam para os novos', rm.pzAim && rm.base1 && rm.dup && rm.base2 && rm.nkeys>=19 && cd.n===2 && cd.ok, {rm, cd});
+  const rs=await p.evaluate(async()=>{ const A=AMStudio; const html=A.exportHTML(); const dk=JSON.parse(/<script type="application\/json" id="am-deck-data">([\s\S]*?)<\/script>/.exec(html)[1]); A.loadDeck(dk,'re2'); await new Promise(r=>setTimeout(r,200));
+    A.goSlide(1); const z=A.deck.slides[1].els.find(e=>e.kind==='persona'), aim0=z.data.aim; Object.assign(z.data,{bcol:'navy',side:'left',bubble:'grita',aim:''}); A.renderAll(); A.commit();
+    A.resetSlide(1); await new Promise(r=>setTimeout(r,200)); const z2=A.deck.slides[1].els.find(e=>e.kind==='persona'); return {bcol:z2.data.bcol, side:z2.data.side, bubble:z2.data.bubble, aim:z2.data.aim===aim0 && !!aim0}; });
+  check('S35-28: salvar → reabrir → mudar cor, lado, tipo de balão e alvo → “Redefinir slide” devolve os quatro (a base guarda as 19 escolhas do personagem)', rs.bcol==='gelo' && rs.side==='top' && rs.bubble==='pensa' && rs.aim, rs);
+  /* menu de variantes, prévia, efeitos que não servem */
+  await p.evaluate(()=>{ const A=AMStudio; const z=A.deck.slides[1].els.find(e=>e.kind==='persona'); A.selectMany([z.id]); }); await sleep(200);
+  await p.click('#fxArrow'); await sleep(200);
+  const vm=await p.evaluate(async()=>{ const A=AMStudio; const t=(document.querySelector('#mVar .vh b')||{}).textContent; A.closeMenus();
+    const pv=(document.querySelector('#props [data-act="pvel"]')||{}).textContent, loops=[...document.querySelectorAll('#props [data-set="anim.loop"]')].map(b=>b.dataset.v), hov=[...document.querySelectorAll('#props [data-set="anim.hover"]')].map(b=>b.dataset.v);
+    const sh=A.insertFx('card'); A.selectMany([sh.id]); await new Promise(r=>setTimeout(r,120)); const loops2=[...document.querySelectorAll('#props [data-set="anim.loop"]')].map(b=>b.dataset.v); return {t, pv, loops, hov, loops2}; });
+  check('S35-29: menu do seletor “Personagem: Personagem A&M” e botão “▶ Ver movimento no slide”; “Reflexo” (contínuo) e “Zoom interno” (mouse) não são oferecidos ao personagem, mas continuam para um card', vm.t==='Personagem: Personagem A&M' && /Ver movimento no slide/.test(vm.pv) && vm.loops.length>3 && !vm.loops.includes('shimmer') && !vm.hov.includes('inzoom') && vm.hov.length>3 && vm.loops2.includes('shimmer'), vm);
+  /* PowerPoint editável: o personagem sai com o lado e a mira do slide inteiro */
+  const px=await p.evaluate(async()=>{ const A=AMStudio; const F=AMRT.FX.persona, orig=F.html, seen=[]; F.html=function(d,w,h,el){ if(el&&el._pzAim) seen.push(el._pzAim); return orig.apply(this,arguments); };
+    try { const dk=A.newDeck(); A.loadDeck(dk,null); const ch=A.insertFx('bars'); ch.x=40; ch.y=100; ch.w=600; ch.h=300; const pz=A.insertFx('persona',null,null,'consultor'); pz.x=900; pz.y=100; pz.data.aim=ch.id; pz.data.act='apontar'; A.selectMany([]); A.renderAll(); A.commit();
+      const z=document.querySelector('#cv .am-edit .pz'); const stage={aim:z.style.getPropertyValue('--aim').trim(), face:z.dataset.face};
+      const bl=await AMExport.pptxBuild(A.deck,{mode:'edit'}); return {size:bl.size, seen, stage}; } finally { F.html=orig; } });
+  check('S35-30: PowerPoint editável: o personagem vira imagem com o mesmo lado (esquerda, para o gráfico) e a mesma mira medidos no slide', px.size>10000 && px.seen.length>=1 && px.seen[0].face==='l' && px.stage.face==='l' && px.seen[0].deg===px.stage.aim, px);
+  /* deck de comportamento no player */
+  const ids2=await p.evaluate(()=>{ const A=AMStudio; const dk=A.newDeck(); dk.title='Correções'; A.loadDeck(dk,null); const s0=A.deck.slides[0];
+    const ch=A.insertFx('bars'); ch.x=820; ch.y=80; ch.w=440; ch.h=260;
+    const w=A.insertFx('persona',null,null,'eng'); w.x=20; w.y=300; w.w=260; w.h=360; Object.assign(w.data,{walk:420,act:'apontar',aim:ch.id,say:'Cheguei!'});
+    const ln=A.mk.line(true,false); ln.x1=200; ln.y1=60; ln.x2=150; ln.y2=300; ln.a2={id:w.id,s:'n'}; s0.els.push(ln);
+    const tw=A.insertFx('persona',null,null,'eng'); tw.x=420; tw.y=300; tw.w=260; tw.h=360; Object.assign(tw.data,{act:'apontar',aim:ch.id,say:'Cheguei!',trig:'click'});
+    A.addSlide('blank-light'); const s1=A.deck.slides[1];
+    const a=A.insertFx('persona',null,null,'mestre'); a.x=20; a.y=40; a.w=280; a.h=360; Object.assign(a.data,{act:'acenar',act2:'pular',trig:'in'}); a.anim={in:'none'};
+    const b=A.insertFx('persona',null,null,'dev'); b.x=330; b.y=40; b.w=280; b.h=360; Object.assign(b.data,{act:'andar',trig:'in',bubble:'none'});
+    const c=A.insertFx('persona',null,null,'apresentador'); c.x=640; c.y=40; c.w=280; c.h=360; Object.assign(c.data,{act:'comemorar',trig:'hover',say:'Viva!'});
+    const d=A.insertFx('persona',null,null,'ia'); d.x=950; d.y=40; d.w=310; d.h=420; Object.assign(d.data,{act:'acenar',trig:'loop',say:'Escolha um caminho',choices:[{t:'Seguir',go:3,m:'animado'},{t:'Ficar',go:0,m:'preocupado'}]});
+    A.addSlide('blank-light'); const big=A.insertFx('persona',null,null,'cientista'); big.x=500; big.y=0; big.w=780; big.h=720; Object.assign(big.data,{bubble:'none',act:'parado'});
+    A.addSlide('blank-light'); A.goSlide(0); A.selectMany([]); A.renderAll(); A.commit();
+    return {ch:ch.id, w:w.id, ln:ln.id, tw:tw.id, a:a.id, b:b.id, c:c.id, d:d.id, big:big.id}; });
+  const tw0=await p.evaluate(ids2=>{ const t=document.querySelector('#cv .am-edit .am-el[data-id="'+ids2.tw+'"] .pz'); return t.style.getPropertyValue('--aim').trim(); }, ids2);
+  const h2=await p.evaluate(()=>AMStudio.exportHTML()); const hp2=path.join(TMP,'pz2.html'); fs.writeFileSync(hp2,h2);
+  const r=await open(ctx,'file://'+hp2,'player2'); await sleep(500);
+  const z=(id,sel)=>r.evaluate(([id,sel])=>{ const n=document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] '+(sel||'.pz')); return n; },[id,sel]);
+  const mid=await r.evaluate(ids2=>{ const zz=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.w+'"] .pz'); return {arr:zz.classList.contains('pz-arr'), aR:getComputedStyle(zz.querySelector('.pz-aR')).animationName, face:getComputedStyle(zz.querySelector('.pz-svg')).transform, lnHidden:getComputedStyle(document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.ln+'"]')).visibility}; }, ids2);
+  const pre=await r.evaluate(ids2=>parseFloat(getComputedStyle(document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.w+'"] .pz-mv')).translate)||0, ids2);
+  const wb2=await r.evaluate(ids2=>{ const b=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.w+'"] .pz-char').getBoundingClientRect(); return {x:b.x+b.width/2,y:b.y+b.height/2}; }, ids2);
+  await r.mouse.click(wb2.x,wb2.y); await sleep(60);
+  const post=await r.evaluate(ids2=>{ const zz=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.w+'"] .pz'); return {t:parseFloat(getComputedStyle(zz.querySelector('.pz-mv')).translate)||0, go:zz.classList.contains('pz-go')}; }, ids2);
+  check('S35-31: clique no meio da caminhada não teletransporta nem interrompe: o deslocamento só cresce e o gesto não toca enquanto anda; os braços balançam (pzSwingR) e a linha presa some durante a caminhada', post.t>=pre && !post.go && !mid.arr && mid.aR==='pzSwingR' && mid.lnHidden==='hidden', {pre, post, mid});
+  await sleep(2600);
+  const ar2=await r.evaluate(ids2=>{ const zz=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.w+'"] .pz'); const lx=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.ln+'-pz"]'); const lo=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.ln+'"]');
+    return {arr:zz.classList.contains('pz-arr'), aR:getComputedStyle(zz.querySelector('.pz-aR')).animationName, aim:zz.style.getPropertyValue('--aim').trim(), face:zz.dataset.face, clone:!!lx, origHidden:getComputedStyle(lo).visibility, cloneLeft:lx?parseFloat(lx.style.left):null, origLeft:parseFloat(lo.style.left)}; }, ids2);
+  check('S35-32: ao chegar, o personagem aponta (pzPoint) com a mira calculada da posição de chegada (= a de um igual parado ali), olhando para o gráfico; a linha presa reaparece com a ponta no ponto de chegada', ar2.arr && ar2.aR==='pzPoint' && ar2.face==='r' && ar2.aim===tw0 && ar2.clone && ar2.origHidden==='hidden' && ar2.cloneLeft>ar2.origLeft, {ar2, tw0});
+  await r.keyboard.press('ArrowRight'); await sleep(1200);
+  const sl2=await r.evaluate(ids2=>{ const q=id=>document.querySelector('.amp-slide.on .am-el[data-id="'+id+'"] .pz'); const A=q(ids2.a), B=q(ids2.b), C=q(ids2.c), D=q(ids2.d);
+    return {aDelay:getComputedStyle(A.querySelector('.pz-aR')).animationDelay, tL:getComputedStyle(A.querySelector('.pz-tL')).display, tR:getComputedStyle(A.querySelector('.pz-tR')).display, tRB:getComputedStyle(B.querySelector('.pz-tR')).display,
+      dLoop:getComputedStyle(D.querySelector('.pz-aR')).animationName, confC:getComputedStyle(C.querySelector('.pz-conf circle')).opacity, confD:getComputedStyle(C.querySelector('.pz-conf')).display,
+      bkA:A.style.getPropertyValue('--bk'), bkB:B.style.getPropertyValue('--bk'), lidPath:!!A.querySelector('.pz-lid .pz-lidl')}; }, ids2);
+  check('S35-33: sem animação de entrada o movimento começa em 150 ms; quem acena segura a ferramenta na mão esquerda (a direita fica livre), quem anda na direita; “acenar sem parar” usa a trilha cíclica pzWaveL; confete do “ao passar o mouse” fica invisível parado; cada personagem pisca no seu tempo e a pálpebra tem o traço do olho fechado',
+    sl2.aDelay==='0.15s' && sl2.tL==='inline' && sl2.tR==='none' && sl2.tRB!=='none' && sl2.dLoop==='pzWaveL' && sl2.confC==='0' && sl2.bkA && sl2.bkA!==sl2.bkB && sl2.lidPath, sl2);
+  await sleep(2600);
+  const wv=await r.evaluate(ids2=>{ const A=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.a+'"] .pz'), B=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.b+'"] .pz'); return {aR:getComputedStyle(A.querySelector('.pz-aR')).rotate, lg:getComputedStyle(B.querySelector('.pz-lgL')).rotate, lgAn:getComputedStyle(B.querySelector('.pz-lgL')).animationName}; }, ids2);
+  const ed=await p.evaluate(ids2=>{ AMStudio.goSlide(1); const B=document.querySelector('#cv .am-edit .am-el[data-id="'+ids2.b+'"] .pz'), A=document.querySelector('#cv .am-edit .am-el[data-id="'+ids2.a+'"] .pz'); return {aR:getComputedStyle(A.querySelector('.pz-aR')).rotate, lg:getComputedStyle(B.querySelector('.pz-lgL')).rotate, conf:getComputedStyle(document.querySelector('#cv .am-edit .am-el[data-id="'+ids2.c+'"] .pz-conf')).display}; }, ids2);
+  check('S35-34: as entradas terminam exatamente na pose do editor (acenar: braço em −140°; andar: perna em −12°), e no editor o confete não aparece', wv.aR===ed.aR && ed.aR==='-140deg' && wv.lg===ed.lg && ed.lg==='-12deg' && ed.conf==='none', {wv, ed});
+  const ca=await r.evaluate(ids2=>{ const b=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.a+'"] .pz-char').getBoundingClientRect(); return {x:b.x+b.width/2,y:b.y+b.height*.6}; }, ids2);
+  await r.mouse.click(ca.x,ca.y); await sleep(150);
+  const g1=await r.evaluate(ids2=>getComputedStyle(document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.a+'"] .pz-char')).animationName, ids2);
+  await sleep(1300);
+  const g2=await r.evaluate(ids2=>{ const A=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.a+'"] .pz'); return {go:A.classList.contains('pz-go'), done:A.classList.contains('pz-done'), aR:getComputedStyle(A.querySelector('.pz-aR')).animationName, rot:getComputedStyle(A.querySelector('.pz-aR')).rotate}; }, ids2);
+  check('S35-35: depois da reação ao clique (pular), a entrada não recomeça: o braço fica parado na pose (−140°) e a classe pz-done marca que a entrada já tocou', g1==='pzJump' && !g2.go && g2.done && g2.aR==='pzNone' && g2.rot==='-140deg', {g1, g2});
+  /* decisões: sem pz-on, sem foco preso, Espaço volta a avançar */
+  const dn=await r.evaluate(ids2=>{ const b=[...document.querySelectorAll('.amp-slide.on .am-el[data-id="'+ids2.d+'"] .pz-ch')].find(x=>x.textContent==='Ficar').getBoundingClientRect(); return {x:b.x+b.width/2,y:b.y+b.height/2}; }, ids2);
+  await r.mouse.click(dn.x,dn.y); await sleep(200);
+  const dd=await r.evaluate(ids2=>{ const D=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.d+'"] .pz'); return {on:D.classList.contains('pz-on'), mood:D.dataset.mood, pick:(D.querySelector('.pz-ch.pz-pick')||{}).textContent, focus:document.activeElement&&document.activeElement.classList.contains('pz-ch'), s1:getComputedStyle(D.querySelector('.pz-s1')).display, pos:document.querySelector('.amp-pos').textContent}; }, ids2);
+  await r.keyboard.press(' '); await sleep(500);
+  const sp=await r.evaluate(()=>document.querySelector('.amp-pos').textContent);
+  check('S35-36: decisão “Ficar”: o personagem fica preocupado, o botão escolhido fica marcado, a fala continua (sem a reação do clique), o foco não fica no botão e o Espaço volta a avançar o slide', !dd.on && dd.mood==='preocupado' && dd.pick==='Ficar' && !dd.focus && dd.s1!=='none' && /^02/.test(dd.pos) && /^03/.test(sp), {dd, sp});
+  const bb=await r.evaluate(ids2=>{ const st=document.querySelector('.amp-slide.on .am-stage').getBoundingClientRect(); const ch=document.querySelector('.amp-slide.on .am-el[data-id="'+ids2.big+'"] .pz-char').getBoundingClientRect(); return {empty:{x:st.x+st.width*.93,y:st.y+st.height*.08}, body:{x:ch.x+ch.width*.5,y:ch.y+ch.height*.6}}; }, ids2);
+  await r.mouse.click(bb.body.x,bb.body.y); await sleep(300); const pb=await r.evaluate(()=>document.querySelector('.amp-pos').textContent);
+  await r.mouse.click(bb.empty.x,bb.empty.y); await sleep(500); const pe=await r.evaluate(()=>document.querySelector('.amp-pos').textContent);
+  check('S35-37: só o desenho do personagem recebe o clique: no corpo ele reage e o slide fica; no vazio da caixa (zona de avançar) o slide avança', /^03/.test(pb) && /^04/.test(pe), {pb, pe});
+  await r.close();
+  /* decisão com o player fechado antes do salto (editor: Apresentar → Esc) */
+  const ps=await p.evaluate(async ids2=>{ const A=AMStudio; A.goSlide(1); A.present(1); await new Promise(r=>setTimeout(r,900));
+    const b=[...document.querySelectorAll('#presenter .amp-slide.on .am-el[data-id="'+ids2.d+'"] .pz-ch')].find(x=>x.textContent==='Seguir'); b.click(); document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    await new Promise(r=>setTimeout(r,800)); return {open:document.getElementById('presenter').classList.contains('open'), cur:A.cur}; }, ids2);
+  check('S35-38: decisão clicada e apresentação fechada logo em seguida (Esc): o salto agendado é cancelado, sem erro e sem mexer no editor', !ps.open && ps.cur===1, ps);
+  /* geometria: personagem girado, alvo acima da cabeça, texto longo, decisões, balão de pensamento solto */
+  const geo=await p.evaluate(async()=>{ const A=AMStudio; const dk=A.newDeck(); A.loadDeck(dk,null);
+    const t=A.insertFx('bars'); t.x=900; t.y=40; t.w=340; t.h=200;
+    const p0=A.insertFx('persona',null,null,'consultor'); p0.x=200; p0.y=260; Object.assign(p0.data,{aim:t.id,act:'apontar',bubble:'none'});
+    const p1=A.insertFx('persona',null,null,'consultor'); p1.x=200; p1.y=260; p1.rot=30; Object.assign(p1.data,{aim:t.id,act:'apontar',bubble:'none'});
+    const up=A.insertFx('card'); up.x=470; up.y=0; up.w=120; up.h=60; const p2=A.insertFx('persona',null,null,'consultor'); p2.x=520; p2.y=300; Object.assign(p2.data,{aim:up.id,act:'apontar',bubble:'none'});
+    const lg=A.insertFx('persona',null,null,'consultora'); lg.x=40; lg.y=40; lg.w=240; lg.h=300; lg.data.say='Este é um texto propositalmente longo para conferir se o balão reduz a letra até caber, sem cortar nada do que o personagem precisa dizer à plateia durante a apresentação do projeto.';
+    const cs=A.insertFx('persona',null,null,'ia'); cs.x=700; cs.y=300; cs.w=300; cs.h=380; Object.assign(cs.data,{say:'Qual caminho seguimos agora?',choices:[{t:'Plano A',go:0},{t:'Plano B',go:0},{t:'Plano C',go:0}]});
+    const bu=A.insertFx('bubble'); bu.x=1000; bu.y=520; bu.w=260; bu.h=150; Object.assign(bu.data,{style:'pensa',tail:'bl',text:'Pensando…'});
+    A.selectMany([]); A.renderAll(); await new Promise(r=>setTimeout(r,150));
+    const q=id=>document.querySelector('#cv .am-edit .am-el[data-id="'+id+'"]'); const aim=id=>parseFloat(q(id).querySelector('.pz').style.getPropertyValue('--aim'));
+    const L=q(lg.id).querySelector('.pz-s1'), fsL=parseFloat(getComputedStyle(q(lg.id).querySelector('.pz-say')).fontSize), fs0=parseFloat(getComputedStyle(q(cs.id).querySelector('.pz-say')).fontSize);
+    const S1=q(cs.id).querySelector('.pz-s1').getBoundingClientRect(), CH=q(cs.id).querySelector('.pz-chs').getBoundingClientRect(), SAY=q(cs.id).querySelector('.pz-say').getBoundingClientRect();
+    const say=q(bu.id).querySelector('.pz-say'), fsB=parseFloat(getComputedStyle(say).fontSize);
+    return {a0:aim(p0.id), a1:aim(p1.id), rotAttr:q(p1.id).querySelector('.pz').dataset.rot, up:aim(p2.id), longFits:L.scrollHeight<=L.clientHeight+1, fsL, fs0, s1h:S1.height, chIn:CH.bottom<=SAY.bottom+1&&CH.top>=SAY.top-1, pensaGap:parseFloat(getComputedStyle(say).bottom)/fsB}; });
+  check('S35-39: personagem girado 30° compensa a mira (≈ a do não girado − 30°); alvo logo acima da cabeça: o braço sobe por fora (mira ≤ 90°, nunca entre 90° e 180°); fala longa reduz a letra até caber; com decisões a fala continua visível e os botões ficam dentro do balão; o balão de pensamento solto reserva 2em para as bolinhas',
+    geo.rotAttr==='30.00' && Math.abs(geo.a1-(geo.a0-30))<8 && geo.up<=90 && !(geo.up>90&&geo.up<=180) && geo.longFits && geo.fsL<geo.fs0 && geo.s1h>5 && geo.chIn && Math.abs(geo.pensaGap-2)<0.05, geo);
+  await p.screenshot({path:SH('geometria')});
+  /* vitrine e menu Marca ▾ */
+  const gs=await p.evaluate(async()=>{ const A=AMStudio; const out={}; for (const q of ['mestre de obras','agente de ia','cientista','robô']) { A.gallery.open('all', q); await new Promise(r=>setTimeout(r,250)); const b=document.querySelector('#drawerBody .gx-box[data-gx="cmp:persona"]'); out[q]=!!b&&!b.hidden; } A.openDrawer(false); return out; });
+  check('S35-40: a busca da vitrine acha o personagem por qualquer nome do elenco (mestre de obras, agente de IA, cientista, robô)', Object.values(gs).every(Boolean), gs);
+  await p.click('#rib [data-menu=mBrand]'); await sleep(250);
+  const mb=await p.evaluate(()=>({n:document.querySelectorAll('#mBrand .pzm button').length, hd:[...document.querySelectorAll('#mBrand .mh')].map(x=>x.textContent), vis:document.getElementById('mBrand').classList.contains('open'), fit:document.getElementById('mBrand').getBoundingClientRect().bottom<=innerHeight}));
+  await p.click('#mBrand .pzm button[data-pz="ia"]'); await sleep(300);
+  const mi=await p.evaluate(()=>{ const s=AMStudio.deck.slides[AMStudio.cur]; const e=s.els[s.els.length-1]; return {kind:e.kind, v:e.variant, open:document.getElementById('mBrand').classList.contains('open')}; });
+  check('S35-41: Marca ▾ da faixa de ferramentas tem a seção “Personagens A&M” (10 do elenco + balão, cabendo na tela) e o clique insere o personagem escolhido', mb.vis && mb.n===11 && mb.hd.includes('Personagens A&M') && mb.fit && mi.kind==='persona' && mi.v==='ia' && !mi.open, {mb, mi});
+  }
   check('Zero erros de console', errs.length===0, errs);
   console.log(results.join('\n'));
   console.log(failed?('FALHAS: '+failed):'TUDO OK', JSON.stringify({errs}));

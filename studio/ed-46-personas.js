@@ -2,20 +2,22 @@
    · “Aponta para”: o campo do painel (data.aim) vira um seletor com os elementos do slide atual (nome do tipo + começo do texto),
      montado na hora em que o painel é desenhado (getter sobre FX.persona.fields; no runtime o campo continua estático).
    · Mira ao vivo: depois de arrastar/redimensionar/mover com as setas (pointerup, keyup) ou editar X/Y no painel (input), o braço
-     que aponta e o lado para onde o personagem olha são recalculados no palco (AMRT.personas.aimStage) sem redesenhar nada. */
+     que aponta e o lado para onde o personagem olha são recalculados no palco (AMRT.personas.aimStage) sem redesenhar nada.
+   · Faixa de ferramentas › Marca ▾: seção “Personagens A&M” com os 10 do elenco e o balão de fala (o mesmo que Inserir › Personagens ▸). */
 (function () {
   'use strict';
   var A = window.AMStudio, RT = window.AMRT; if (!A || !RT || !RT.FX || !RT.FX.persona || !RT.personas) return;
   var F = RT.FX.persona, BASE = F.fields.slice();
   function nameOf(e) {
     var base = e.type === 'fx' ? (RT.fxLabel ? RT.fxLabel(e) : 'Componente') : e.type === 'image' ? 'Imagem' : e.type === 'shape' ? 'Forma' : e.type === 'text' ? 'Texto' : 'Elemento';
-    var t = (e.type === 'text' || e.type === 'shape') && RT.plain ? RT.plain(e.html).replace(/\s+/g, ' ').trim() : '';
-    if (!t && e.type === 'fx' && e.data) t = String(e.data.title || e.data.label || e.data.say || '').replace(/\s+/g, ' ').trim();
+    var t = (e.type === 'text' || e.type === 'shape') && RT.plain ? RT.plain(e.html) : '';
+    if (!t && e.type === 'fx' && e.data) ['title', 'label', 'say', 'text'].some(function (k) { var v = e.data[k]; if (typeof v === 'string' && v.trim()) { t = v; return true; } return false; });
+    t = String(t || '').replace(/\s+/g, ' ').trim();
     return (t ? base + ' “' + (t.length > 26 ? t.slice(0, 25) + '…' : t) + '”' : base).replace(/[|=]/g, ' ');
   }
   function aimOpts() {
     var s = A.deck && A.deck.slides[A.cur], sel = A.selected(), me = sel.length === 1 ? sel[0] : null, out = ['=Nenhum'];
-    ((s && s.els) || []).forEach(function (e) { if (!e || e.id === me || e.type === 'line') return; out.push(e.id + '=' + nameOf(e)); });
+    ((s && s.els) || []).forEach(function (e) { if (!e || e.id === me || e.type === 'line' || typeof e.id !== 'string') return; out.push(e.id + '=' + nameOf(e)); });
     return 'sel:' + out.join('|');
   }
   Object.defineProperty(F, 'fields', { configurable: true, enumerable: true, get: function () { return BASE.map(function (f) { return f[0] === 'aim' ? ['aim', f[1], aimOpts()] : f; }); } });
@@ -24,5 +26,19 @@
   document.addEventListener('pointerup', reaim, true);
   document.addEventListener('keyup', function (e) { if (/^Arrow/.test(e.key)) reaim(); }, true);
   var pr = document.getElementById('props'); if (pr) pr.addEventListener('input', reaim);
+  /* Marca ▾: personagens à mão, sem passar pelo menu Inserir */
+  var mb = document.getElementById('mBrand');
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  if (mb && !mb.querySelector('.pzm')) {
+    var h = '<div class="mh">Personagens A&amp;M</div><div class="pzm" role="group" aria-label="Personagens A&amp;M">' +
+      RT.personas.PRESETS.map(function (p) { return '<button type="button" data-pz="' + esc(p[0]) + '" title="' + esc(p[3]) + '">' + esc(p[1]) + '</button>'; }).join('') +
+      (RT.FX.bubble ? '<button type="button" data-pz="bubble" title="Balão solto para ligar com conectores">Balão de fala</button>' : '') + '</div>';
+    mb.insertAdjacentHTML('beforeend', h);
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('#mBrand button[data-pz]'); if (!b) return; /* o menu já fechou (listener genérico de .menu button) */
+    if (b.dataset.pz === 'bubble') { A.insertFx('bubble'); A.toast('Balão inserido: duplo clique escreve; prenda uma linha a ele para ligar a quem fala.'); return; }
+    A.insertFx('persona', null, null, b.dataset.pz); A.toast('Personagem inserido. Roupa, ferramenta, expressão, fala e movimento ficam no painel à direita; na apresentação ele reage ao clique.');
+  });
   window.AMPersonas = { reaim: reaim, aimOpts: aimOpts };
 })();

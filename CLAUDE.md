@@ -20,7 +20,7 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
   `ed-*.js/.css` (extensões **só do editor**, um `<script>` por arquivo, depois de `editor.js`) · `cover.*` (tela inicial) · `history.js`.
 - Marcas A&M vêm de `am/brand/` (`%%LOGO_PERF_W%%` etc.). Os slides institucionais entram por `/*%%INST_SPECS%%*/null` em `ed-45-institucional.js`,
   substituído pelo JSON de `studio/inst/*.json` (imagens viram `data:` JPEG). **Não escreva esse marcador dentro de um comentário.**
-- Orçamento do arquivo do editor: **≤ 2000 KB** (`test-s90-perf.js`). Hoje ~1841 KB; recomprimir artes antes de subir o limite.
+- Orçamento do arquivo do editor: **≤ 2000 KB** (`test-s90-perf.js`) — vale também para o editor em nuvem (`platform/tests/cloud/preservacao.test.js` PR-07), que soma ~146 KB ao autônomo. Hoje: autônomo ~1825 KB, nuvem ~1971 KB (artes institucionais recomprimidas em JPEG q64 na S35). Antes de subir o limite: deduplicar os logos embutidos (3× o mesmo PNG) ou recomprimir de novo, conferindo a fidelidade do S34.
 
 ## Invariantes que não podem quebrar
 
@@ -32,7 +32,7 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 - Capa: 6 `.cv-opt` (teclas 1–6); **6 projetos prontos** (7/7/6/6/6/7 slides; o 6º é “Apresentação institucional A&M”); cabe sem rolagem de 1024 a 1440; sem rolagem horizontal a 390. Manual (F1) com 17 linhas.
 - Barra de ferramentas sem estouro de 1180 a 1920 px (`#rib` e `#top`); `#bSave` dentro da viewport. Rótulos curtos até 1640 px; grupo de edição só com ícones até 1800 px; Gráficos só ícone ≤ 1300; “Apresentar deste slide” só ícone ≤ 1380; botão Institucional só ícone ≤ 1220.
 - Player: `hooks.show` só deve conter o gancho de navegação enquanto um player está aberto (extensões não registram `show` próprio; formulários e workshop armam no init do player). Cliques em `.am-ia` não navegam.
-- Menu **Inserir**: um só item “Personagens” (submenu com os 10 presets de `AMRT.personas.PRESETS`, na ordem, + “Balão de fala”).
+- Menu **Inserir**: um só item “Personagens” (submenu com os 10 presets de `AMRT.personas.PRESETS`, na ordem, + “Balão de fala”). Menu **Marca ▾** da faixa: seção “Personagens A&M” com os mesmos 11 botões, cabendo na tela a 1280×720.
 - Zero erros de console em todas as baterias.
 
 ## Marca e slides institucionais
@@ -46,13 +46,20 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 
 - `rt-70-personas.js/.css` (runtime, vai no exportado) + `ed-46-personas.js` (só editor). `FX.persona`: SVG procedural (viewBox 200×240) com partes em
   `AMRT.personas` (chapéus, cabelos, óculos, roupas, ferramentas, expressões) e 10 presets como **variantes**; cada campo de parte vazio = “Do personagem”
-  (`resolve(d, el)`). Cores só da paleta A&M; o kit de marca recolore (`palOk` true).
-- Movimentos/gatilhos são CSS: o `data-act` define `--kR/--kL/--kG/--kG2/--kB/--kC/--kM/--kF`, o `data-trig` arma (`--aX: var(--kX)`) com `--n` e `--d0`.
+  (`resolve(d, el)`). Cores só da paleta A&M: o personagem fica **fora** do kit “Cores do componente” (`palOk` falso para a categoria Personagens); só os seletores
+  “Cor do corpo/da roupa” (paleta A&M) mudam as cores. `FX.persona.norm` saneia arquivos editados à mão (decisões em texto viram lista, falas viram texto).
+- Movimentos/gatilhos são CSS. A pose de repouso vem de variáveis (`--rR/--rL` braços, `--rGL/--rGR` pernas) que o `data-act` define; cada movimento tem três
+  trilhas: entrada `--kX` (toca uma vez e **termina na pose**), laço `--lX` (cíclica em volta da pose, para “Sem parar” e “Ao passar o mouse”) e gesto `--gX`
+  (começa e termina na pose, para o clique, `.pz-go`). O `data-trig` arma a trilha (`--aX`). `.pz-done` impede a entrada de recomeçar depois de um clique.
   **Nunca** use `none` como nome de animação nessas variáveis (o atalho `animation` lê `none` como fill-mode): o nome inerte é `pzNone`. Loops, hover,
-  piscar e LED só sob `.am-play`; palco de edição, miniaturas e rasters mostram a pose de repouso do movimento.
+  piscar e LED só sob `.am-play`; palco de edição, miniaturas e rasters mostram a pose de repouso (sem confete). No player só o desenho e o balão recebem
+  o ponteiro (o vazio da caixa deixa o clique chegar às zonas de avançar/voltar).
 - Balão (`.pz-say`) é HTML por cima do SVG; `data.say` editável no lugar (`U.E`); botões de decisão `.pz-ch` inertes em `.am-edit/.am-export`.
-  Andar até X move o invólucro `.pz-mv` (balão + boneco) em **cqw** (`--wq`). Mira (`data.aim` = id) recalculada por `aimStage` depois de cada
-  `AMRT.renderSlide`, no player e após pointerup/keyup/input no editor (`AMPersonas.reaim`).
+  Andar até X move o invólucro `.pz-mv` (balão + boneco) em **cqw** (`--wq/--wqy`, no referencial do elemento girado); na chegada (`animationend` →
+  `.pz-arr`) o movimento toca, a mira usa a posição de chegada e as linhas presas reaparecem com a ponta no ponto de chegada (cópia `<id>-pz`). Mira
+  (`data.aim` = id) recalculada por `aimStage` depois de cada `AMRT.renderSlide`, no player e após pointerup/keyup/input no editor (`AMPersonas.reaim`);
+  copiar/duplicar remapeia `data.aim` (e a base do Redefinir) como as pontas presas. Entradas: Inserir › Personagens ▸ e a seção “Personagens A&M” do
+  menu Marca ▾ da faixa de ferramentas (`ed-46-personas.js/.css`).
 - Tokens novos de `data.*` entram em `DATA_TOKENS` (editor.js) **e** em `NOTEXT_KEYS` (runtime.js); texto livre (`say`, `say2`, `choices`) fica fora e sai
   sempre com `esc()`. A raiz leva `.am-ia`; o player não registra `hooks.show`.
 
@@ -65,8 +72,8 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 
 ## Plataforma online (`platform/`)
 
-- **`studio/` é intocável pela plataforma.** O editor em nuvem é construído por `platform/tools/build-cloud-editor.js` numa cópia temporária, com a extensão `studio-cloud/ed-50-cloud.js` e os patches de texto de `studio-cloud/patches.json` (cada "antes" precisa existir exatamente uma vez; se `studio/` mudar, o build falha em vez de produzir editor quebrado). O build autônomo tem de continuar byte-idêntico ao original (`original/SHA256SUMS`).
-- **Prova de paridade obrigatória** antes de publicar qualquer mudança no build em nuvem: `npm run test:parity` (ou `:quick`) compara o original e o candidato em DOM, raster, quadros do player, transições e exportações, com o mesmo deck de prova (catálogo completo da gaveta). Resultado e envelope de ruído em `docs/evidencias/paridade.md`.
+- **`studio/` é intocável pela plataforma.** O editor em nuvem é construído por `platform/tools/build-cloud-editor.js` numa cópia temporária, com a extensão `studio-cloud/ed-50-cloud.js` e os patches de texto de `studio-cloud/patches.json` (cada "antes" precisa existir exatamente uma vez; se `studio/` mudar, o build falha em vez de produzir editor quebrado). Duas garantias separadas (`--verify-standalone`, `preservacao.test.js`): o build autônomo de `studio/` é byte-idêntico ao **build publicado na raiz** (`AM-Studio-Editor.html` = `Canteiro-AM.html`, atualizado a cada etapa depois do portão); `original/` é só a cópia preservada do upload S34b e confere com `original/SHA256SUMS`. Cada etapa de `studio/` também regenera `platform/vercel.json` (`node tools/build-web.js`: a CSP leva o hash de cada script inline do editor; o CI confere com `--check`).
+- **Prova de paridade obrigatória** antes de publicar qualquer mudança no build em nuvem: `npm run test:parity` (ou `:quick`) compara o build autônomo publicado (`../AM-Studio-Editor.html`) e o candidato em DOM, raster, quadros do player, transições e exportações, com o mesmo deck de prova (catálogo completo da gaveta). Resultado e envelope de ruído em `docs/evidencias/paridade.md`.
 - **Processo**: implementar → `npm test` (unit, banco com RLS, API), `npm run build:web` e `npm run test:security` (lê o site gerado) → suítes afetadas (`tests/web`, `tests/cloud`, `tests/ops`, `tests/e2e`) → `node tools/verify-deploy.js` → commit/push. Produção só pelo workflow com aprovação.
 - **Segurança**: o banco decide permissões (RLS; nunca `if` de papel no JS confiando no cliente); SQL só parametrizado; toda entrada passa por zod; nada de segredo/token/senha em log ou auditoria; CSP estrita (sem script/estilo inline nas páginas; editor com hashes + `strict-dynamic`); uploads validados por magic bytes; `app_api` nunca é membro de `app_system`.
 - **Regras do produto**: acervo comum visível a todos; só o dono (ou admin) altera; cópia para usar; sem cadastro aberto; lixeira reversível. Mudou o contrato → mude `platform/docs/API.md` primeiro.

@@ -519,6 +519,7 @@
   /* --- elemento como imagem (gráficos, modelos, ícones, cards, contadores; formas que o PowerPoint não desenha igual) --- */
   function rasterXml(sl, slide, el, media, node, name) {
     var c = clone(el); delete c.rot; delete c.anim;
+    if (el.kind === 'persona') { var pz = node && node.querySelector && node.querySelector('.pz'); if (pz) c._pzAim = { face: pz.dataset.face, deg: pz.style.getPropertyValue('--aim').trim() || '-100deg' }; } /* S35: sai sozinho na imagem, com o lado e a mira medidos no slide inteiro */
     return rasterCut(slide, [c], 80).then(function (r) {
       if (!r) return '';
       return media.addBlob(r.blob, 'png').then(function (nm) {

@@ -289,11 +289,19 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
       return { kind: AMHist.kind(), n: AMHist.count(), ids: AMHist.metas().map((m) => m.id) };
     });
     check('8.1 editor original (file://): 2 obras gravadas em "Minhas obras" (' + made.kind + ')', made.n >= 2 && made.ids.includes('obra-e2e-a') && made.ids.includes('obra-e2e-b'), made);
-    /* contagem de efeitos no ORIGINAL para comparar com o build em nuvem (cenário 12) */
-    await po.click('#bFx'); await sleep(1500);
-    S.origFx = await po.evaluate(() => ({ boxes: document.querySelectorAll('#drawerBody .gx-box').length, head: (document.querySelector('.gx-count') || {}).textContent, fams: Object.fromEntries([...document.querySelectorAll('#drawerBody [data-gf]')].map((c) => [c.dataset.gf, +(c.querySelector('i') || {}).textContent])) }));
-    await po.keyboard.press('Escape'); await sleep(300);
-    check('8.2 o editor ORIGINAL abre o Acervo de efeitos com ' + S.origFx.boxes + ' caixas ("' + String(S.origFx.head || '').trim() + '")', S.origFx.boxes >= 192, S.origFx);
+    /* contagem de efeitos no editor AUTÔNOMO PUBLICADO (AM-Studio-Editor.html da raiz = o build de studio/ que passou no portão), para comparar
+       com o build em nuvem (cenário 12.9). O original/ é só a cópia do upload (S34b) e serve aqui para exportar o acervo local; o build em nuvem
+       segue o build publicado. Contexto próprio: o file:// do autônomo não divide IndexedDB/localStorage com o editor original acima. */
+    {
+      const ctxPub = await newCtx('autonomo');
+      try {
+        const pp = await ctxPub.newPage(); const pubFile = path.join(REPO, 'AM-Studio-Editor.html');
+        await pp.goto('file://' + pubFile + '?nocover'); await pp.waitForFunction(() => window.AMStudio && window.AMHist && window.AMCover, null, { timeout: 30000 }); await sleep(800);
+        await pp.click('#bFx'); await sleep(1500);
+        S.pubFx = await pp.evaluate(() => ({ boxes: document.querySelectorAll('#drawerBody .gx-box').length, head: (document.querySelector('.gx-count') || {}).textContent, fams: Object.fromEntries([...document.querySelectorAll('#drawerBody [data-gf]')].map((c) => [c.dataset.gf, +(c.querySelector('i') || {}).textContent])) }));
+      } finally { await ctxPub.close(); }
+    }
+    check('8.2 o editor autônomo publicado (AM-Studio-Editor.html da raiz) abre o Acervo de efeitos com ' + S.pubFx.boxes + ' caixas ("' + String(S.pubFx.head || '').trim() + '")', S.pubFx.boxes >= 192, S.pubFx);
     /* capa › Minhas obras › Exportar acervo (.json) */
     let jsonText = null, via = 'ui';
     try {
@@ -481,7 +489,7 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
     const g = await p.evaluate(() => ({ boxes: document.querySelectorAll('#drawerBody .gx-box').length, items: AMStudio.gallery ? AMStudio.gallery.items().length : null, head: (document.querySelector('.gx-count') || {}).textContent, fams: Object.fromEntries([...document.querySelectorAll('#drawerBody [data-gf]')].map((c) => [c.dataset.gf, +(c.querySelector('i') || {}).textContent])), fx: Object.keys(AMRT.FX).length, rendered: [...document.querySelectorAll('#drawerBody .gx-box')].filter((b) => b.querySelector('.gx-pv') && b.querySelector('.gx-pv').children.length).length }));
     await shot(p, '12-acervo-efeitos');
     check('12.8 Acervo de efeitos abre com ' + g.boxes + ' caixas ("' + String(g.head || '').trim() + '"; famílias ' + JSON.stringify(g.fams) + '; ' + g.rendered + ' prévias vivas) — ≥ 192', g.boxes >= 192 && g.boxes === g.items && g.fams.all === g.boxes && g.rendered > 0, g);
-    check('12.9 mesmo nº de efeitos do editor ORIGINAL (' + (S.origFx ? S.origFx.boxes : '?') + ') e as mesmas famílias', !!S.origFx && S.origFx.boxes === g.boxes && JSON.stringify(S.origFx.fams) === JSON.stringify(g.fams), { orig: S.origFx, cloud: g.fams });
+    check('12.9 mesmo nº de efeitos do editor autônomo publicado (' + (S.pubFx ? S.pubFx.boxes : '?') + ') e as mesmas famílias', !!S.pubFx && S.pubFx.boxes === g.boxes && JSON.stringify(S.pubFx.fams) === JSON.stringify(g.fams), { autonomo: S.pubFx, cloud: g.fams });
     await p.keyboard.press('Escape'); await sleep(400);
     /* Modelos */
     await p.click('#bModels'); await p.waitForSelector('#drawer.open', { timeout: 5000 }); await sleep(800);
@@ -506,7 +514,7 @@ const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
   });
 
   await H.closeBrowser();
-  const out = { base: BASE, passed: R.passed, failed: R.failed, checks: R.checks, scenarios: R.scenarios, notes: R.notes, csp: R.cspViolations.length, consoleErrors: R.consoleErrors, pageErrors: R.pageErrors, hosts, origFx: S.origFx, ids: S.ids, at: new Date().toISOString() };
+  const out = { base: BASE, passed: R.passed, failed: R.failed, checks: R.checks, scenarios: R.scenarios, notes: R.notes, csp: R.cspViolations.length, consoleErrors: R.consoleErrors, pageErrors: R.pageErrors, hosts, pubFx: S.pubFx, ids: S.ids, at: new Date().toISOString() };
   fs.writeFileSync(process.env.E2E_RESULTS || path.join(TMP, 'results.json'), JSON.stringify(out, null, 1));
   console.log('\nRESULTADO E2E: PASS ' + R.passed + ' · FAIL ' + R.failed + ' · CSP ' + R.cspViolations.length + ' · console ' + R.consoleErrors.length + ' · página ' + R.pageErrors.length);
   process.exit(R.failed ? 1 : 0);

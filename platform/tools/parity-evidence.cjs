@@ -19,13 +19,13 @@ const segs = rep.segments || [];
 const pptx = rep.exportPptx || {};
 const pptxRow = (mode, label) => { const r = pptx[mode]; return `| PowerPoint exportado — modo ${label} | ${r && r.same === true ? `idêntico (${r.entries} entradas do zip, exceto \`docProps/core.xml\`, que leva a data)` : r && r.same === false ? 'DIFERENTE: ' + r.diff.join(', ') : 'não medido (' + ((r || {}).note || (r || {}).error || 'sem resultado') + ')'} |`; };
 const noiseLine = (m) => `- ${m.layer} · slide ${m.i + 1} · ${m.it} · t=${m.t} ms · ${m.px} px (${m.pct} %), máx ${m.maxCh}/255${m.bbox ? ` · caixa ${m.bbox.w}×${m.bbox.h} em (${m.bbox.x}, ${m.bbox.y})` : ''}`;
-const doc = `# Prova de paridade — original × editor em nuvem (efeitos, modelos, layouts, projetos prontos, quadros do player, transições, mouse e exportações)
+const doc = `# Prova de paridade — editor autônomo publicado × editor em nuvem (efeitos, modelos, layouts, projetos prontos, quadros do player, transições, mouse e exportações)
 
 **Resultado: ${S.identical ? 'IDÊNTICO' : 'DIVERGÊNCIAS ENCONTRADAS'}**${sample ? ` — **amostra** de ${S.compared} slides (\`--only\`), não a prova completa` : ''} — relatório gerado em ${rep.startedAt.slice(0, 16).replace('T', ' ')} UTC por \`platform/tools/parity.cjs\` (identidade da medição: harness \`${(rep.identity || {}).harnessSha || '?'}\`, promoção de camada nas transições ${rep.promote === false ? 'desligada' : 'ligada'}); documento montado por \`tools/parity-evidence.cjs\`. Relatório bruto e imagens de cada diferença: \`${rel(OUT)}/\` (não versionado; reproduza com \`npm run test:parity\`).
 
 | Lado | Arquivo | SHA-256 |
 |---|---|---|
-| A (original) | \`${path.basename(rep.a)}\` | \`${rep.aSha}\` |
+| A (editor autônomo publicado na raiz: o build atual de \`studio/\`) | \`${path.basename(rep.a)}\` | \`${rep.aSha}\` |
 | B (candidato: editor em nuvem) | \`${path.basename(rep.b)}\` | \`${rep.bSha}\` |
 ${segs.length > 1 ? `
 Execução em **${segs.length} trechos** (\`--resume\`; cada registro do checkpoint carrega a identidade da medição — hashes de A, B, do deck e do harness, instantes e envelope — e só é reaproveitado se tudo coincidir): ${segs.map((g) => `${g.from.slice(11, 16)}–${g.to.slice(11, 16)} UTC (${g.slides} slides)`).join('; ')}; ${S.totalMinutes} min de medição no total${rep.resumeRefused ? `; ${rep.resumeRefused} registros de outra medição foram ignorados` : ''}${rep.diffDiscarded ? `; ${rep.diffDiscarded} imagens de medições substituídas movidas para \`diff/descartados/\`` : ''}.
@@ -34,7 +34,7 @@ Execução em um único trecho (${S.durationS} s).
 `}
 ## 1. O que a prova garante
 
-O editor em nuvem é o original acrescido da extensão de nuvem e de ${patches.length || 'alguns'} ajustes de uma linha${patches.length ? ` (\`${patches.join('`, `')}\`)` : ''}. Esta prova mostra que **tudo o que o usuário vê** — cada efeito do Acervo de efeitos com suas variantes, cada caixa da Biblioteca de modelos, todos os ícones e transformações, layouts, projetos prontos da capa, blocos, SmartArt, formas, textos, linhas e marcas — **rende de forma idêntica** nos dois arquivos, quadro a quadro, inclusive durante as animações, nas transições e com o mouse sobre os elementos, e que as exportações (HTML e PowerPoint, nos modos editável e imagem) são as mesmas. O que ela **não** mede está no §5.
+O editor em nuvem é o build autônomo de \`studio/\` (o mesmo publicado na raiz) acrescido da extensão de nuvem e de ${patches.length || 'alguns'} ajustes de uma linha${patches.length ? ` (\`${patches.join('`, `')}\`)` : ''}. Esta prova mostra que **tudo o que o usuário vê** — cada efeito do Acervo de efeitos com suas variantes, cada caixa da Biblioteca de modelos, todos os ícones e transformações, layouts, projetos prontos da capa, blocos, SmartArt, formas, textos, linhas e marcas — **rende de forma idêntica** nos dois arquivos, quadro a quadro, inclusive durante as animações, nas transições e com o mouse sobre os elementos, e que as exportações (HTML e PowerPoint, nos modos editável e imagem) são as mesmas. O que ela **não** mede está no §5.
 
 ## 2. Método (determinístico e reproduzível)
 
@@ -74,15 +74,15 @@ Antes da versão atual do harness, a transição “Deslizar” a 250 ms mostrav
 ## 5. O que esta prova NÃO cobre
 
 - **Modo ativo da plataforma**: B é medido em \`file://\` com a extensão de nuvem inerte (sem \`window.AM_CLOUD\`): é exatamente o editor publicado em \`/editor/<id>\`, onde o palco e o player são os mesmos; em \`/visualizar/<id>\` a página acrescenta uma barra de 44 px no topo (título, sair), e a lâmina — idêntica — é mostrada em escala para a área restante. Essa barra é interface da plataforma, não conteúdo do slide.
-- **Interações com o ponteiro além do hover**: cliques e arrasto em componentes interativos (formulários, post-its, votação, cronômetro, carrossel, antes/depois) e o zoom do player por movimento do mouse; atalhos de teclado do player; outros tamanhos de janela e densidade de pixels (DPR 2); exportação em PDF binária (o raster que a alimenta é comparado). O código desses caminhos é o mesmo nos dois arquivos (runtime byte a byte igual) e eles são exercitados pelas 35 baterias do portão do editor sobre o build em nuvem (EVIDENCIAS §1.1) e pela suíte E2E, mas não por comparação pixel a pixel.
+- **Interações com o ponteiro além do hover**: cliques e arrasto em componentes interativos (formulários, post-its, votação, cronômetro, carrossel, antes/depois) e o zoom do player por movimento do mouse; atalhos de teclado do player; outros tamanhos de janela e densidade de pixels (DPR 2); exportação em PDF binária (o raster que a alimenta é comparado). O código desses caminhos é o mesmo nos dois arquivos (runtime byte a byte igual) e eles são exercitados pelas baterias do portão do editor sobre o build em nuvem (EVIDENCIAS §1.1) e pela suíte E2E, mas não por comparação pixel a pixel.
 
 ## 6. Como reproduzir
 
 \`\`\`bash
 cd platform
-npm run build:cloud                                   # gera .tmp/cloud-build/cloud-editor.html e prova que o autônomo segue byte-idêntico ao original
-npm run test:parity                                   # ≈ 2 h: original × nuvem, todos os slides, quadros, transições, hover e exportações → .tmp/parity/cloud/relatorio.md
-node tools/parity.cjs --a .tmp/parity/original.html --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud --resume   # continuar uma execução interrompida
+npm run build:cloud                                   # gera .tmp/cloud-build/cloud-editor.html e prova que o autônomo de studio/ = o build publicado na raiz
+npm run test:parity                                   # ≈ 2 h: autônomo publicado (../AM-Studio-Editor.html) × nuvem, todos os slides, quadros, transições, hover e exportações → .tmp/parity/cloud/relatorio.md
+node tools/parity.cjs --a ../AM-Studio-Editor.html --b .tmp/cloud-build/cloud-editor.html --out .tmp/parity/cloud --resume   # continuar uma execução interrompida
 node tools/parity.cjs --a … --b … --out .tmp/parity/x --deck .tmp/parity/cloud --only 39,57                                     # reconferir slides específicos
 npm run test:parity:evidence                          # atualiza este documento a partir do relatório
 \`\`\`

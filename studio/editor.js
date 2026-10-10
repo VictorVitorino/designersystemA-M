@@ -422,7 +422,7 @@
     ['font', 'align', 'valign', 'fit', 'shape', 'variant', 'ds'].forEach(function (k) { if (typeof v[k] === 'string' && TOKEN_RE.test(v[k])) o[k] = v[k]; });
     Object.keys(EL_TOKENS).forEach(function (k) { if (EL_TOKENS[k].indexOf(v[k]) >= 0) o[k] = v[k]; });
     var pl = safePal(v.pal); if (pl) o.pal = pl;
-    if (v.dsel && typeof v.dsel === 'object' && !Array.isArray(v.dsel)) { var dd = {}; Object.keys(v.dsel).slice(0, 12).forEach(function (k) { var x = v.dsel[k]; if (/^[a-z][\w-]{0,30}$/i.test(k) && !/^(__proto__|constructor|prototype)$/.test(k) && ((typeof x === 'string' && (TOKEN_RE.test(x) || COLOR_RE.test(x))) || (typeof x === 'number' && isFinite(x)))) dd[k] = x; }); o.dsel = dd; }
+    if (v.dsel && typeof v.dsel === 'object' && !Array.isArray(v.dsel)) { var dd = {}; Object.keys(v.dsel).slice(0, 32).forEach(function (k) { var x = v.dsel[k]; if (/^[a-z][\w-]{0,30}$/i.test(k) && !/^(__proto__|constructor|prototype)$/.test(k) && ((typeof x === 'string' && (TOKEN_RE.test(x) || COLOR_RE.test(x))) || (typeof x === 'number' && isFinite(x)))) dd[k] = x; }); o.dsel = dd; }
     if (Array.isArray(v.cols)) { var dc = v.cols.slice(0, 6).map(function (c) { return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : ''; }); while (dc.length && !dc[dc.length - 1]) dc.pop(); if (dc.length) o.cols = dc; }
     return o;
   }
@@ -518,7 +518,13 @@
   function linkedLines(s, id) { return ((s && s.els) || []).filter(function (e) { return e.type === 'line' && ((e.a1 && e.a1.id === id) || (e.a2 && e.a2.id === id)); }); }
   function refreshLinks(el) { var s = slide(); linkedLines(s, el.id).forEach(function (ln) { syncLine(s, ln); if (stage && stage.querySelector('.am-el[data-id="' + ln.id + '"]')) rerenderEl(ln); }); }
   function detachMoved(list) { var ids = list.map(function (e) { return e.id; }); list.forEach(function (e) { if (e.type !== 'line') return; ['a1', 'a2'].forEach(function (k) { if (e[k] && ids.indexOf(e[k].id) < 0) delete e[k]; }); }); } /* mover a linha sozinha solta as pontas; mover junto com a forma mantém */
-  function remapLinks(list, map) { list.forEach(function (e) { if (e.type !== 'line') return; ['a1', 'a2'].forEach(function (k) { if (!e[k]) return; if (map[e[k].id]) e[k] = { id: map[e[k].id], s: e[k].s }; else delete e[k]; }); }); return list; }
+  function remapLinks(list, map) { list.forEach(function (e) { if (e.type === 'fx' && e.data && typeof e.data.aim === 'string' && map[e.data.aim]) { e.data.aim = map[e.data.aim]; return; } /* S35: alvo do personagem acompanha a cópia (fora do mapa, continua no original) */ if (e.type !== 'line') return; ['a1', 'a2'].forEach(function (k) { if (!e[k]) return; if (map[e[k].id]) e[k] = { id: map[e[k].id], s: e[k].s }; else delete e[k]; }); }); return list; }
+  /* S35: a base do “Redefinir” de um slide copiado também aponta para os ids novos (pontas presas e alvo do personagem) */
+  function remapBase(b, map) {
+    if (!b || typeof b !== 'object') return;
+    Object.keys(b.els || {}).forEach(function (k) { var sn = b.els[k]; if (!sn) return; ['a1', 'a2'].forEach(function (a) { if (sn[a] && map[sn[a].id]) sn[a] = { id: map[sn[a].id], s: sn[a].s }; }); if (sn.dsel && typeof sn.dsel.aim === 'string' && map[sn.dsel.aim]) sn.dsel.aim = map[sn.dsel.aim]; });
+    Object.keys(b.tpl || {}).forEach(function (k) { var t = b.tpl[k]; if (t && t.data && typeof t.data.aim === 'string' && map[t.data.aim]) t.data.aim = map[t.data.aim]; });
+  }
   /* alvo para prender a ponta arrastada: elemento (não linha) sob o ponteiro (até 12 px fora da caixa); a 22 px do meio de um lado = esse lado, senão automático; o menor elemento ganha */
   function snapTarget(x, y, selfId) {
     var best = null;
@@ -751,7 +757,7 @@
   /* ---------------- propriedades ---------------- */
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function fld(label, inner) { return '<label class="pf"><span>' + label + '</span>' + inner + '</label>'; }
-  function num(p, v, step, min, max) { return '<input type="number" data-p="' + p + '" data-n="1" value="' + (v == null ? '' : Math.round(v * 100) / 100) + '" step="' + (step || 1) + '"' + (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') + '>'; }
+  function num(p, v, step, min, max) { return '<input type="number" data-p="' + p + '" data-n="1" value="' + (v == null || v === '' || !isFinite(+v) ? '' : Math.round(v * 100) / 100) + '" step="' + (step || 1) + '"' + (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') + '>'; }
   function txtIn(p, v) { return '<input type="text" data-p="' + p + '" value="' + esc(v) + '">'; }
   function area(p, v) { return '<textarea data-p="' + p + '">' + esc(v) + '</textarea>'; }
   function selIn(p, v, opts, isNum) { return '<select data-p="' + p + '"' + (isNum ? ' data-n="1"' : '') + '>' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(v) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>'; }
@@ -904,7 +910,8 @@
   function canDraw(el) { return isStroke(el) || isIcon(el); }
   /* o efeito f:k serve para este elemento? ('ln' = só traços, 'tx' = só textos e formas com texto) */
   function hasText(el) { return el.type === 'text' || (el.type === 'shape' && /\S/.test(String(el.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' '))); }
-  function animFits(el, f, k) { var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
+  var PZ_OFF = { 'loop:shimmer': 1, 'hover:inzoom': 1 }; /* S35: recortam o desenho do personagem (overflow da caixa) */
+  function animFits(el, f, k) { if (el && el.kind === 'persona' && PZ_OFF[f + ':' + k]) return false; var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
   var ONLY_MSG = { ln: 'funciona em linhas, setas e Linhas A&M', lnIn: 'funciona em linhas, setas, Linhas A&M e ícones animados', tx: 'funciona em textos e formas com texto' };
   function onlyMsg(it) { return ONLY_MSG[it.only === 'ln' && it.fam === 'in' ? 'lnIn' : it.only]; }
   var holdProps = false;
@@ -953,7 +960,7 @@
     var FD = el.type === 'fx' ? RT.FX[el.kind] : null, h0 = h; /* ícone: Conteúdo (qual ícone) vem antes da lista de movimentos */
     if (FD && FD.variants) {
       var cv = el.variant || FD.variant, cvd = FD.variants.find(function (x) { return x[0] === cv; }) || FD.variants[0];
-      h += '<div class="sec"><h3>' + esc(FD.vtitle || 'Efeito do modelo') + '</h3><div class="chips">' + FD.variants.map(function (o) { return '<button class="chip' + (o[0] === cv ? ' on' : '') + '" data-var="' + o[0] + '" title="' + esc(o[2] || '') + '">' + esc(o[1]) + '</button>'; }).join('') + '</div><p class="note">' + esc(cvd[2]) + '</p><div class="row r1" style="margin-top:8px"><button class="btnw pri" data-act="pvel">▶ Ver ' + (FD.gal === 'icon' ? 'movimento' : 'efeito') + ' no slide</button></div>' + (FD.gal === 'icon' ? '<div class="row r1"><button class="btnw ic" data-act="gallery-icon">' + svgI('models') + 'Comparar os movimentos em caixas</button></div>' : '') + (FD.tip ? '<p class="vtip">' + esc(FD.tip) + '</p>' : '') + '</div>';
+      h += '<div class="sec"><h3>' + esc(FD.vtitle || 'Efeito do modelo') + '</h3><div class="chips">' + FD.variants.map(function (o) { return '<button class="chip' + (o[0] === cv ? ' on' : '') + '" data-var="' + o[0] + '" title="' + esc(o[2] || '') + '">' + esc(o[1]) + '</button>'; }).join('') + '</div><p class="note">' + esc(cvd[2]) + '</p><div class="row r1" style="margin-top:8px"><button class="btnw pri" data-act="pvel">▶ Ver ' + (FD.pvl || (FD.gal === 'icon' ? 'movimento' : 'efeito')) + ' no slide</button></div>' + (FD.gal === 'icon' ? '<div class="row r1"><button class="btnw ic" data-act="gallery-icon">' + svgI('models') + 'Comparar os movimentos em caixas</button></div>' : '') + (FD.tip ? '<p class="vtip">' + esc(FD.tip) + '</p>' : '') + '</div>';
     }
     if (el.type === 'fx') {
       h += '<div class="sec"><h3>Conteúdo</h3>' + RT.FX[el.kind].fields.map(function (f) {
@@ -962,6 +969,7 @@
         if (t === 'lines') return '<div class="row r1">' + fld(f[1], '<textarea data-p="' + k + '" data-codec="lines">' + esc((Array.isArray(v) ? v : String(v || '').split(/\n/)).join('\n')) + '</textarea>') + '</div>';
         if (t.indexOf('rows:') === 0) return '<div class="row r1">' + fld(f[1], '<textarea data-p="' + k + '" data-codec="' + t + '" style="min-height:120px">' + esc(rowsToText(v, t.slice(5))) + '</textarea>') + '</div>';
         if (t === 'number') return '<div class="row r1">' + fld(f[1], num(k, v, 'any')) + '</div>';
+        if (t === 'numopt') return '<div class="row r1">' + fld(f[1], num(k, v, 'any').replace('data-n="1"', 'data-n="1" data-opt="1"')) + '</div>'; /* S35: número opcional (apagar = vazio) */
         if (t === 'area') return '<div class="row r1">' + fld(f[1], area(k, v)) + '</div>';
         var co = colorOpts(t); if (co) return '<div class="cfld"><span class="pf"><span>' + esc(f[1]) + '</span></span>' + swatches(k, v, false, co) + '</div>';
         if (t.indexOf('colors:') === 0) return colorsField(el, f);
@@ -1024,7 +1032,7 @@
   }
   /* “Cores do componente” (S20): el.pal = {p, a}; o runtime (rt-05-pal.js) troca o azul-marinho/azuis pela cor principal e o laranja
      pela de destaque, só neste elemento. Não vale para a Marca A&M nem para ícones (que já têm cores próprias) */
-  function palOk(el) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !!(F && RT.palTag && F.cat !== 'Marca A&M' && !isIcon(el)); }
+  function palOk(el) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !!(F && RT.palTag && F.cat !== 'Marca A&M' && F.cat !== 'Personagens' && !isIcon(el)); } /* S35: personagens só com as cores A&M (seletores do painel) */
   /* S29: kit de marca — cada chamada é um passo de desfazer; devolvem o que ficou gravado / quantos elementos mudaram */
   function setBrand(b, msg) { var nb = safeBrand(b); if (editingId) endEdit(); flush(); if (nb) deck.brand = nb; else delete deck.brand; ensureFonts(); renderAll(); commit(); if (msg) toast(msg); return nb; }
   function fxHasFont(e) { var F = e.type === 'fx' && RT.FX[e.kind]; return !!(F && F.fields && F.fields.some(function (f) { return f[0] === 'font'; })); }
@@ -1230,7 +1238,7 @@
   $('#drawer').addEventListener('pointerdown', function () { if (zone === 'thumbs') setZone('panel'); }, true);
   props.addEventListener('input', function (e) {
     var t = e.target, p = t.dataset.p; if (!p) return;
-    var v = t.value; if (t.dataset.n) { v = parseFloat(v); if (isNaN(v)) return; }
+    var v = t.value; if (t.dataset.n) { v = parseFloat(v); if (isNaN(v)) { if (t.dataset.opt && !String(t.value).trim()) v = ''; else return; } }
     if (t.dataset.codec === 'lines') v = v.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
     else if (t.dataset.codec === 'outline') { var oe = sel(), OF = oe && oe.type === 'fx' && RT.FX[oe.kind]; v = OF && OF.outlineParse ? OF.outlineParse(v) : RT.smartParse ? RT.smartParse(v) : v; } /* codec próprio do modelo (FX.outlineParse), senão o do SmartArt */
     else if (t.dataset.codec && t.dataset.codec.indexOf('rows:') === 0) v = textToRows(v, t.dataset.codec.slice(5));
@@ -1291,7 +1299,7 @@
   }
   function rowsToText(v, spec) {
     var cols = spec.split('|');
-    return (v || []).map(function (o) { return cols.map(function (c) { if (c[0] === '*') return (o[c.slice(1)] || []).join(' | '); return o[c.split(':')[0]] == null ? '' : o[c.split(':')[0]]; }).join(' | '); }).join('\n');
+    return (Array.isArray(v) ? v : []).filter(function (o) { return o && typeof o === 'object'; }).map(function (o) { return cols.map(function (c) { if (c[0] === '*') return (Array.isArray(o[c.slice(1)]) ? o[c.slice(1)] : []).join(' | '); return o[c.split(':')[0]] == null ? '' : o[c.split(':')[0]]; }).join(' | '); }).join('\n');
   }
   function textToRows(txt, spec) {
     var cols = spec.split('|');
@@ -1667,7 +1675,7 @@
   }
   function openVarMenu(btn) {
     var el = sel(); if (!el) return; var m = $('#mVar'), FDx = el.type === 'fx' ? RT.FX[el.kind] : null, opts, cv, title;
-    if (FDx && FDx.variants) { opts = FDx.variants; cv = el.variant || FDx.variant; title = 'Efeitos para ' + FDx.name; }
+    if (FDx && FDx.variants) { opts = FDx.variants; cv = el.variant || FDx.variant; title = FDx.vlabel ? FDx.vlabel + ': ' + FDx.name : 'Efeitos para ' + FDx.name; }
     else { opts = ANIM_IN.filter(function (a) { return a[0] === 'none' || animFits(el, 'in', a[0]); }).map(function (a) { return [a[0], a[1], ANIM_TIP[a[0]] || '']; }); cv = (el.anim && el.anim.in) || 'none'; title = 'Animação de entrada'; }
     m.innerHTML = '<div class="vh"><b>' + esc(title) + '</b><button data-vprev="1">▶ Ver</button></div><div class="vlist">' + opts.map(function (o) { return '<button class="vo' + (o[0] === cv ? ' on' : '') + '" data-v="' + o[0] + '"><i></i><b>' + esc(o[1]) + '</b><span>' + esc(o[2] || '') + '</span></button>'; }).join('') + '</div>' + (FDx && FDx.tip ? '<p class="vtip">' + esc(FDx.tip) + '</p>' : '') +
       '<button class="vall" data-vall="1">' + svgI('models') + 'Ver todos em caixas, com prévia…</button>';
@@ -1926,7 +1934,7 @@
   }
 
   /* ---------------- slides (lateral) ---------------- */
-  function freshSlide(s) { var c = clone(s), map = {}; c.id = uid(); c.els = (c.els || []).map(function (x) { map[x.id] = uid(); x.id = map[x.id]; return x; }); remapLinks(c.els, map); return c; }
+  function freshSlide(s) { var c = clone(s), map = {}; c.id = uid(); c.els = (c.els || []).map(function (x) { map[x.id] = uid(); x.id = map[x.id]; return x; }); remapLinks(c.els, map); remapBase(c.base, map); return c; }
   function dupSlide(i) { if (i == null) i = cur; if (editingId) endEdit(); deck.slides.splice(i + 1, 0, freshSlide(deck.slides[i])); cur = i + 1; pick([]); renderAll(); commit(); }
   function delSlide(i) {
     if (i == null) i = cur; if (editingId) endEdit();

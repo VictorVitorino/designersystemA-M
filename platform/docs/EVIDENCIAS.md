@@ -22,31 +22,44 @@ O que depende de contas externas (Supabase, Vercel, domínio, e-mail) **não foi
 
 **CI no GitHub Actions (executado de verdade):** o workflow `CI` falhou do run 3 ao 13 — a suíte de segurança lia o site gerado (`dist/public`), que no GitHub só era gerado depois dela; o `--check` do `vercel.json` rodava depois do build; dois testes de taxa/tempo eram sensíveis à virada da janela e à carga; o S3 falso usava porta fixa. Corrigido nos commits `5eb2443` e `2924ee4`: **run 14 verde** (2026-10-07, [37615844075](https://github.com/VictorVitorino/designersystemA-M/actions/runs/37615844075)) — migrações do zero, `vercel.json` em dia com o build, `npm test`, `npm run test:security` e testes de operação, todos aprovados no runner do GitHub. Os workflows de publicação, backup e monitoramento só passam a rodar quando o código estiver na `main` (eles disparam a partir do branch padrão).
 
-## 1. Preservação do editor original
+## 1. Preservação do editor (original preservado × build publicado)
+
+Duas garantias, separadas a partir da S35 (`tools/build-cloud-editor.js --verify-standalone` e `tests/cloud/preservacao.test.js`):
+
+1. **Original**: `original/Canteiro-AM (3).html` é a cópia preservada do arquivo enviado (S34b) e confere com `original/SHA256SUMS` (`ORIGINAL_SHA256`).
+   Não muda e **não** precisa ser igual ao build atual.
+2. **Build publicado**: o build autônomo de `studio/` (`python3 assemble.py`) é byte-idêntico a `AM-Studio-Editor.html` e `Canteiro-AM.html` da raiz,
+   que cada etapa de `studio/` atualiza depois do portão (`GATE PASS`; regra 5 do `CLAUDE.md`). O build em nuvem e a prova de paridade seguem esse build.
+
+Na S34b as duas coincidiam (o build publicado era o próprio original); as rodadas de 2026-10-07 registradas abaixo são dessa etapa.
 
 | Prova | Resultado |
 |---|---|
-| Cópia do arquivo enviado (`original/Canteiro-AM (3).html`) | SHA-256 `dc93ceac…5099`, 1.893.245 bytes, igual ao build publicado da etapa S34b |
-| Build autônomo a partir de `studio/` (`python3 assemble.py`) | **byte-idêntico** ao original (mesmo SHA-256), confirmado por `tools/build-cloud-editor.js --verify-standalone` |
-| Build em nuvem (`platform/.tmp/cloud-build/cloud-editor.html`, 1.939 KB, SHA-256 `47a556b1…`) | = `studio/` + extensão `ed-50-cloud` + 6 patches de uma linha, cada um exigido exatamente 1× (o build falha se `studio/` mudar) |
+| Cópia do arquivo enviado (`original/Canteiro-AM (3).html`) | SHA-256 `dc93ceac…5099`, 1.893.245 bytes, igual ao build publicado da etapa S34b; confere com `original/SHA256SUMS` e fica intacta (PR-11, PR-11b) |
+| Build autônomo a partir de `studio/` (`python3 assemble.py`) | **byte-idêntico** ao build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`, SHA-256 `«PREENCHER»`), confirmado por `tools/build-cloud-editor.js --verify-standalone` (PR-01, PR-02) |
+| Build em nuvem (`platform/.tmp/cloud-build/cloud-editor.html`, «PREENCHER» KB, SHA-256 `«PREENCHER»`) | = `studio/` + extensão `ed-50-cloud` + 6 patches de uma linha, cada um exigido exatamente 1× (o build falha se `studio/` mudar) |
 | Arquivo servido em `/editor/` e `/visualizar/` | byte-idêntico ao build em nuvem (mesmo SHA-256) |
-| Portão de 35 baterias do editor sobre o build em nuvem (modo inerte) | ver §1.1 |
-| Paridade pixel a pixel original × nuvem | ver [`evidencias/paridade.md`](evidencias/paridade.md) e §1.2 |
+| Portão de «PREENCHER» baterias do editor sobre o build em nuvem (modo inerte) | ver §1.1 |
+| Paridade pixel a pixel autônomo publicado × nuvem (`npm run test:parity`, lado A = `../AM-Studio-Editor.html`; na S34b, original × nuvem) | ver [`evidencias/paridade.md`](evidencias/paridade.md) e §1.2 |
 
-### 1.1 Portão de qualidade do editor (35 baterias)
+### 1.1 Portão de qualidade do editor
 
 Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node tests/cloud/preservacao.test.js`, que copia `studio/`, troca o HTML sob teste pelo **build em nuvem sem `window.AM_CLOUD`** e roda o `qa-gate.sh` completo:
 
 | Medida | Resultado |
 |---|---|
-| **Rodada final** (build `47a556b1…`, 2026-10-07 03:26, máquina sem outras cargas) | **GATE PASS — 35 de 35 baterias** (569 s); provas PR-01…PR-15: 15/15 (`.tmp/quality/preservacao.log`) |
+| **Rodada da S35** (build autônomo `«PREENCHER»`, build em nuvem `«PREENCHER»`, «PREENCHER») | **GATE PASS — «PREENCHER» de «PREENCHER» baterias** («PREENCHER» s); provas PR-01…PR-15 e PR-11b: «PREENCHER» |
+| Rodada final da S34b (build `47a556b1…`, 2026-10-07 03:26, máquina sem outras cargas) | **GATE PASS — 35 de 35 baterias** (569 s); provas PR-01…PR-15: 15/15 (`.tmp/quality/preservacao.log`) |
 | Rodada anterior (build `8e20f87c…`, com três fazendas de Chromium em paralelo) | 34 de 35 (539 s); a única falha, `test-s24-import.js` ("Execution context was destroyed", renderer derrubado por falta de recursos), passou isolada (38 checagens, 0 erros) |
 | Execução do agente construtor (mesmo comando, máquina ociosa) | GATE PASS 35/35 (530 s) |
-| Provas estruturais da mesma suíte (PR-01…PR-13) | cloud − extensão = autônomo + 6 patches (igualdade exata de texto); nenhum arquivo de `studio/`, `original/`, `am/` alterado; build autônomo com o SHA-256 do original |
+| Provas estruturais da mesma suíte (PR-01…PR-13) | cloud − extensão = autônomo + 6 patches (igualdade exata de texto); nenhum arquivo de `studio/`, `original/`, `am/` alterado; build autônomo com o SHA-256 do original (na S34b o build publicado era o próprio original) |
 
-Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as 35 baterias do editor original.
+Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as baterias do portão do editor (S34b: 35 de 35; S35: «PREENCHER»).
 
 ### 1.2 Prova de paridade (todos os efeitos, modelos, layouts, templates e quadros)
+
+A partir da S35 o lado A de `npm run test:parity` é o build autônomo publicado (`../AM-Studio-Editor.html`), não o `original/`. Rodada da S35: «PREENCHER».
+A rodada registrada abaixo é a da S34b, quando o build publicado era o próprio original.
 
 `npm run test:parity` (`tools/parity.cjs`) com o original × build em nuvem final (sha `8e20f87c…`), executada em 2026-10-07 em duas passagens retomáveis (00:46–01:57, 311 slides; travamento transitório do navegador; retomada 02:19–02:52 a partir do checkpoint, com os 7 slides de transição recalculados pelo harness definitivo). Documento completo com método, envelope de ruído e lista de cada quadro fora da igualdade exata: [`evidencias/paridade.md`](evidencias/paridade.md).
 

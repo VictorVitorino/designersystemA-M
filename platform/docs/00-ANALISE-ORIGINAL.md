@@ -6,7 +6,12 @@
 dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099
 ```
 
-É byte a byte o build publicado da etapa S34b (portão de qualidade 35/35 aprovado). Montar o editor a partir de `studio/` (`python3 studio/assemble.py`) reproduz exatamente esse arquivo.
+É byte a byte o build publicado da etapa S34b (portão de qualidade 35/35 aprovado); até a S34b, montar o editor a partir de `studio/` (`python3 studio/assemble.py`) reproduzia exatamente esse arquivo.
+
+**Regra a partir da S35 (duas garantias separadas):** `original/` é a cópia preservada do upload (S34b) — não muda, confere com `original/SHA256SUMS` e **não** precisa
+ser igual ao build atual. O build autônomo de `studio/` é conferido contra o **build publicado na raiz** (`AM-Studio-Editor.html` = `Canteiro-AM.html`,
+hoje sha256 `«PREENCHER»`), que cada etapa de `studio/` atualiza depois do portão (regra 5 do processo no `CLAUDE.md`); o build em nuvem e a prova de
+paridade seguem esse build. A análise abaixo descreve o arquivo original enviado.
 
 ## 1. O que o arquivo é
 
@@ -42,7 +47,7 @@ Um editor de apresentações completo em **um único HTML** (sem servidor): edit
 
 ## 3. O que muda e o que NÃO muda
 
-**Não muda (e é verificado):** todo o código de `studio/` (editor, efeitos, animações, modelos, atalhos, componentes interativos, importação/exportação). O build **standalone** (`python3 studio/assemble.py`) continua sendo exatamente o arquivo original.
+**Não muda pela plataforma (e é verificado):** todo o código de `studio/` (editor, efeitos, animações, modelos, atalhos, componentes interativos, importação/exportação). O build **standalone** (`python3 studio/assemble.py`) é exatamente o build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`) — na S34b, o próprio arquivo original; a cada etapa nova de `studio/`, o build que passou no portão e foi publicado.
 
 **O que a versão online acrescenta, sem tocar em `studio/`:** o build "cloud" é feito numa **cópia temporária** de `studio/`, onde se adicionam a extensão de nuvem (`platform/studio-cloud/ed-50-cloud.js`) e **seis ajustes de texto cirúrgicos e verificados** (`studio-cloud/patches.json`; cada um exige que o trecho original exista exatamente uma vez, senão o build falha):
 
@@ -53,14 +58,15 @@ Um editor de apresentações completo em **um único HTML** (sem servidor): edit
 5. a capa não abre quando o editor roda dentro da plataforma (o ponto de entrada passa a ser o acervo);
 6. a pergunta “sair sem salvar?” do navegador passa a ser decidida pela extensão (só com alterações ainda não confirmadas na nuvem).
 
-Sem `window.AM_CLOUD` (modo inerte) nenhum dos seis muda comportamento; a prova é o portão de 35 baterias do editor sobre o build em nuvem (EVIDENCIAS §1.1).
+Sem `window.AM_CLOUD` (modo inerte) nenhum dos seis muda comportamento; a prova é o portão de «PREENCHER» baterias do editor sobre o build em nuvem (EVIDENCIAS §1.1).
 
 ## 4. Como a preservação é provada
 
 | Prova | O que garante |
 |---|---|
-| Hash do build standalone = hash do arquivo original | `studio/` não foi alterado em nada |
-| Gate de 35 suítes do editor executado sobre o **build cloud em modo inerte** (sem `window.AM_CLOUD`) | os 6 ajustes e a extensão não quebram nenhum comportamento existente |
+| Hash do build standalone = hash do build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`) | a plataforma não alterou `studio/` e o editor publicado é o que `studio/` monta |
+| Hash de `original/Canteiro-AM (3).html` = `original/SHA256SUMS` (`dc93ceac…5099`) | a cópia do arquivo enviado (S34b) continua intacta; ela não precisa ser igual ao build atual |
+| Gate de «PREENCHER» suítes do editor executado sobre o **build cloud em modo inerte** (sem `window.AM_CLOUD`) | os 6 ajustes e a extensão não quebram nenhum comportamento existente |
 | Suítes novas em modo nuvem: abrir/editar/salvar, importar PPTX/PDF, exportar HTML/PDF/PowerPoint com imagens hidratadas, player, atalhos, formulários | as funções continuam funcionando **dentro** da plataforma |
 | Zero violações de CSP em Chromium real durante todos os fluxos | a política de segurança estrita não desliga nenhum recurso |
 | Medição do tempo de abertura/salvamento e do peso do arquivo | a fluidez não piora |
