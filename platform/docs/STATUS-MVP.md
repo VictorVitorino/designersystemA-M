@@ -154,3 +154,10 @@ Essas verificações cobrem a implementação no repositório. **Não são prova
 ### Dependências externas
 
 Implantação Render Free não comprovada; variáveis secretas em ambientes protegidos e configuração real do Supabase Auth/convite continuam necessárias. Até comprovação por URL real, não marcar o MVP como publicado ou homologado.
+
+## Atualização — 10/10/2026
+
+- Integrados à `main` com CI, PostgreSQL 17, CodeQL e E2E Chromium aprovados no head: [PR #31](https://github.com/VictorVitorino/designersystemA-M/pull/31) (preparação da carga de 50 usuários, workflow **não executado**), [PR #39](https://github.com/VictorVitorino/designersystemA-M/pull/39) (logout confirma a limpeza do IndexedDB; issue #37 fechada) e [PR #42](https://github.com/VictorVitorino/designersystemA-M/pull/42) (auditoria do backend: 5 correções, AF-6 a AF-10 em `SEGURANCA.md`, migração `0010`).
+- A migração `0010_invite_expiry_enforced.sql` **não** foi aplicada ao Supabase `canteiro-mvp` (continua em `0009`); seguir pelo workflow com aprovação.
+- AWS Amplify/AppSync (issue #41): nenhuma implementação existe no GitHub; a decisão de 10/10 foi manter a arquitetura Render/Supabase.
+- Próximas tarefas e bloqueios consolidados em [`HANDOFF.md`](../../HANDOFF.md). **Aceite permanece 1/6.**

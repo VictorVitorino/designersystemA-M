@@ -1,6 +1,6 @@
 # CLAUDE.md — regras do Canteiro (Design System A&M)
 
-Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo vive em `studio/`; o detalhe técnico completo está em
+Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. **Estado atual e próximas tarefas: `HANDOFF.md`.** Tudo vive em `studio/`; o detalhe técnico completo está em
 `studio/docs/ARCH.md` (leia o §0 “15 regras” e o §9.5 “Invariantes fixadas por testes” antes de mexer em qualquer coisa).
 
 ## Processo de cada mudança (nesta ordem)
