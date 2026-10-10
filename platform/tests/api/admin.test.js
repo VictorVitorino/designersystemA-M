@@ -239,10 +239,12 @@ describe('auditoria', () => {
     assert.ok(ids.every((id, i) => i === 0 || BigInt(ids[i - 1]) > BigInt(id)), 'ordem decrescente');
   });
   test('parâmetros maliciosos → 400 (nunca 500, nunca SQL)', async () => {
-    for (const qs of ["action=' or 1=1 --", "actor=1' or '1'='1", 'cursor=1;drop table app.audit_log', 'cursor=abc', 'from=ontem', 'limit=-1', 'limit=101', 'extra=1', "action=" + 'a'.repeat(100)]) {
+    for (const qs of ["action=' or 1=1 --", "actor=1' or '1'='1", 'cursor=1;drop table app.audit_log', 'cursor=abc', 'from=ontem', 'from=2026-13-45', 'to=2026-01-01T99:99', 'from=2026-02-30', 'limit=-1', 'limit=101', 'extra=1', "action=" + 'a'.repeat(100)]) {
       const r = await admC.get('/api/admin/audit?' + qs.replace(/ /g, '%20')); assert.equal(r.status, 400, qs);
     }
     assert.equal((await q((tx) => tx`select count(*)::int n from app.audit_log`))[0].n > 0, true);
+    const badCur = Buffer.from(JSON.stringify(['9999-99-99 00:00:00', '00000000-0000-4000-8000-000000000000'])).toString('base64url');
+    assert.equal((await admC.get('/api/admin/users?cursor=' + badCur)).status, 400, 'cursor de usuários com data impossível → 400');
   });
   test('trilha NÃO contém senha, token nem e-mail de falha', async () => {
     await t.anon().login('segredo.falha@am.test', 'SenhaQueNaoPodeVazar-1!');

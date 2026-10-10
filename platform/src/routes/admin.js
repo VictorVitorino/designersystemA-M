@@ -30,6 +30,8 @@ const SETTING_KEYS = Object.keys(SETTINGS);
 
 const lim = z.coerce.number().int().min(1).max(100).default(30);
 const UsersQuery = z.object({ status: z.enum(['invited', 'active', 'suspended']).optional(), q: z.string().trim().max(100).optional(), limit: lim, cursor: z.string().max(200).optional() }).strict();
+/* Datas viajam como TEXTO (::text::timestamptz): o driver converteria um parâmetro timestamptz em Date do JS, e um valor de formato certo mas
+   impossível (2026-13-45) virava RangeError → 500. Como texto, o Postgres recusa com 22007/22008, que middleware/error.js traduz em 400. */
 const day = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
 const AuditQuery = z.object({
   actor: uuidField.optional(), action: z.string().regex(/^[a-z0-9_.:*-]{1,80}$/, 'Ação inválida.').optional(),
@@ -87,7 +89,7 @@ export function adminRoutes(deps) {
        where true
          ${q.status ? tx`and u.status = ${q.status}` : tx``}
          ${like ? tx`and (u.email ilike ${like} or u.display_name ilike ${like})` : tx``}
-         ${cur ? tx`and (u.created_at, u.id) < (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
+         ${cur ? tx`and (u.created_at, u.id) < (${cur[0]}::text::timestamptz, ${cur[1]}::uuid)` : tx``}
        order by u.created_at desc, u.id desc
        limit ${q.limit + 1}`);
     const page = rows.slice(0, q.limit);
@@ -222,8 +224,8 @@ export function adminRoutes(deps) {
        where true
          ${q.actor ? tx`and a.actor_id = ${q.actor}` : tx``}
          ${q.action ? (prefix ? tx`and a.action like ${prefix}` : tx`and a.action = ${q.action}`) : tx``}
-         ${q.from ? tx`and a.at >= ${q.from}::timestamptz` : tx``}
-         ${q.to ? tx`and a.at < ${q.to}::timestamptz` : tx``}
+         ${q.from ? tx`and a.at >= ${q.from}::text::timestamptz` : tx``}
+         ${q.to ? tx`and a.at < ${q.to}::text::timestamptz` : tx``}
          ${cur ? tx`and a.id < ${cur}::bigint` : tx``}
        order by a.id desc
        limit ${q.limit + 1}`);
