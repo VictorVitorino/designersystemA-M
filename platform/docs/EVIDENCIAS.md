@@ -36,10 +36,10 @@ Na S34b as duas coincidiam (o build publicado era o próprio original); as rodad
 | Prova | Resultado |
 |---|---|
 | Cópia do arquivo enviado (`original/Canteiro-AM (3).html`) | SHA-256 `dc93ceac…5099`, 1.893.245 bytes, igual ao build publicado da etapa S34b; confere com `original/SHA256SUMS` e fica intacta (PR-11, PR-11b) |
-| Build autônomo a partir de `studio/` (`python3 assemble.py`) | **byte-idêntico** ao build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`, SHA-256 `«PREENCHER»`), confirmado por `tools/build-cloud-editor.js --verify-standalone` (PR-01, PR-02) |
-| Build em nuvem (`platform/.tmp/cloud-build/cloud-editor.html`, «PREENCHER» KB, SHA-256 `«PREENCHER»`) | = `studio/` + extensão `ed-50-cloud` + 6 patches de uma linha, cada um exigido exatamente 1× (o build falha se `studio/` mudar) |
+| Build autônomo a partir de `studio/` (`python3 assemble.py`) | **byte-idêntico** ao build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`, SHA-256 `70a14b05081732b1…`), confirmado por `tools/build-cloud-editor.js --verify-standalone` (PR-01, PR-02) |
+| Build em nuvem (`platform/.tmp/cloud-build/cloud-editor.html`, 1989 KB, SHA-256 `85863901c97567af…`) | = `studio/` + extensão `ed-50-cloud` + 6 patches de uma linha, cada um exigido exatamente 1× (o build falha se `studio/` mudar) |
 | Arquivo servido em `/editor/` e `/visualizar/` | byte-idêntico ao build em nuvem (mesmo SHA-256) |
-| Portão de «PREENCHER» baterias do editor sobre o build em nuvem (modo inerte) | ver §1.1 |
+| Portão de 36 baterias do editor sobre o build em nuvem (modo inerte) | ver §1.1 |
 | Paridade pixel a pixel autônomo publicado × nuvem (`npm run test:parity`, lado A = `../AM-Studio-Editor.html`; na S34b, original × nuvem) | ver [`evidencias/paridade.md`](evidencias/paridade.md) e §1.2 |
 
 ### 1.1 Portão de qualidade do editor
@@ -48,17 +48,17 @@ Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node te
 
 | Medida | Resultado |
 |---|---|
-| **Rodada da S35** (build autônomo `«PREENCHER»`, build em nuvem `«PREENCHER»`, «PREENCHER») | **GATE PASS — «PREENCHER» de «PREENCHER» baterias** («PREENCHER» s); provas PR-01…PR-15 e PR-11b: «PREENCHER» |
+| **Rodada da S35** (build autônomo `70a14b05…`, build em nuvem `85863901…`, 2026-10-10, com `NODE_OPTIONS=--require tools/pw-local.cjs`) | **GATE PASS — 36 de 36 baterias** (619 s); provas PR-01…PR-15 e PR-11b: 16/16 |
 | Rodada final da S34b (build `47a556b1…`, 2026-10-07 03:26, máquina sem outras cargas) | **GATE PASS — 35 de 35 baterias** (569 s); provas PR-01…PR-15: 15/15 (`.tmp/quality/preservacao.log`) |
 | Rodada anterior (build `8e20f87c…`, com três fazendas de Chromium em paralelo) | 34 de 35 (539 s); a única falha, `test-s24-import.js` ("Execution context was destroyed", renderer derrubado por falta de recursos), passou isolada (38 checagens, 0 erros) |
 | Execução do agente construtor (mesmo comando, máquina ociosa) | GATE PASS 35/35 (530 s) |
 | Provas estruturais da mesma suíte (PR-01…PR-13) | cloud − extensão = autônomo + 6 patches (igualdade exata de texto); nenhum arquivo de `studio/`, `original/`, `am/` alterado; build autônomo com o SHA-256 do original (na S34b o build publicado era o próprio original) |
 
-Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as baterias do portão do editor (S34b: 35 de 35; S35: «PREENCHER»).
+Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as baterias do portão do editor (S34b: 35 de 35; S35: 36 de 36).
 
 ### 1.2 Prova de paridade (todos os efeitos, modelos, layouts, templates e quadros)
 
-A partir da S35 o lado A de `npm run test:parity` é o build autônomo publicado (`../AM-Studio-Editor.html`), não o `original/`. Rodada da S35: «PREENCHER».
+A partir da S35 o lado A de `npm run test:parity` é o build autônomo publicado (`../AM-Studio-Editor.html`), não o `original/`. Rodada da S35: **não executável neste contêiner** — o harness usa o relógio falso (`page.clock`) do Playwright 1.63 de `platform/package.json`, cujo navegador não está instalado aqui; com o Playwright global (1.56) todos os slides animados divergem no mesmo retângulo de 26×40 px só no quadro de 400 ms, com CSS e JS do runtime idênticos em A e B (`cssSame`/`jsSame`), sinal de relógio e não de produto. Pendente: rodar `npm run test:parity` numa máquina com o navegador do 1.63 (como o job de e2e, que instala o Chromium do projeto).
 A rodada registrada abaixo é a da S34b, quando o build publicado era o próprio original.
 
 `npm run test:parity` (`tools/parity.cjs`) com o original × build em nuvem final (sha `8e20f87c…`), executada em 2026-10-07 em duas passagens retomáveis (00:46–01:57, 311 slides; travamento transitório do navegador; retomada 02:19–02:52 a partir do checkpoint, com os 7 slides de transição recalculados pelo harness definitivo). Documento completo com método, envelope de ruído e lista de cada quadro fora da igualdade exata: [`evidencias/paridade.md`](evidencias/paridade.md).

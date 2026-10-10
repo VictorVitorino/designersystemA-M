@@ -2,7 +2,7 @@
 
 O editor (`studio/`) é um arquivo HTML único montado por `studio/assemble.py`. **Esta pasta não altera `studio/`**: o build cloud copia as
 fontes para `platform/.tmp/cloud-build`, acrescenta a extensão daqui, aplica uma lista curta de patches de texto e roda o `assemble.py` da cópia.
-Sem `window.AM_CLOUD` o resultado se comporta como o editor autônomo (modo inerte) — é assim que o portão de «PREENCHER» baterias de `studio/` prova a preservação.
+Sem `window.AM_CLOUD` o resultado se comporta como o editor autônomo (modo inerte) — é assim que o portão de 36 baterias de `studio/` prova a preservação.
 
 ## Original × build publicado (duas garantias separadas)
 
@@ -14,7 +14,7 @@ Sem `window.AM_CLOUD` o resultado se comporta como o editor autônomo (modo iner
   e o build em nuvem e a prova de paridade (`npm run test:parity`, lado A = `../AM-Studio-Editor.html`) seguem esse build — não o `original/`.
 - Uma etapa nova em `studio/` não quebra a plataforma por mudar o SHA-256: basta passar o portão, publicar o build na raiz e rodar de novo
   `--verify-standalone`, `tests/cloud/preservacao.test.js` e a paridade. Se o build publicado ficar para trás, `--verify-standalone` falha e diz o que fazer.
-- Build autônomo publicado hoje: sha256 `«PREENCHER»`; build em nuvem: «PREENCHER» KB (orçamento 2000 KB).
+- Build autônomo publicado hoje (S35): sha256 `70a14b05081732b1c7056045f8dd35d5ff2c6447df7d0fb85c3382df9b518174`; build em nuvem: 1989 KB pelo PR-07 (orçamento 2000 KB; ~11 KB de folga).
 
 | Arquivo | Para quê |
 |---|---|
@@ -60,7 +60,7 @@ Na página do editor existe `window.AMCloud` (somente leitura + `saveNow()`/`sav
 ```bash
 node --test tests/cloud/cloud-core.test.js     # cloud-core (Node)
 node tests/cloud/editor-cloud.test.js          # editor em nuvem (Chromium real + mock da API, CSP real)   ONLY=03,07 filtra cenários
-node tests/cloud/preservacao.test.js           # prova de preservação   PRESERVE_FULL=1 roda o portão completo («PREENCHER» baterias)
+node tests/cloud/preservacao.test.js           # prova de preservação   PRESERVE_FULL=1 roda o portão completo (36 baterias)
 node tests/cloud/mock-api.js [porta]           # sobe o mock + o site (platform/dist/public) para ver o editor em nuvem à mão
 ```
 

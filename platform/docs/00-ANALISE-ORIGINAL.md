@@ -10,7 +10,7 @@ dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099
 
 **Regra a partir da S35 (duas garantias separadas):** `original/` é a cópia preservada do upload (S34b) — não muda, confere com `original/SHA256SUMS` e **não** precisa
 ser igual ao build atual. O build autônomo de `studio/` é conferido contra o **build publicado na raiz** (`AM-Studio-Editor.html` = `Canteiro-AM.html`,
-hoje sha256 `«PREENCHER»`), que cada etapa de `studio/` atualiza depois do portão (regra 5 do processo no `CLAUDE.md`); o build em nuvem e a prova de
+hoje sha256 `70a14b05081732b1…`, S35), que cada etapa de `studio/` atualiza depois do portão (regra 5 do processo no `CLAUDE.md`); o build em nuvem e a prova de
 paridade seguem esse build. A análise abaixo descreve o arquivo original enviado.
 
 ## 1. O que o arquivo é
@@ -58,7 +58,7 @@ Um editor de apresentações completo em **um único HTML** (sem servidor): edit
 5. a capa não abre quando o editor roda dentro da plataforma (o ponto de entrada passa a ser o acervo);
 6. a pergunta “sair sem salvar?” do navegador passa a ser decidida pela extensão (só com alterações ainda não confirmadas na nuvem).
 
-Sem `window.AM_CLOUD` (modo inerte) nenhum dos seis muda comportamento; a prova é o portão de «PREENCHER» baterias do editor sobre o build em nuvem (EVIDENCIAS §1.1).
+Sem `window.AM_CLOUD` (modo inerte) nenhum dos seis muda comportamento; a prova é o portão de 36 baterias do editor sobre o build em nuvem (EVIDENCIAS §1.1).
 
 ## 4. Como a preservação é provada
 
@@ -66,7 +66,7 @@ Sem `window.AM_CLOUD` (modo inerte) nenhum dos seis muda comportamento; a prova 
 |---|---|
 | Hash do build standalone = hash do build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`) | a plataforma não alterou `studio/` e o editor publicado é o que `studio/` monta |
 | Hash de `original/Canteiro-AM (3).html` = `original/SHA256SUMS` (`dc93ceac…5099`) | a cópia do arquivo enviado (S34b) continua intacta; ela não precisa ser igual ao build atual |
-| Gate de «PREENCHER» suítes do editor executado sobre o **build cloud em modo inerte** (sem `window.AM_CLOUD`) | os 6 ajustes e a extensão não quebram nenhum comportamento existente |
+| Gate de 36 suítes do editor executado sobre o **build cloud em modo inerte** (sem `window.AM_CLOUD`) | os 6 ajustes e a extensão não quebram nenhum comportamento existente |
 | Suítes novas em modo nuvem: abrir/editar/salvar, importar PPTX/PDF, exportar HTML/PDF/PowerPoint com imagens hidratadas, player, atalhos, formulários | as funções continuam funcionando **dentro** da plataforma |
 | Zero violações de CSP em Chromium real durante todos os fluxos | a política de segurança estrita não desliga nenhum recurso |
 | Medição do tempo de abertura/salvamento e do peso do arquivo | a fluidez não piora |
