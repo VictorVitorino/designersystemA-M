@@ -53,18 +53,22 @@
 .pz-tL{display:none}
 .pz:is([data-act=acenar],[data-act=apontar]) .pz-tL,.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]):not([data-act=pensar]):not([data-act=comemorar]) .pz-tL{display:inline}
 .pz:is([data-act=acenar],[data-act=apontar]) .pz-tR,.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]):not([data-act=pensar]):not([data-act=comemorar]) .pz-tR{display:none}
+/* gesto sem mão livre (o braço que segura a ferramenta entra no gesto e o outro já está ocupado): a ferramenta some durante o gesto */
+.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]):is([data-act=pensar],[data-act=comemorar]) :is(.pz-tL,.pz-tR),
+.pz.pz-go[data-act2=pensar]:is([data-act=acenar],[data-act=apontar],[data-act=comemorar]) :is(.pz-tL,.pz-tR),
+.pz.pz-go[data-act2=comemorar]:is([data-act=acenar],[data-act=apontar]) :is(.pz-tL,.pz-tR){display:none}
 .pz-tR{rotate:var(--rT)}
 .pz[data-act=comemorar]{--rT:160deg}
 /* motor: cada parte toca a trilha armada (--aX) */
 .pz-char{animation:var(--aC,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
 .pz-torso{animation:var(--aB,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
-.pz-aR{animation:var(--aR,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
-.pz-aL{animation:var(--aL,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
+.pz-aR{animation:var(--aR,pzNone) var(--dA,var(--dur,1.6s)) var(--ease,ease-in-out) var(--d0,0ms) var(--nA,var(--n,1)) both}
+.pz-aL{animation:var(--aL,pzNone) var(--dA,var(--dur,1.6s)) var(--ease,ease-in-out) var(--d0,0ms) var(--nA,var(--n,1)) both}
 .pz-lgL{animation:var(--aG,pzNone) var(--gd,.5s) linear var(--d0,0ms) var(--ln,var(--n,1)) both}
 .pz-lgR{animation:var(--aG2,pzNone) var(--gd,.5s) linear var(--d0,0ms) var(--ln,var(--n,1)) both}
 .pz-mouth{animation:var(--aM,pzNone) var(--dur,2s) ease-in-out var(--d0,0ms) var(--n,1) both}
 .pz-conf circle{animation:var(--aF,pzNone) 1.3s ease-out var(--d0,0ms) var(--n,1) both}
-.pz-tR{animation:var(--aT,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
+.pz-tR{animation:var(--aT,pzNone) var(--dA,var(--dur,1.6s)) var(--ease,ease-in-out) var(--d0,0ms) var(--nA,var(--n,1)) both}
 /* trilhas por movimento: entrada (--k) e laço (--l, só onde a entrada não é cíclica) */
 .pz[data-act=acenar]{--kR:pzWave;--lR:pzWaveL;--dur:1.8s}
 .pz[data-act=apontar]{--kR:pzPoint;--lR:pzPointL;--dur:2.4s}
@@ -81,7 +85,7 @@
 .am-play .pz[data-trig=hover]:hover{--aC:var(--kC);--aB:var(--kB);--aR:var(--lR,var(--kR));--aL:var(--lL,var(--kL));--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:infinite;--d0:0ms}
 /* a entrada já tocou (houve clique ou decisão): não recomeça quando a reação termina */
 .am-play.am-in .pz.pz-done[data-trig=in]{--aC:pzNone;--aB:pzNone;--aR:pzNone;--aL:pzNone;--aG:pzNone;--aG2:pzNone;--aM:pzNone;--aF:pzNone;--aT:pzNone}
-.am-play.am-in .pz.pz-done[data-trig=loop]{--d0:0ms} /* laço: depois do gesto, volta na hora (sem esperar a entrada do slide de novo) */
+.am-play.am-in .pz.pz-g1[data-trig=loop]{--d0:0ms} /* laço: depois de um gesto, volta na hora (sem esperar a entrada do slide); só depois de um gesto de verdade */
 /* andar até: balão e boneco (.pz-mv) deslizam até --wq/--wqy (cqw, no referencial do elemento) enquanto as pernas dão --wn passos de
    --ws; o lado da caminhada é data-wf. Na chegada (animationend → .pz-arr) o movimento escolhido toca e a mira vale */
 .pz[data-walk]{--wd0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
@@ -90,8 +94,8 @@
 .am-play.am-in .pz[data-walk][data-wf=l]:not(.pz-arr) .pz-svg{transform:scaleX(-1)}
 .am-play.am-in .pz[data-walk][data-wf=r]:not(.pz-arr) .pz-svg{transform:none}
 .am-play.am-in .pz.pz-arr{--d0:0ms}
-/* na chegada, fora do “ao entrar”: a entrada toca uma vez (da pose neutra da caminhada até a pose) e depois o gatilho assume */
-.am-play.am-in .pz.pz-arr.pz-ent{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--aT:var(--kT);--n:var(--n1,1);--d0:0ms}
+/* na chegada, fora do “ao entrar”: só braços e ferramenta vão da pose neutra da caminhada à pose (0,5 s); o movimento em si fica com o gatilho */
+.am-play.am-in .pz.pz-arr.pz-pose{--aR:pzPoseR;--aL:pzPoseL;--aT:pzPoseT;--dA:.5s;--nA:1;--d0:0ms}
 /* clique (player): o gesto (data-act2) toca uma vez, partindo da pose de repouso e voltando a ela */
 .am-stage .pz.pz-go[data-act2][data-act2]{--aT:var(--gT,pzNone);--aC:var(--gC,pzNone);--aB:var(--gB,pzNone);--aR:var(--gR,pzNone);--aL:var(--gL,pzNone);--aG:var(--gG,pzNone);--aG2:var(--gG2,pzNone);--aM:var(--gM,pzNone);--aF:var(--gF,pzNone);--dur:var(--gdur,1.6s);--gd:var(--ggd,.5s);--ease:var(--gease,ease-in-out);--n:var(--gn1,1);--ln:var(--gn1,1);--d0:0ms}
 .pz[data-act2=acenar]{--gR:pzWaveG;--gdur:1.8s}
@@ -108,6 +112,12 @@
 .am-play .am-k-persona,.am-play .am-k-persona>.am-rot,.am-play .am-k-persona>.am-rot>.am-fxw,.am-play .pz,.am-play .pz-mv,.am-play .pz-svg{pointer-events:none}
 .am-play .pz-char,.am-play .pz-say{pointer-events:auto}
 .am-play .pz-conf,.am-play .pz-shd{pointer-events:none} /* confete invisível e sombra não recebem o clique */
+/* efeitos que o personagem recusa (FX.persona.animOk) também não agem aqui: arquivo exportado antes da regra, editado à mão ou com “Andar até” preenchido depois do efeito */
+.am-k-persona>.am-rot>.am-fxw::after{content:none!important}
+.am-play .am-k-persona>.am-rot>.am-fxw[data-hover=ring]{outline:none!important}
+.am-k-persona>.am-rot>.am-fxw[data-hover=inzoom]{overflow:visible!important}.am-k-persona>.am-rot>.am-fxw[data-hover=inzoom]>*{transform:none!important}
+.am-k-persona:has(.pz[data-walk])>.am-rot>.am-fxw:is([data-loop=pulse],[data-loop=beat],[data-loop=wiggle],[data-loop=drift]){animation:none!important}
+.am-play .am-k-persona:has(.pz[data-walk])>.am-rot>.am-fxw:is([data-hover=tilt],[data-hover=zoom],[data-hover=lean],[data-hover=spot]){transform:none!important}
 /* linhas presas a quem anda: escondidas durante a caminhada; a cópia com a ponta na chegada aparece suave */
 .am-play .am-el.pz-lnw{visibility:hidden}
 .am-play .am-el.pz-lnx{animation:amFade .35s ease both}
@@ -143,6 +153,9 @@
 @keyframes pzNod{0%,100%{translate:0 0}25%{translate:0 6px}50%{translate:0 0}75%{translate:0 6px}}
 @keyframes pzShake{0%,100%{rotate:0deg}20%{rotate:-7deg}40%{rotate:7deg}60%{rotate:-5deg}80%{rotate:5deg}}
 @keyframes pzBlink{0%,92%,100%{scale:1 0}95%,97%{scale:1 1}}
+@keyframes pzPoseR{from{rotate:-16deg}to{rotate:var(--rR)}}
+@keyframes pzPoseL{from{rotate:16deg}to{rotate:var(--rL)}}
+@keyframes pzPoseT{from{rotate:0deg}to{rotate:var(--rT)}}
 @keyframes pzToolUp{0%{rotate:0deg}25%,100%{rotate:var(--rT)}}
 @keyframes pzToolUpG{0%,100%{rotate:var(--rT)}20%,80%{rotate:160deg}}
 /* cópias para os gestos (nomes diferentes dos do laço) */
@@ -169,7 +182,8 @@
 .pz-s1,.pz-s2{max-width:100%;flex:0 0 auto;overflow:hidden}
 .pz-s1:empty{display:none}
 .pz-txt{white-space:pre-line;overflow-wrap:anywhere}
-.pz-over .pz-s1 .pz-txt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--lc,3);overflow:hidden} /* não coube nem com a menor letra: reticências */
+.pz-over :is(.pz-s1,.pz-s2) .pz-txt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--lc,3);overflow:hidden} /* não coube nem com a menor letra: reticências (fala e fala ao clicar) */
+.am-play .pz-over .pz-chs{overflow:auto;scrollbar-width:thin} /* decisões que não cabem nem com a menor letra continuam alcançáveis */
 .pz-s2{display:none}.pz-on.pz-has2 .pz-s1{display:none}.pz-on.pz-has2 .pz-s2{display:block}
 .pz-chs{display:flex;flex-wrap:wrap;justify-content:center;gap:.3em;max-width:100%;flex:0 1 auto;min-height:0;overflow:hidden}
 .pz-ch{font:inherit;font-size:.78em;font-weight:600;line-height:1.2;padding:.28em .75em;border-radius:1em;border:.1em solid var(--c-line,#002A46);background:var(--c-line,#002A46);color:var(--c-bub,#fff);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

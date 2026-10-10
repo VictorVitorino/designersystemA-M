@@ -23,6 +23,12 @@
     if (cur && /^[\w-]{1,40}$/.test(cur) && !els.some(function (e) { return e && e.id === cur; })) out.splice(1, 0, cur + '=(alvo que não está neste slide)');
     return 'sel:' + out.join('|');
   }
+  /* aviso no painel quando a fala não cabe no balão (o palco já mostra o contorno tracejado e o texto com reticências) */
+  var TIP = F.tip;
+  Object.defineProperty(F, 'tip', { configurable: true, enumerable: true, get: function () {
+    var sel = A.selected(), n = sel.length === 1 && document.querySelector('#wrap .am-stage .am-el[data-id="' + sel[0] + '"] .pz.pz-over');
+    return (n ? '⚠ A fala não cabe no balão: na apresentação ela sai cortada, com reticências. Aumente o personagem, encurte a fala ou use menos decisões. ' : '') + TIP;
+  } });
   Object.defineProperty(F, 'fields', { configurable: true, enumerable: true, get: function () { return BASE.map(function (f) { return f[0] === 'aim' ? ['aim', f[1], aimOpts()] : f; }); } });
   var t = 0;
   /* giro (alça, teclado, painel) e posição mudam o palco sem redesenhar o personagem: data-rot e data-walk (distância até o X de chegada)

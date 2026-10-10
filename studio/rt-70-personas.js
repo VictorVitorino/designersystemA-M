@@ -170,22 +170,25 @@
   /* o desenho (viewBox 200×240, “meet”, centrado e apoiado embaixo) dentro de uma caixa em px lógicos */
   function drawBox(x, y, bw, bh) { var k = Math.min(bw / 200, bh / 240) || 1, dw = 200 * k, dh = 240 * k; return { k: k, x: x + (bw - dw) / 2, y: y + bh - dh, w: dw, h: dh }; }
   /* caixa do SVG e do balão (frações de w/h), calculadas a partir do desenho efetivo: o balão encosta na cabeça em qualquer proporção */
-  function layout(side, w, h, hasB, face, f) {
+  function layout(side, w, h, hasB, face, f, nch) {
+    var big = (nch || 0) > 2; /* várias decisões: o desenho encolhe e o balão ganha altura */
     if (!/^(top|left|right)$/.test(side)) side = hasB ? (w >= h * 1.15 ? (face === 'l' ? 'left' : 'right') : 'top') : 'none';
     if (!hasB || side === 'none') return { side: 'none', svg: [0, 0, 1, 1], bub: null, tail: 'n', D: drawBox(0, 0, w, h) };
     var tail = f * 1.05, sv, D;
     if (side === 'top') {
-      sv = [0.05, 0.31, 0.9, 0.69]; D = drawBox(w * sv[0], h * sv[1], w * sv[2], h * sv[3]);
-      var bot = Math.max(h * 0.16, D.y + 6 * D.k - tail), top = Math.max(0, bot - h * 0.45);
+      sv = big ? [0.1, 0.4, 0.8, 0.6] : [0.05, 0.31, 0.9, 0.69]; D = drawBox(w * sv[0], h * sv[1], w * sv[2], h * sv[3]);
+      var bot = Math.max(h * 0.16, D.y + 6 * D.k - tail), top = Math.max(0, bot - h * (big ? 0.6 : 0.45));
       return { side: side, svg: sv, bub: [0, top / h, 1, (bot - top) / h], tail: 'b', D: D };
     }
     sv = side === 'right' ? [0, 0.05, 0.5, 0.95] : [0.5, 0.05, 0.5, 0.95]; D = drawBox(w * sv[0], h * sv[1], w * sv[2], h * sv[3]);
-    var bh = h * 0.64, headY = D.y + 100 * D.k, by = Math.max(0, Math.min(h - bh, headY - bh * 0.62));
+    var bh = h * (big ? 0.82 : 0.64), headY = D.y + 100 * D.k, by = Math.max(0, Math.min(h - bh, headY - bh * 0.62));
     if (side === 'right') { var x0 = Math.min(w * 0.7, D.x + D.w + tail * 0.4); return { side: side, svg: sv, bub: [x0 / w, by / h, (w - x0) / w, bh / h], tail: 'l', D: D }; }
     var x1 = Math.max(w * 0.3, D.x - tail * 0.4); return { side: side, svg: sv, bub: [0, by / h, x1 / w, bh / h], tail: 'r', D: D };
   }
   /* cabe? estimativa determinística (vale igual no editor, no player e nas imagens do PDF/PowerPoint) */
-  var PAD = { fala: [1.94, 1.24, 1], nota: [1.94, 1.24, 1], pensa: [3.24, 2.04, 0.78], grita: [4.24, 2.84, 0.62] };
+  /* [padding horizontal em em, padding vertical em em, fração útil da altura, fração útil da largura]: a nuvem (elipse) e a estrela do grito
+     recortam as bordas, então a área de texto é menor que a caixa */
+  var PAD = { fala: [1.94, 1.24, 1, 1], nota: [1.94, 1.24, 1, 1], pensa: [3.24, 2.04, 0.7, 0.8], grita: [4.24, 2.84, 0.55, 0.74] };
   /* linhas que o texto ocupa com cpl caracteres por linha, quebrando por palavra (palavra maior que a linha quebra no meio) */
   function wrapLines(t, cpl) {
     var n = 0; String(t || '').split('\n').forEach(function (p) {
@@ -195,8 +198,8 @@
   }
   /* altura que sobra para o texto (px) depois das decisões; negativo = nem as decisões cabem */
   function room(f, bw, bh, ch, kind) {
-    var P = PAD[kind] || PAD.fala, iw = bw - f * P[0], ih = (bh - f * P[1]) * P[2];
-    if (ch && ch.length) { var rw = 0, rows = 1; ch.forEach(function (c) { var bwid = (Math.min(c.t.length, 40) * 0.58 + 1.6) * f * 0.78 + f * 0.3; if (rw + bwid > iw && rw > 0) { rows++; rw = 0; } rw += bwid; }); ih -= rows * (f * 0.78 * 1.96 + f * 0.3) + f * 0.35; }
+    var P = PAD[kind] || PAD.fala, iw = (bw - f * P[0]) * P[3], ih = (bh - f * P[1]) * P[2];
+    if (ch && ch.length) { var rw = 0, rows = 1, lim = iw * 0.9; ch.forEach(function (c) { var bwid = Math.min(lim, (Math.min(c.t.length, 40) * 0.6 + 1.7) * f * 0.78 + f * 0.3); if (rw + bwid > lim && rw > 0) { rows++; rw = 0; } rw += bwid; }); ih -= rows * (f * 0.78 * 2.05 + f * 0.3 + 1.5) + f * 0.35; } /* fileira = botão (1,96em + borda) + vão; folga para o arredondamento da borda na tela */
     return { iw: iw, ih: ih };
   }
   function fits(f, bw, bh, t, ch, kind) {
@@ -258,11 +261,12 @@
       if (fx && /^[lr]$/.test(fx.face) && /^-?\d{1,3}(\.\d+)?deg$/.test(fx.deg)) { face = fx.face; vars += '--aim:' + fx.deg + ';'; attrs += ' data-fix="1"'; }
       if (el && typeof el.id === 'string') vars += '--bk:-' + hashMs(el.id) + 'ms;';
       var f = Math.max(10, Math.min(24, Math.min(w * .058, h * .052))), fb = f, bubHTML = '', over = '';
-      var L = layout(d.side, w, h, hasB, face, f);
+      var L = layout(d.side, w, h, hasB, face, f, ch.length);
       if (hasB) { /* rabicho apontando para a cabeça: x = centro do desenho (em cima) ou y da cabeça (dos lados) */
         var B = L.bub, bw = w * B[2], bh = h * B[3], D = L.D, headX = D.x + D.w / 2, headY = D.y + 100 * D.k;
         fb = fitFont(f, bw, bh, [say, say2], ch, bub);
-        if (![say, say2].every(function (t) { return fits(fb, bw, bh, t, ch, bub); })) { over = ' pz-over'; vars += '--lc:' + clampLines(fb, bw, bh, ch, bub) + ';'; } /* não cabe nem com 8 px: corta com reticências (e o editor marca o balão) */
+        var o1 = !fits(fb, bw, bh, say, ch, bub), o2 = !!say2.trim() && !fits(fb, bw, bh, say2, ch, bub); /* não cabe nem com 8 px: corta com reticências (e o editor marca o balão) */
+        if (o1 || o2) { over = ' pz-over'; vars += '--lc:' + clampLines(fb, bw, bh, ch, bub) + ';'; }
         var tx = (headX - w * B[0]) / bw * 100, ty = (headY - h * B[1]) / bh * 100;
         var inner = '<div class="pz-s1">' + (say.trim() ? E('say', say, 'pz-txt') : '') + '</div>' + (say2.trim() ? '<div class="pz-s2">' + E('say2', say2, 'pz-txt') + '</div>' : '') +
           (ch.length ? '<div class="pz-chs">' + ch.map(function (c) { return '<button type="button" class="pz-ch" data-go="' + c.go + '"' + (c.m ? ' data-cm="' + c.m + '"' : '') + '>' + esc(c.t) + '</button>'; }).join('') + '</div>' : '');
@@ -319,10 +323,12 @@
   function flash(pz, cls, ms) { pz.classList.remove(cls); void pz.offsetWidth; pz.classList.add(cls); clearTimeout(pz['_t' + cls]); pz['_t' + cls] = setTimeout(function () { pz.classList.remove(cls); }, ms); }
   function walking(pz) { return !!pz.dataset.walk && !pz.classList.contains('pz-arr') && !!pz.closest('.am-in'); }
   var ARR = []; /* players abertos: religam as linhas presas na chegada */
+  var POSED = { acenar: 1, apontar: 1, pensar: 1, comemorar: 1 }; /* movimentos com pose fora da neutra */
   function arrive(pz) {
     pz.classList.add('pz-arr'); aimNode(pz);
-    var act = pz.dataset.act; /* fora do “ao entrar”, a entrada toca uma vez na chegada (sai da pose neutra da caminhada sem salto) e então o gatilho assume */
-    if (pz.dataset.trig !== 'in' && act && act !== 'parado') flash(pz, 'pz-ent', ACT_MS[act] || 2000);
+    var act = pz.dataset.act; /* fora do “ao entrar”: só os braços (e a ferramenta) saem da pose neutra da caminhada para a pose, em 0,5 s; o movimento em si
+       só toca pelo gatilho (laço, mouse ou clique) */
+    if (pz.dataset.trig !== 'in' && POSED[act]) flash(pz, 'pz-pose', 520);
     ARR.slice().forEach(function (f) { try { f(pz); } catch (err) { if (window.console) console.error(err); } });
   }
   document.addEventListener('animationend', function (e) { if (e.animationName !== 'pzWalkTo') return; var pz = e.target.closest && e.target.closest('.pz'); if (pz && pz.closest('.am-in') && !pz.classList.contains('pz-arr')) arrive(pz); });
@@ -332,7 +338,18 @@
     var fw = tn.querySelector('.am-fxw'); tn.classList.remove('pz-hl'); void tn.offsetWidth; tn.classList.add('pz-hl'); if (fw) fw.classList.add('am-hov');
     clearTimeout(tn._pzT); tn._pzT = setTimeout(function () { tn.classList.remove('pz-hl'); if (fw) fw.classList.remove('am-hov'); }, 1800);
   }
-  function gesture(pz) { var a2 = pz.dataset.act2; if (a2 && a2 !== 'none' && !walking(pz)) flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
+  function looping(pz) { var t = pz.dataset.trig; return !!pz.closest('.am-in') && (t === 'loop' || (t === 'hover' && pz.matches(':hover'))) && !pz.classList.contains('pz-go'); }
+  function go(pz, a2) { pz.classList.add('pz-g1'); flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
+  /* gesto do clique: parado, toca na hora; em laço (sem parar / mouse em cima), espera a virada do ciclo — braços, corpo, tronco e boca têm a mesma
+     duração e o mesmo atraso, então na virada todos estão na pose e o gesto (que parte da pose) começa sem salto */
+  function gesture(pz) {
+    var a2 = pz.dataset.act2; if (!a2 || a2 === 'none' || walking(pz)) return;
+    if (!looping(pz)) { go(pz, a2); return; }
+    if (pz._gw) return;
+    var done = function () { pz.removeEventListener('animationiteration', on); clearTimeout(pz._gwT); pz._gw = null; if (pz.closest('.am-in')) go(pz, a2); };
+    var on = function (e) { if (/\bpz-(aR|aL|char|torso|mouth)\b/.test(e.target.getAttribute && e.target.getAttribute('class') || '')) done(); };
+    pz._gw = on; pz.addEventListener('animationiteration', on); pz._gwT = setTimeout(done, 2700); /* movimento reduzido (sem iterações): não fica esperando */
+  }
   function react(pz) {
     var on = pz.classList.toggle('pz-on'), m2 = pz.dataset.mood2;
     if (m2) pz.dataset.mood = on ? m2 : (pz.dataset.mood1 || pz.dataset.mood);
@@ -366,7 +383,7 @@
     function eyes() { if (moved && !raf) raf = requestAnimationFrame(tick); }
     /* palco (re)entrou: todos recomeçam do estado inicial */
     function reset(st) {
-      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-ent'); if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
+      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-pose', 'pz-g1'); if (pz._gw) { pz.removeEventListener('animationiteration', pz._gw); clearTimeout(pz._gwT); pz._gw = null; } if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
       relink(st); eyes();
     }
     function onArrive(pz) { if (!deckEl.contains(pz)) return; var st = pz.closest('.am-stage'), n = pz.closest('.am-el'); if (st && n) relink(st, n.dataset.id); eyes(); }

@@ -422,6 +422,7 @@
     ['font', 'align', 'valign', 'fit', 'shape', 'variant', 'ds'].forEach(function (k) { if (typeof v[k] === 'string' && TOKEN_RE.test(v[k])) o[k] = v[k]; });
     Object.keys(EL_TOKENS).forEach(function (k) { if (EL_TOKENS[k].indexOf(v[k]) >= 0) o[k] = v[k]; });
     var pl = safePal(v.pal); if (pl) o.pal = pl;
+    ['a1', 'a2'].forEach(function (k) { var a = v[k]; if (a && typeof a === 'object' && !Array.isArray(a) && typeof a.id === 'string' && /^[\w-]{1,40}$/.test(a.id)) o[k] = { id: a.id, s: /^[nesw]$/.test(a.s) ? a.s : 'c' }; }); /* S32/S35: pontas presas da base sobrevivem a salvar e reabrir */
     if (v.dsel && typeof v.dsel === 'object' && !Array.isArray(v.dsel)) { var dd = {}; Object.keys(v.dsel).slice(0, 32).forEach(function (k) { var x = v.dsel[k]; if (/^[a-z][\w-]{0,30}$/i.test(k) && !/^(__proto__|constructor|prototype)$/.test(k) && ((typeof x === 'string' && (TOKEN_RE.test(x) || COLOR_RE.test(x))) || (typeof x === 'number' && isFinite(x)))) dd[k] = x; }); o.dsel = dd; }
     if (Array.isArray(v.cols)) { var dc = v.cols.slice(0, 6).map(function (c) { return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : ''; }); while (dc.length && !dc[dc.length - 1]) dc.pop(); if (dc.length) o.cols = dc; }
     return o;
@@ -912,6 +913,12 @@
   function hasText(el) { return el.type === 'text' || (el.type === 'shape' && /\S/.test(String(el.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' '))); }
   /* S35: o componente pode recusar efeitos (FX.animOk: o personagem recusa os que recortam o desenho, contornam a caixa vazia ou, com “Andar até”, giram/escalam em volta da caixa de origem) */
   function fxAnimOk(el, f, k) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !(F && typeof F.animOk === 'function' && !F.animOk(f, k, el)); }
+  /* S35: tira do elemento os efeitos (contínuo e de mouse) que o componente recusa no estado atual e avisa */
+  var stripTimer = 0;
+  function stripRefused(el, live) {
+    var out = []; ['loop', 'hover'].forEach(function (f) { var k = el.anim && el.anim[f]; if (k && k !== 'none' && !fxAnimOk(el, f, k)) { var a = RT.ANIMS[f].filter(function (x) { return x[0] === k; })[0]; out.push(a ? a[1] : k); el.anim[f] = 'none'; } });
+    if (!out.length) return; rerenderEl(el); clearTimeout(stripTimer); stripTimer = setTimeout(function () { if (!live) commit(); renderProps(); toast(out.join(' e ') + (out.length > 1 ? ' saíram' : ' saiu') + ': não combina com “Andar até” (giraria em volta do lugar de origem) · Ctrl+Z desfaz'); }, 0);
+  }
   function animFits(el, f, k) { if (!fxAnimOk(el, f, k)) return false; var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
   var ONLY_MSG = { ln: 'funciona em linhas, setas e Linhas A&M', lnIn: 'funciona em linhas, setas, Linhas A&M e ícones animados', tx: 'funciona em textos e formas com texto' };
   function onlyMsg(it) { return ONLY_MSG[it.only === 'ln' && it.fam === 'in' ? 'lnIn' : it.only] || 'não serve para personagens (recortaria, contornaria a caixa vazia ou deslocaria o desenho)'; }
@@ -1268,7 +1275,7 @@
     g.querySelector('.icf-none').hidden = n > 0;
   });
   props.addEventListener('change', function (e) {
-    var t = e.target; if (!t.dataset.p) return; commit(); if (t.tagName === 'SELECT' || t.type === 'color' || t.dataset.p === 'rot') renderProps();
+    var t = e.target; if (!t.dataset.p) return; commit(); if (t.dataset.p === 'data.walk' && sel()) stripRefused(sel(), false); /* S35: com “Andar até”, saem os efeitos que giram/escalam em volta da caixa de origem */ if (t.tagName === 'SELECT' || t.type === 'color' || t.dataset.p === 'rot') renderProps();
     /* campos do slide: o cabeçalho (capítulo), os placeholders e a dica dependem deles; redesenha depois que o foco saiu do painel, sem engolir o clique */
     else if (/^s\.(title|sec|secSub|notes)$/.test(t.dataset.p)) setTimeout(function () { if (!props.contains(document.activeElement) && !sel()) renderProps(); }, 0);
   });
@@ -1332,6 +1339,7 @@
     if (c.kind === 'icon' && c.data && c.data.trig !== 'loop') c.data.trig = 'in-loop';
     if (c.kind === 'iconmorph') c.variant = 'loop';
     var pzn = c.kind === 'persona' && stage.querySelector('.am-el[data-id="' + el.id + '"] .pz'); /* S35: personagem sozinho na prévia, com o lado e a mira do slide; o movimento toca como “ao entrar” */
+    if (pzn && RT.personas) RT.personas.aimNode(pzn); /* nó recém-redesenhado (trocar o preset): mira já, antes de copiar */
     if (pzn) { c._pzAim = { face: pzn.dataset.face, deg: pzn.style.getPropertyValue('--aim').trim() || '-100deg' }; c.data = clone(c.data || {}); if (c.data.trig !== 'loop') c.data.trig = 'in'; }
     st = RT.renderSlide({ bg: 'transparent', els: [c] }, { play: true });
     st.querySelector('.am-el').style.zIndex = slide().els.indexOf(el) + 1;
@@ -1339,8 +1347,8 @@
     var node = stage.querySelector('.am-el[data-id="' + el.id + '"]'); if (node) node.classList.add('previewing');
     void st.offsetWidth; st.classList.remove('am-pre'); st.classList.add('am-in'); ov._clean = RT.runFx(st);
     var cyc = !!st.querySelector('[data-cycle="g"],[data-cycle="1"]');
-    var pzw = pzn && st.querySelector('.pz[data-walk]'), pzMs = pzw ? (+((pzw.style.getPropertyValue('--wt') || '0').replace('ms', '')) || 0) + 3600 : 0; /* caminhada + movimento */
-    clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : Math.max(4200, (+((c.anim || {}).delay) || 0) + pzMs));
+    var pzw = pzn && st.querySelector('.pz[data-walk]'), pzMs = pzw ? (+((c.anim || {}).delay) || 0) + (+((c.anim || {}).dur) || 700) + 150 + (+((pzw.style.getPropertyValue('--wt') || '0').replace('ms', '')) || 0) + ((RT.personas.ACT_MS || {})[pzw.dataset.act] || 0) + 600 : 0; /* entrada + caminhada + movimento */
+    clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : Math.max(4200, pzMs));
   }
 
   /* ---------------- ações ---------------- */
@@ -2925,11 +2933,21 @@
     $('#gxEmpty').hidden = n > 0;
   }
   /* S35: a busca casou com um personagem do elenco (“mestre de obras”): o card mostra, prova e insere esse personagem */
+  var GX_GEN = { personagem: 1, personagens: 1, boneco: 1, bonecos: 1, mascote: 1, avatar: 1, am: 1, a: 1, de: 1, da: 1, do: 1 }, GX_SYN = { robo: 'ia', robos: 'ia', inteligencia: 'ia', artificial: 'ia' };
+  /* casamento por palavra (prefixo de uma palavra inteira), com prioridade: nome igual > todas as palavras no nome > todas no nome ou na descrição */
+  function gxPresetOf(q) {
+    var P = RT.personas; if (!P) return ''; var ws = q.map(function (w) { return GX_SYN[w] || w; }).filter(function (w) { return !GX_GEN[w]; }); if (!ws.length) return '';
+    var tk = function (s) { return norm(s).split(/[^a-z0-9]+/).filter(Boolean); }, all = function (toks) { return ws.every(function (w) { return toks.some(function (t) { return t === w || t.indexOf(w) === 0; }); }); };
+    var best = '', score = 0;
+    P.PRESETS.forEach(function (p) { var nt = tk(p[1]), sc = nt.join(' ') === ws.join(' ') ? 3 : all(nt) ? (ws.every(function (w) { return nt.indexOf(w) >= 0; }) ? 2.5 : 2) : all(nt.concat(tk(p[3]))) ? 1 : 0; if (sc > score) { score = sc; best = p[0]; } });
+    return best;
+  }
   function gxPreset(bx, q) {
-    var P = RT.personas, it = bx._it, v = '';
-    if (P && q.length) P.PRESETS.some(function (p) { var nm = norm(p[1] + ' ' + p[3]); if (q.every(function (w) { return nm.indexOf(w) >= 0; })) { v = p[0]; return true; } return false; });
+    var P = RT.personas, it = bx._it, v = gxPresetOf(q);
     if ((it.variant || '') === v) return;
-    var b = bx.querySelector('.gx-ins'); if (v) { it.variant = v; bx.dataset.v = v; if (b) b.dataset.v = v; } else { delete it.variant; delete bx.dataset.v; if (b) delete b.dataset.v; }
+    var b = bx.querySelector('.gx-ins'), nm = bx.querySelector('.gx-ft b'), pr = v && P.PRESETS.filter(function (p) { return p[0] === v; })[0];
+    if (!it._name) it._name = it.name; it.name = pr ? 'Personagem · ' + pr[1] : it._name; if (nm) { nm.textContent = it.name; nm.title = it.name; }
+    if (v) { it.variant = v; bx.dataset.v = v; if (b) b.dataset.v = v; } else { delete it.variant; delete bx.dataset.v; if (b) delete b.dataset.v; }
     if (bx._st) { if (bx._clean) { bx._clean(); bx._clean = null; } bx._st.remove(); bx._st = null; gxRender(bx); }
   }
   function gxFilter(f) { gx.fam = f; gxApply(); $('#drawerBody').scrollTop = 0; }

@@ -56,7 +56,7 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
   o ponteiro (o vazio da caixa deixa o clique chegar às zonas de avançar/voltar).
 - Balão (`.pz-say`) é HTML por cima do SVG; `data.say` editável no lugar (`U.E`); botões de decisão `.pz-ch` inertes em `.am-edit/.am-export`.
   Andar até X move o invólucro `.pz-mv` (balão + boneco) em **cqw** (`--wq/--wqy`, no referencial do elemento girado); na chegada (`animationend` →
-  `.pz-arr`) o movimento toca, a mira usa a posição de chegada e as linhas presas reaparecem com a ponta no ponto de chegada (cópia `<id>-pz`). Mira
+  `.pz-arr`) só “Ao entrar” toca o movimento; nos outros gatilhos os braços e a ferramenta só vão para a pose (`.pz-pose`, 0,5 s), a mira usa a posição de chegada e as linhas presas reaparecem com a ponta no ponto de chegada (cópia `<id>-pz`). Mira
   (`data.aim` = id) recalculada por `aimStage` depois de cada `AMRT.renderSlide`, no player e após pointerup/keyup/input no editor (`AMPersonas.reaim`);
   copiar/duplicar remapeia `data.aim` (e a base do Redefinir) como as pontas presas. Entradas: Inserir › Personagens ▸ e a seção “Personagens A&M” do
   menu Marca ▾ da faixa de ferramentas (`ed-46-personas.js/.css`).
@@ -65,7 +65,11 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 - Efeitos que o personagem recusa vêm do próprio componente (`FX.persona.animOk`, usado pelo painel, pela vitrine e pelo `safeEl`): nunca Reflexo, anéis,
   Zoom interno, Contorno, Varrer luz, Sublinhar; com “Andar até”, também os que giram/escalam em volta da caixa de origem. A chegada da caminhada é tratada por
   um ouvinte de `animationend` no documento (vale na prévia do editor); durante a caminhada os braços balançam em volta da pose neutra. Trilhas de gesto têm
-  nomes próprios (`…G`): o mesmo nome do laço não reiniciaria a animação. Pincel de formato não leva `pal` onde `palOk` é falso.
+  nomes próprios (`…G`): o mesmo nome do laço não reiniciaria a animação. Em laço/mouse o gesto do clique espera a virada do ciclo (`animationiteration`)
+  para partir da pose; clique sem gesto não mexe no laço (`.pz-done` só vale para `trig=in`). A ferramenta existe nas duas mãos (`.pz-tL/.pz-tR`): o
+  gesto usa a mão livre e, sem mão livre, a ferramenta some durante o gesto. Ligar “Andar até” tira os efeitos recusados (`stripRefused`, no `change`).
+  Fala que não cabe nem com 8 px (fala 1 ou “Fala ao clicar”): `.pz-over` corta as duas com reticências, o editor contorna e o painel avisa; em
+  `.am-play` as decisões rolam dentro do balão. Pincel de formato não leva `pal` onde `palOk` é falso.
 
 ## Convenções
 
