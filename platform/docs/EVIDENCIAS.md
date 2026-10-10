@@ -48,6 +48,7 @@ Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node te
 
 | Medida | Resultado |
 |---|---|
+| **Rodada da S38** (build autônomo `631ad721…`, build em nuvem `9be82a9b…`, 2026-10-10; etapa só de `studio/`) | PR-01…PR-15 e PR-11b 16/16 (rápido); `editor-cloud.test.js` 175/175; paridade nuvem **idêntica** e paridade do **acervo** (original S34b × atual: 423/423 DOM, raster e animações idênticos) em [`evidencias/paridade.md`](evidencias/paridade.md) |
 | **Rodada da S37** (build autônomo `e0cc4c08…`, montagem sem comentários; build em nuvem `2a766423…`, 2026-10-10; `studio-cloud/patches.json` mudou → modo completo) | **GATE PASS — 38 de 38 baterias** (601 s) sobre o build em nuvem; PR-01…PR-15 e PR-11b: 16/16; `editor-cloud.test.js` 175/175; build em nuvem 1769 KB; paridade em [`evidencias/paridade.md`](evidencias/paridade.md) (equivalentes) |
 | **Rodada da S36** (build autônomo `109aac48…`, build em nuvem `cf3fe506…`, 2026-10-10; etapa só de `studio/`, modo rápido pela regra do CLAUDE.md) | PR-01…PR-15 e PR-11b: 16/16 (53 s, portão rápido de 4 baterias sobre o build em nuvem); `tests/cloud/editor-cloud.test.js`: 175/175; build em nuvem 1991 KB |
 | **Rodada da S35** (build autônomo `70a14b05…`, build em nuvem `85863901…`, 2026-10-10, com `NODE_OPTIONS=--require tools/pw-local.cjs`) | **GATE PASS — 36 de 36 baterias** (619 s); provas PR-01…PR-15 e PR-11b: 16/16 |
