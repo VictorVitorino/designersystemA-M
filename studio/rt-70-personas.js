@@ -367,9 +367,11 @@
      caminhada, pose, outro gesto) ou até a virada do laço; quando o tempo vence, tudo é medido de novo (o laço pode ter recomeçado) */
   function gesture(pz, n) {
     var a2 = pz.dataset.act2; if (!a2 || a2 === 'none' || pz._gw || pz.classList.contains('pz-go')) return;
-    var q = wait(pz); if (q.w < 34 || q.since < 60) { if (pz.dataset.trig === 'in') pz.classList.add('pz-done'); go(pz, a2); return; }
-    if ((n || 0) >= 6) return;
-    pz._gw = setTimeout(function () { pz._gw = 0; if (pz.closest('.am-in')) gesture(pz, (n || 0) + 1); }, Math.min(q.w, 4000));
+    var q = wait(pz), wk = walking(pz); /* andando: nunca começa (a chegada põe a pose ou o movimento; o gesto vem depois deles) */
+    if (!wk && (q.w < 34 || q.since < 60)) { if (pz.dataset.trig === 'in') pz.classList.add('pz-done'); go(pz, a2); return; }
+    if ((n || 0) >= 8) return;
+    var d = q.since < 1e9 ? q.w : Math.max(q.w, 34) + 40; /* laço: a virada exata; animação finita: 40 ms de folga (o tempo medido é o do último quadro) */
+    pz._gw = setTimeout(function () { pz._gw = 0; if (pz.closest('.am-in')) gesture(pz, (n || 0) + 1); }, Math.min(d, 4000));
   }
   function react(pz) {
     var on = pz.classList.toggle('pz-on'), m2 = pz.dataset.mood2;

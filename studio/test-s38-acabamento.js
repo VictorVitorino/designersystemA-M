@@ -32,7 +32,7 @@ async function open(ctx, url, tag){ const p=await ctx.newPage(); await fonts(p);
     A.goSlide(1); const g2=JSON.parse(JSON.stringify(g)); g2.id='gS38b'; g2.x=40; g2.data.walk=900; A.deck.slides[1].els.push(g2);   /* no slide 2 ele anda de 40 até 900 */
     A.selectMany([]); A.renderAll(); A.commit(); return {e:e.id, k:k.id, h:h.id, g:g.id, g2:g2.id}; });
   const html=await p.evaluate(()=>AMStudio.exportHTML()); const hp=path.join(TMP,'s38.html'); fs.writeFileSync(hp,html);
-  const idw=await p.evaluate(()=>{ const A=AMStudio; const dk=A.newDeck(); A.loadDeck(dk,null); const w=A.insertFx('persona',null,null,'dev'); w.x=20; w.y=380; w.w=200; w.h=280; Object.assign(w.data,{bubble:'none',walk:300,act:'acenar',trig:'click'}); w.anim=Object.assign({},w.anim||{},{in:'none'}); A.renderAll(); A.commit(); return {w:w.id}; });
+  const idw=await p.evaluate(()=>{ const A=AMStudio; const dk=A.newDeck(); A.loadDeck(dk,null); const w=A.insertFx('persona',null,null,'dev'); w.x=20; w.y=380; w.w=200; w.h=280; Object.assign(w.data,{bubble:'none',walk:1000,act:'acenar',trig:'click'}); /* ~3 s de caminhada: o clique cai no meio dela */ w.anim=Object.assign({},w.anim||{},{in:'none'}); A.renderAll(); A.commit(); return {w:w.id}; });
   const hpw=path.join(TMP,'s38w.html'); fs.writeFileSync(hpw, await p.evaluate(()=>AMStudio.exportHTML()));
   const v=await open(ctx,'file://'+hp,'player'); const Q=(id,sel)=>'.amp-slide.on .am-el[data-id="'+id+'"] '+(sel||'.pz');
   const clickChar=id=>v.evaluate(sel=>{ const c=document.querySelector(sel), r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.x+r.width/2,clientY:r.y+r.height*.6})); }, Q(id,'.pz-char'));
@@ -59,6 +59,16 @@ async function open(ctx, url, tag){ const p=await ctx.newPage(); await fonts(p);
   await vw.evaluate(sel=>{ const c=document.querySelector(sel), r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.x+r.width/2,clientY:r.y+r.height*.6})); }, Q(idw.w,'.pz-char')); await sleep(60);
   const w1=await vw.evaluate(sel=>{ const pz=document.querySelector(sel); return {pose:pz.classList.contains('pz-pose'), go:pz.classList.contains('pz-go'), an:getComputedStyle(pz.querySelector('.pz-aR')).animationName}; }, Q(idw.w)); await vw.close();
   check('S38-03: clique durante a pose de chegada: a pose termina normalmente (pzPoseR), sem gesto cortando no meio', w0.pose && w1.pose && !w1.go && w1.an==='pzPoseR', {w0, w1});
+  /* clique DURANTE a caminhada: o gesto espera a chegada e a pose; o braço nunca salta de uma vez */
+  const vw2=await open(ctx,'file://'+hpw,'player-w2');
+  const wk=await vw2.evaluate(async sel=>{ const pz=document.querySelector(sel), arm=pz.querySelector('.pz-aR'); const S=[]; let goAt=0, arrAt=0, endAt=0; const t0=performance.now();
+    new MutationObserver(()=>{ const t=performance.now()-t0; if(!goAt&&pz.classList.contains('pz-go')) goAt=t; if(!arrAt&&pz.classList.contains('pz-arr')) arrAt=t; }).observe(pz,{attributes:true,attributeFilter:['class']});
+    document.addEventListener('animationend',e=>{ if(e.animationName==='pzWalkTo') endAt=performance.now()-t0; });
+    let clicked=false; while(performance.now()-t0<4200){ await new Promise(r=>requestAnimationFrame(r)); const r=getComputedStyle(arm).rotate; S.push(r==='none'?0:parseFloat(r));
+      if(!clicked && performance.now()-t0>700){ clicked=true; const c=pz.querySelector('.pz-char'), b=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:b.x+b.width/2,clientY:b.y+b.height*.6})); } }
+    let mx=0; for(let i=1;i<S.length;i++) mx=Math.max(mx,Math.abs(S[i]-S[i-1])); return {maxDeg:Math.round(mx), goAt:Math.round(goAt), arrAt:Math.round(arrAt), endAt:Math.round(endAt)}; }, Q(idw.w));
+  await vw2.close();
+  check('S38-13: clique durante a caminhada (“Andar até”): o gesto só começa depois da chegada e da pose, e o braço nunca salta (≤ 30° por quadro)', wk.endAt>900 && wk.goAt>0 && wk.arrAt>0 && wk.goAt>wk.arrAt+400 && wk.maxDeg<=30, wk);
   /* ao passar o mouse + pular: o mouse parado perto dos pés não faz o boneco piscar */
   const hb=await v.evaluate(sel=>{ const r=document.querySelector(sel).getBoundingClientRect(); return {x:r.x+r.width/2, y:r.y+r.height*.88}; }, Q(ids.h,'.pz-svg'));
   await v.mouse.move(hb.x,hb.y); await sleep(200);
