@@ -36,7 +36,7 @@ Na S34b as duas coincidiam (o build publicado era o próprio original); as rodad
 | Prova | Resultado |
 |---|---|
 | Cópia do arquivo enviado (`original/Canteiro-AM (3).html`) | SHA-256 `dc93ceac…5099`, 1.893.245 bytes, igual ao build publicado da etapa S34b; confere com `original/SHA256SUMS` e fica intacta (PR-11, PR-11b) |
-| Build autônomo a partir de `studio/` (`python3 assemble.py`) | **byte-idêntico** ao build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`, SHA-256 `70a14b05081732b1…`), confirmado por `tools/build-cloud-editor.js --verify-standalone` (PR-01, PR-02) |
+| Build autônomo a partir de `studio/` (`python3 assemble.py`) | **byte-idêntico** ao build publicado na raiz (`AM-Studio-Editor.html` = `Canteiro-AM.html`, SHA-256 `109aac4819759e4e…`), confirmado por `tools/build-cloud-editor.js --verify-standalone` (PR-01, PR-02) |
 | Build em nuvem (`platform/.tmp/cloud-build/cloud-editor.html`, 1989 KB, SHA-256 `85863901c97567af…`) | = `studio/` + extensão `ed-50-cloud` + 6 patches de uma linha, cada um exigido exatamente 1× (o build falha se `studio/` mudar) |
 | Arquivo servido em `/editor/` e `/visualizar/` | byte-idêntico ao build em nuvem (mesmo SHA-256) |
 | Portão de 36 baterias do editor sobre o build em nuvem (modo inerte) | ver §1.1 |
@@ -48,6 +48,7 @@ Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node te
 
 | Medida | Resultado |
 |---|---|
+| **Rodada da S36** (build autônomo `109aac48…`, build em nuvem `cf3fe506…`, 2026-10-10; etapa só de `studio/`, modo rápido pela regra do CLAUDE.md) | PR-01…PR-15 e PR-11b: 16/16 (53 s, portão rápido de 4 baterias sobre o build em nuvem); `tests/cloud/editor-cloud.test.js`: 175/175; build em nuvem 1991 KB |
 | **Rodada da S35** (build autônomo `70a14b05…`, build em nuvem `85863901…`, 2026-10-10, com `NODE_OPTIONS=--require tools/pw-local.cjs`) | **GATE PASS — 36 de 36 baterias** (619 s); provas PR-01…PR-15 e PR-11b: 16/16 |
 | Rodada final da S34b (build `47a556b1…`, 2026-10-07 03:26, máquina sem outras cargas) | **GATE PASS — 35 de 35 baterias** (569 s); provas PR-01…PR-15: 15/15 (`.tmp/quality/preservacao.log`) |
 | Rodada anterior (build `8e20f87c…`, com três fazendas de Chromium em paralelo) | 34 de 35 (539 s); a única falha, `test-s24-import.js` ("Execution context was destroyed", renderer derrubado por falta de recursos), passou isolada (38 checagens, 0 erros) |

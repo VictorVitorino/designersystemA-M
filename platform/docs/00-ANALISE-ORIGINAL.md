@@ -10,7 +10,7 @@ dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099
 
 **Regra a partir da S35 (duas garantias separadas):** `original/` é a cópia preservada do upload (S34b) — não muda, confere com `original/SHA256SUMS` e **não** precisa
 ser igual ao build atual. O build autônomo de `studio/` é conferido contra o **build publicado na raiz** (`AM-Studio-Editor.html` = `Canteiro-AM.html`,
-hoje sha256 `70a14b05081732b1…`, S35), que cada etapa de `studio/` atualiza depois do portão (regra 5 do processo no `CLAUDE.md`); o build em nuvem e a prova de
+hoje sha256 `109aac4819759e4e…`, S36), que cada etapa de `studio/` atualiza depois do portão (regra 5 do processo no `CLAUDE.md`); o build em nuvem e a prova de
 paridade seguem esse build. A análise abaixo descreve o arquivo original enviado.
 
 ## 1. O que o arquivo é

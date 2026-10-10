@@ -14,7 +14,7 @@ Sem `window.AM_CLOUD` o resultado se comporta como o editor autônomo (modo iner
   e o build em nuvem e a prova de paridade (`npm run test:parity`, lado A = `../AM-Studio-Editor.html`) seguem esse build — não o `original/`.
 - Uma etapa nova em `studio/` não quebra a plataforma por mudar o SHA-256: basta passar o portão, publicar o build na raiz e rodar de novo
   `--verify-standalone`, `tests/cloud/preservacao.test.js` e a paridade. Se o build publicado ficar para trás, `--verify-standalone` falha e diz o que fazer.
-- Build autônomo publicado hoje (S35): sha256 `70a14b05081732b1c7056045f8dd35d5ff2c6447df7d0fb85c3382df9b518174`; build em nuvem: 1989 KB pelo PR-07 (orçamento 2000 KB; ~11 KB de folga).
+- Build autônomo publicado hoje (S36): sha256 `109aac4819759e4ee482ae2d74358b557e8ac1a0f51bbcf3b8520c43809cb2a4`; build em nuvem: 1991 KB pelo PR-07 (orçamento 2000 KB; ~9 KB de folga).
 
 | Arquivo | Para quê |
 |---|---|
