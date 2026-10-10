@@ -9,6 +9,7 @@
     var skip = /[?&]nocover(?:[=&]|$)/.test(location.search);
     var $ = function (s, el) { return (el || cover).querySelector(s); };
     var $$ = function (s, el) { return Array.prototype.slice.call((el || cover).querySelectorAll(s)); };
+    var wmImg = $('.cv-wm'), wmSrc = (document.querySelector('img.brand-wm') || {}).src; if (wmImg && wmSrc) wmImg.src = wmSrc; /* S36: wordmark lido do topo do editor (embutido uma vez só) */
     var reduce = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
     var st = { open: false, view: 'home', fromEditor: false, lastFocus: null, pendingFile: false, confirm: null, ct: 0, et: 0, lastOpt: null, tplCur: 0, returnTo: null };
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }

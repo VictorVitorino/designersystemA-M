@@ -85,7 +85,7 @@
 .am-play .pz[data-trig=hover]:hover{--aC:var(--kC);--aB:var(--kB);--aR:var(--lR,var(--kR));--aL:var(--lL,var(--kL));--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:infinite;--d0:0ms}
 /* a entrada já tocou (houve clique ou decisão): não recomeça quando a reação termina */
 .am-play.am-in .pz.pz-done[data-trig=in]{--aC:pzNone;--aB:pzNone;--aR:pzNone;--aL:pzNone;--aG:pzNone;--aG2:pzNone;--aM:pzNone;--aF:pzNone;--aT:pzNone}
-.am-play.am-in .pz.pz-g1[data-trig=loop]{--d0:0ms} /* laço: depois de um gesto, volta na hora (sem esperar a entrada do slide); só depois de um gesto de verdade */
+.am-play.am-in .pz.pz-from{animation:pzFrom var(--wt,1.6s) linear var(--wd0,0ms) 1 backwards} /* S36: personagem guia, vem da posição do slide anterior */
 /* andar até: balão e boneco (.pz-mv) deslizam até --wq/--wqy (cqw, no referencial do elemento) enquanto as pernas dão --wn passos de
    --ws; o lado da caminhada é data-wf. Na chegada (animationend → .pz-arr) o movimento escolhido toca e a mira vale */
 .pz[data-walk]{--wd0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
@@ -144,7 +144,7 @@
 @keyframes pzSwingL{0%,100%{rotate:var(--rL)}25%{rotate:calc(var(--rL) - 22deg)}75%{rotate:calc(var(--rL) + 14deg)}}
 @keyframes pzSwingR{0%,100%{rotate:var(--rR)}25%{rotate:calc(var(--rR) - 14deg)}75%{rotate:calc(var(--rR) + 22deg)}}
 @keyframes pzBob{0%,50%,100%{translate:0 0}25%,75%{translate:0 -4px}}
-@keyframes pzWalkTo{to{translate:var(--wq,0cqw) var(--wqy,0cqw)}}
+@keyframes pzWalkTo{to{translate:var(--wq,0cqw) var(--wqy,0cqw)}}@keyframes pzFrom{from{translate:var(--gfx,0cqw) var(--gfy,0cqw)}}
 @keyframes pzJump{0%{translate:0 0;scale:1 1}18%{scale:1.08 .9}40%{translate:0 -34px;scale:.96 1.06}62%{translate:0 0;scale:1.1 .88}80%{scale:1 1.02}100%{translate:0 0;scale:1 1}}
 @keyframes pzTuck{0%,100%{scale:1 1}40%{scale:1 .8}}
 @keyframes pzHop{0%,100%{translate:0 0}25%{translate:0 -14px}45%{translate:0 0}65%{translate:0 -10px}85%{translate:0 0}}

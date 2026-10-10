@@ -90,6 +90,17 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
   Fala que não cabe nem com 8 px (fala 1 ou “Fala ao clicar”): `.pz-over` corta as duas com reticências, o editor contorna e o painel avisa; em
   `.am-play` as decisões rolam dentro do balão. Pincel de formato não leva `pal` onde `palOk` é falso.
 
+## Estúdio do personagem e ligação com os slides (S36)
+
+- O painel do personagem é um estúdio (`ed-46`): `MutationObserver` em `#props` troca as fichas de variante pelo estúdio e recolhe os campos originais em
+  `details.pzs-fine` (“Ajustes finos”). As opções vêm dos campos `sel:` do próprio componente; miniaturas = `FX.persona.html` (pose de repouso). Clique em
+  miniatura/amostra = muda o modelo + `renderAll` + `commit` (um passo de desfazer); campos de texto/número/seleção do estúdio repassam ao campo original.
+  O elenco usa `data-var` (o editor troca a variante). Testes que usam `selectOption` nos campos originais abrem “Ajustes finos” antes.
+- `data.grp` (id simples, em `DATA_TOKENS` e `NOTEXT_KEYS`) = o mesmo personagem em vários slides: peças, cores e preset valem para o grupo; no player ele
+  anda da posição do slide anterior até a nova (`pz-from` + `data-walk` temporário). `data.link` (inteiro 1–999) = o clique leva ao slide N.
+- Gesto do clique (`act2`) só com “Ao entrar” (e “Só ao clicar”); em laço/mouse o `html()` zera. O observador de palcos trata cada palco uma vez por lote.
+- Wordmark branco embutido uma vez só (`img.brand-wm` do topo); `BRAND.wmW` e a capa leem o `src` dele. Não volte a usar `%%WM_W%%` em outro arquivo.
+
 ## Convenções
 
 - Commits em português, descrevendo o efeito; terminar com as linhas de atribuição definidas pela sessão. Nenhum identificador de modelo em código, comentários ou mensagens de commit.

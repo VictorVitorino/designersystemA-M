@@ -154,6 +154,8 @@
     d.choices = choicesOf(d.choices);
     ['say', 'say2'].forEach(function (k) { if (d[k] != null && typeof d[k] !== 'string') d[k] = str(d[k]); });
     if (d.walk != null && d.walk !== '') { var wv = +d.walk; d.walk = isFinite(wv) && typeof d.walk !== 'boolean' ? Math.round(Math.max(-2 * W, Math.min(3 * W, wv))) : ''; }
+    if (d.link != null && d.link !== '') { var lv = +d.link; d.link = typeof d.link !== 'boolean' && lv >= 1 && lv <= 999 ? Math.round(lv) : ''; } /* S36: ao clicar, ir para o slide nº */
+    if (d.grp != null && !(typeof d.grp === 'string' && /^[\w-]{1,40}$/.test(d.grp))) d.grp = ''; /* S36: o mesmo personagem em vários slides */
     return d;
   }
   function charSVG(p) {
@@ -229,15 +231,15 @@
     label: function (el) { return 'Personagem · ' + presetOf(el)[1]; },
     norm: norm, animOk: animOk,
     tip: 'Na apresentação o personagem se move conforme o gatilho, os olhos seguem o mouse e um clique nele muda a expressão, a fala e acende o elemento para onde aponta. Prenda uma linha a ele para ligar o balão a um gráfico.',
-    data: { hat: '', hair: '', lashes: '', glasses: '', outfit: '', tool: '', c1: '', c2: '', mood: '', act: 'acenar', trig: 'in', dir: 'auto', look: '1', say: 'Olá! Vamos ao plano.', bubble: 'fala', side: 'auto', bcol: 'branco', mood2: '', say2: '', act2: 'pular', aim: '', walk: '', choices: [] },
+    data: { hat: '', hair: '', lashes: '', glasses: '', outfit: '', tool: '', c1: '', c2: '', mood: '', act: 'acenar', trig: 'in', dir: 'auto', look: '1', say: 'Olá! Vamos ao plano.', bubble: 'fala', side: 'auto', bcol: 'branco', mood2: '', say2: '', act2: 'pular', aim: '', link: '', walk: '', choices: [] },
     fields: [['hat', 'Chapéu', selOf(HATS, 'Do personagem')], ['hair', 'Cabelo', selOf(HAIRS, 'Do personagem')], ['lashes', 'Cílios', 'sel:=Do personagem|1=Com cílios|0=Sem cílios'], ['glasses', 'Óculos', selOf(GLASSES, 'Do personagem')],
       ['outfit', 'Roupa', selOf(OUTFITS, 'Do personagem')], ['tool', 'Ferramenta na mão', selOf(TOOLS, 'Do personagem')], ['c1', 'Cor do corpo', colSel(COLS, 'Do personagem')], ['c2', 'Cor da roupa', colSel(COLS2, 'Do personagem')],
       ['mood', 'Expressão', selOf(MOODS, 'Do personagem')], ['act', 'Movimento', selList(ACTS)], ['trig', 'Quando se move', selList(TRIGS)], ['dir', 'Olhando para', 'sel:auto=Automático (para o alvo)|r=Direita|l=Esquerda'],
       ['look', 'Olhos na apresentação', 'sel:1=Seguem o mouse|0=Fixos'],
       ['say', 'Fala', 'area'], ['bubble', 'Balão', selList(BUBS)], ['side', 'Posição do balão', 'sel:auto=Automática|top=Em cima|right=À direita|left=À esquerda'], ['bcol', 'Cor do balão', 'sel:' + Object.keys(BCOLS).map(function (k) { return k + '=' + BCOLS[k][0]; }).join('|')],
       ['help', '<b>Ao clicar</b> na apresentação o personagem reage: muda a expressão, troca a fala, faz o movimento abaixo (com o gatilho “Só ao clicar”, faz o movimento principal) e acende o elemento para onde aponta. Um segundo clique volta ao normal.', 'help'],
-      ['mood2', 'Expressão ao clicar', selOf(MOODS, 'Não muda')], ['say2', 'Fala ao clicar', 'area'], ['act2', 'Movimento ao clicar', 'sel:none=Nenhum|' + ACTS.slice(1).map(function (o) { return o[0] + '=' + o[1]; }).join('|')],
-      ['aim', 'Aponta para', 'sel:=Nenhum'], ['walk', 'Andar até (X no slide, em px; vazio = fica onde está)', 'numopt'],
+      ['mood2', 'Expressão ao clicar', selOf(MOODS, 'Não muda')], ['say2', 'Fala ao clicar', 'area'], ['act2', 'Movimento ao clicar (com o gatilho “Ao entrar”)', 'sel:none=Nenhum|' + ACTS.slice(1).map(function (o) { return o[0] + '=' + o[1]; }).join('|')],
+      ['aim', 'Aponta para', 'sel:=Nenhum'], ['link', 'Ao clicar, ir para o slide (nº; vazio = fica no mesmo)', 'numopt'], ['walk', 'Andar até (X no slide, em px; vazio = fica onde está)', 'numopt'],
       ['choices', 'Decisões no balão — uma por linha: Botão | nº do slide | expressão (feliz, triste…)', 'rows:t|go:n|m'],
       ['help2', 'Cada decisão vira um botão no balão: na apresentação ele muda a expressão e leva ao slide indicado (0 = fica no mesmo). Com <b>Andar até</b>, o personagem caminha até esse X ao entrar no slide e só então faz o movimento e aponta; as linhas presas a ele reaparecem no ponto de chegada.', 'help']],
     html: function (d, w, h, el) {
@@ -256,6 +258,9 @@
         attrs += ' data-walk="' + Math.round(dist) + '" data-wf="' + wf + '"';
       }
       if (trig === 'click' && act !== 'parado') act2 = act; /* “só ao clicar”: o clique toca o próprio movimento */
+      if (trig === 'loop' || trig === 'hover') act2 = 'none'; /* S36: em laço ou ao passar o mouse o clique muda expressão e fala, sem gesto por cima do movimento */
+      var link = +d.link, grp = typeof d.grp === 'string' && /^[\w-]{1,40}$/.test(d.grp) ? d.grp : '';
+      if (link >= 1 && link <= 999) attrs += ' data-link="' + Math.round(link) + '"'; if (grp) attrs += ' data-grp="' + grp + '"';
       if (rot) attrs += ' data-rot="' + rot.toFixed(2) + '"';
       var fx = el && el._pzAim; /* exportação PowerPoint editável: o elemento sai sozinho na imagem, com a mira medida no slide inteiro */
       if (fx && /^[lr]$/.test(fx.face) && /^-?\d{1,3}(\.\d+)?deg$/.test(fx.deg)) { face = fx.face; vars += '--aim:' + fx.deg + ';'; attrs += ' data-fix="1"'; }
@@ -338,18 +343,9 @@
     var fw = tn.querySelector('.am-fxw'); tn.classList.remove('pz-hl'); void tn.offsetWidth; tn.classList.add('pz-hl'); if (fw) fw.classList.add('am-hov');
     clearTimeout(tn._pzT); tn._pzT = setTimeout(function () { tn.classList.remove('pz-hl'); if (fw) fw.classList.remove('am-hov'); }, 1800);
   }
-  function looping(pz) { var t = pz.dataset.trig; return !!pz.closest('.am-in') && (t === 'loop' || (t === 'hover' && pz.matches(':hover'))) && !pz.classList.contains('pz-go'); }
-  function go(pz, a2) { pz.classList.add('pz-g1'); flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
-  /* gesto do clique: parado, toca na hora; em laço (sem parar / mouse em cima), espera a virada do ciclo — braços, corpo, tronco e boca têm a mesma
-     duração e o mesmo atraso, então na virada todos estão na pose e o gesto (que parte da pose) começa sem salto */
-  function gesture(pz) {
-    var a2 = pz.dataset.act2; if (!a2 || a2 === 'none' || walking(pz)) return;
-    if (!looping(pz)) { go(pz, a2); return; }
-    if (pz._gw) return;
-    var done = function () { pz.removeEventListener('animationiteration', on); clearTimeout(pz._gwT); pz._gw = null; if (pz.closest('.am-in')) go(pz, a2); };
-    var on = function (e) { if (/\bpz-(aR|aL|char|torso|mouth)\b/.test(e.target.getAttribute && e.target.getAttribute('class') || '')) done(); };
-    pz._gw = on; pz.addEventListener('animationiteration', on); pz._gwT = setTimeout(done, 2700); /* movimento reduzido (sem iterações): não fica esperando */
-  }
+  function go(pz, a2) { pz.classList.remove('pz-pose'); flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
+  /* gesto do clique (só com “ao entrar” ou “só ao clicar”: em laço/mouse o html() zera o act2) */
+  function gesture(pz) { var a2 = pz.dataset.act2; if (a2 && a2 !== 'none' && !walking(pz)) go(pz, a2); }
   function react(pz) {
     var on = pz.classList.toggle('pz-on'), m2 = pz.dataset.mood2;
     if (m2) pz.dataset.mood = on ? m2 : (pz.dataset.mood1 || pz.dataset.mood);
@@ -383,9 +379,24 @@
     function eyes() { if (moved && !raf) raf = requestAnimationFrame(tick); }
     /* palco (re)entrou: todos recomeçam do estado inicial */
     function reset(st) {
-      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-pose', 'pz-g1'); if (pz._gw) { pz.removeEventListener('animationiteration', pz._gw); clearTimeout(pz._gwT); pz._gw = null; } if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
+      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-pose', 'pz-from'); if (pz._gt) { delete pz.dataset.walk; delete pz.dataset.wf; pz._gt = 0; } if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
       relink(st); eyes();
     }
+    /* S36: personagem guia — o mesmo grupo (data-grp) no slide de onde se veio: sai daquela posição (pés com pés) e anda até a sua. É uma caminhada
+       (pz-from no .pz + data-walk temporário), então a chegada, a mira e as linhas presas seguem o caminho de sempre; com “Andar até” próprio, as duas somam */
+    var lastSt = null;
+    function boxOf(n) { var s = n && n.style; return s && s.left ? { x: parseFloat(s.left) / 100 * W, y: parseFloat(s.top) / 100 * H, w: parseFloat(s.width) / 100 * W, h: parseFloat(s.height) / 100 * H } : null; }
+    function guide(from, st) {
+      Array.prototype.forEach.call(st.querySelectorAll('.pz[data-grp]'), function (pz) {
+        var src = from.querySelector('.pz[data-grp="' + pz.dataset.grp + '"]'), a = src && boxOf(src.closest('.am-el')), b = boxOf(pz.closest('.am-el')); if (!a || !b) return;
+        var dx = a.x + a.w / 2 - (b.x + b.w / 2), dy = a.y + a.h - (b.y + b.h), dist = Math.sqrt(dx * dx + dy * dy); if (!(dist >= 4)) return;
+        var t = (parseFloat(pz.dataset.rot) || 0) * Math.PI / 180, ms = Math.round(Math.max(600, Math.min(5000, dist * 3.2))), n = Math.max(1, Math.round(ms / 500));
+        pz.style.setProperty('--gfx', CQ(dx * Math.cos(t) + dy * Math.sin(t))); pz.style.setProperty('--gfy', CQ(-dx * Math.sin(t) + dy * Math.cos(t)));
+        if (!pz.dataset.walk) { pz._gt = 1; pz.dataset.walk = '0'; pz.dataset.wf = /^[lr]$/.test(pz.dataset.dir) ? pz.dataset.dir : dx > 0 ? 'l' : 'r'; pz.style.setProperty('--wt', ms + 'ms'); pz.style.setProperty('--wn', n); pz.style.setProperty('--ws', (ms / n).toFixed(1) + 'ms'); }
+        void pz.offsetWidth; pz.classList.add('pz-from');
+      });
+    }
+    function enter(st) { reset(st); var from = lastSt; lastSt = st; if (from && from !== st && deckEl.contains(from)) guide(from, st); }
     function onArrive(pz) { if (!deckEl.contains(pz)) return; var st = pz.closest('.am-stage'), n = pz.closest('.am-el'); if (st && n) relink(st, n.dataset.id); eyes(); }
     function click(e) {
       var ch = e.target.closest ? e.target.closest('.pz-ch') : null;
@@ -397,7 +408,9 @@
         if (go > 0) { var at = hd.cur(); goT = setTimeout(function () { goT = 0; if (hd.cur() === at) hd.go(visOf(hd, go - 1)); }, 420); }
         return;
       }
-      var p = e.target.closest ? e.target.closest('.pz') : null; if (p) react(p);
+      var p = e.target.closest ? e.target.closest('.pz') : null; if (!p) return; react(p);
+      var lk = +p.dataset.link; /* S36: ao clicar, ir para o slide nº (depois de mostrar a reação) */
+      if (lk > 0) { clearTimeout(goT); var at = hd.cur(); goT = setTimeout(function () { goT = 0; if (hd.cur() === at) hd.go(visOf(hd, lk - 1)); }, 650); }
     }
     function down(e) { if (e.target.closest && e.target.closest('.pz-ch')) e.preventDefault(); } /* clique não deixa o foco no botão: Espaço e Enter continuam avançando */
     function tick() {
@@ -412,8 +425,8 @@
     }
     function move(e) { px = e.clientX; py = e.clientY; moved = true; if (!raf) raf = requestAnimationFrame(tick); }
     var mo = null;
-    if (window.MutationObserver) { mo = new MutationObserver(function (recs) { recs.forEach(function (r) { var st = r.target; if (st && st.classList && st.classList.contains('am-stage') && st.classList.contains('am-in') && !(r.oldValue && /\bam-in\b/.test(r.oldValue))) reset(st); }); }); mo.observe(deckEl, { attributes: true, subtree: true, attributeFilter: ['class'], attributeOldValue: true }); }
-    Array.prototype.forEach.call(deckEl.querySelectorAll('.am-stage.am-in'), reset);
+    if (window.MutationObserver) { mo = new MutationObserver(function (recs) { var seen = []; recs.forEach(function (r) { var st = r.target; if (st && st.classList && st.classList.contains('am-stage') && st.classList.contains('am-in') && !(r.oldValue && /\bam-in\b/.test(r.oldValue)) && seen.indexOf(st) < 0) { seen.push(st); enter(st); } }); }); /* uma entrada por palco em cada lote (am-pre sai e am-in entra no mesmo passo) */ mo.observe(deckEl, { attributes: true, subtree: true, attributeFilter: ['class'], attributeOldValue: true }); }
+    Array.prototype.forEach.call(deckEl.querySelectorAll('.am-stage.am-in'), function (st) { reset(st); lastSt = st; });
     ARR.push(onArrive);
     deckEl.addEventListener('click', click); deckEl.addEventListener('mousedown', down); hd.root.addEventListener('pointermove', move);
     hd.onDestroy(function () { var k = ARR.indexOf(onArrive); if (k >= 0) ARR.splice(k, 1); deckEl.removeEventListener('click', click); deckEl.removeEventListener('mousedown', down); hd.root.removeEventListener('pointermove', move); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(goT); goT = 0; if (mo) mo.disconnect(); });

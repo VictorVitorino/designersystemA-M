@@ -3,7 +3,8 @@
   var RT = window.AMRT, W = RT.W, H = RT.H;
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
-  var BRAND = { perfW: '%%LOGO_PERF_W%%', perfN: '%%LOGO_PERF_N%%', wmW: '%%WM_W%%', wmN: '%%WM_N%%' };
+  /* S36: o wordmark branco fica embutido uma vez só (no <img class="brand-wm"> do topo, que já existe quando este script roda); a capa também lê dele */
+  var BRAND = { perfW: '%%LOGO_PERF_W%%', perfN: '%%LOGO_PERF_N%%', wmW: (document.querySelector('img.brand-wm') || {}).src || '', wmN: '%%WM_N%%' };
   var BRAND_SIZE = { perfW: [743, 134], perfN: [743, 134], wmW: [262, 42], wmN: [262, 42] };
   /* paleta A&M: navy, azuis-aço, gelos, branco e um único laranja */
   var SW = ['#002A46', '#001E32', '#13315C', '#43698F', '#4A6FA5', '#7EA1C3', '#A3B8D6', '#E3EAF2', '#EBEEF1', '#FFFFFF', '#F78C16', '#3E4C5E', '#6B7A90'];
@@ -317,7 +318,7 @@
   function updUndo() { $('#bUndo').disabled = !hist.length; $('#bRedo').disabled = !fut.length; }
   /* ---------- validação de dados vindos de fora (arquivo, área de transferência) ---------- */
   var COLOR_RE = /^(#[0-9a-f]{3,8}|none|transparent|rgba?\([\d.,\s%]+\)|[a-z]{3,20})$/i, TOKEN_RE = /^[\w\s.%-]{0,40}$/, DATA_TOKENS = ['style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort',
-    'hat', 'hair', 'lashes', 'glasses', 'outfit', 'tool', 'mood', 'mood2', 'act', 'act2', 'dir', 'look', 'bubble', 'side', 'bcol', 'aim', 'tail']; /* S35: personagens (partes, movimentos, balão, alvo) */
+    'hat', 'hair', 'lashes', 'glasses', 'outfit', 'tool', 'mood', 'mood2', 'act', 'act2', 'dir', 'look', 'bubble', 'side', 'bcol', 'aim', 'tail', 'grp']; /* S35: personagens (partes, movimentos, balão, alvo) */
   /* DATA_TOKENS: data.* que viram classe/atributo (ícones, SmartArt, gráficos). Só texto simples (TOKEN_RE) ou cor; texto livre usa outras chaves e sai com esc().
      EL_TOKENS: campos do elemento com valores fechados (linhas e cards); os booleanos antigos dash/headStart/headEnd continuam valendo */
   var HEADS = ['arrow', 'open', 'dot', 'diamond', 'bar'], EL_TOKENS = { curve: ['straight', 'elbow', 'curve'], dashS: ['dash', 'dot', 'dashdot', 'long'], headS: HEADS, headE: HEADS, look: ['flat', 'outline', 'lift', 'accent', 'topbar', 'header', 'gradient', 'ice'] };
