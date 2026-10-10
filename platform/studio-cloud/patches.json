@@ -4,8 +4,8 @@
     {
       "id": "a-commit",
       "file": "editor.js",
-      "before": "histCall('touch', now); /* Minhas obras: grava com atraso próprio, fora do caminho da edição */",
-      "after": "histCall('touch', now); /* Minhas obras: grava com atraso próprio, fora do caminho da edição */ window.dispatchEvent(new CustomEvent('am:commit')); /* nuvem: autosave */",
+      "before": "histCall('touch', now);",
+      "after": "histCall('touch', now); window.dispatchEvent(new CustomEvent('am:commit'));",
       "why": "commit(): avisa a extensão de nuvem que o deck mudou (o evento não tem ouvinte no editor puro; o debounce e o salvamento ficam em ed-50-cloud.js)."
     },
     {
@@ -18,8 +18,8 @@
     {
       "id": "c-load",
       "file": "editor.js",
-      "before": "if (!noHist) histCall('put', JSON.parse(last)); /* arquivo aberto, projeto pronto ou rascunho entram em Minhas obras */",
-      "after": "if (!noHist) histCall('put', JSON.parse(last)); /* arquivo aberto, projeto pronto ou rascunho entram em Minhas obras */ window.dispatchEvent(new CustomEvent('am:load'));",
+      "before": "if (!noHist) histCall('put', JSON.parse(last));",
+      "after": "if (!noHist) histCall('put', JSON.parse(last)); window.dispatchEvent(new CustomEvent('am:load'));",
       "why": "loadDeck(): Abrir…, Novo, importar (substituir) e modelos prontos trocam o deck inteiro; a nuvem precisa fixar o id da apresentação e salvar."
     },
     {

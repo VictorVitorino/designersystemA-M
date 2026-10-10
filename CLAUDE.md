@@ -7,7 +7,7 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
 
 1. Implementar nas fontes (`studio/`), nunca no HTML montado. Recurso novo mora no **próprio módulo** (`rt-NN-*.js/.css` no runtime,
    `ed-NN-*.js/.css` no editor); em `editor.js`/`runtime.js` só entram pontos de extensão genéricos (ex.: `FX.animOk`, `FX.vlabel`, `FX.pvl`),
-   nunca código de um componente específico. Orçamento apertado (nuvem ~1988 KB de 2000): recurso novo precisa sair enxuto.
+   nunca código de um componente específico. Orçamento: nuvem ~1769 KB de 2000 desde a S37 (montagem sem comentários).
 2. Iterar com `./qa-gate.sh affected` (monta e roda `test.js`, `test2.js` e só as baterias ligadas aos arquivos alterados desde a última
    publicação, pelo mapa `studio/qa-map.txt`; arquivo fora do mapa, `am/` ou `fonts2/` → portão completo). `./qa-gate.sh rerun` repete só
    as reprovadas, sem remontar (uso: bateria sensível a carga, ex.: S20-18; registrar).
@@ -39,7 +39,7 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
   `ed-*.js/.css` (extensões **só do editor**, um `<script>` por arquivo, depois de `editor.js`) · `cover.*` (tela inicial) · `history.js`.
 - Marcas A&M vêm de `am/brand/` (`%%LOGO_PERF_W%%` etc.). Os slides institucionais entram por `/*%%INST_SPECS%%*/null` em `ed-45-institucional.js`,
   substituído pelo JSON de `studio/inst/*.json` (imagens viram `data:` JPEG). **Não escreva esse marcador dentro de um comentário.**
-- Orçamento do arquivo do editor: **≤ 2000 KB** (`test-s90-perf.js`) — vale também para o editor em nuvem (`platform/tests/cloud/preservacao.test.js` PR-07), que soma ~146 KB ao autônomo. Hoje (S36 publicada): autônomo ~1835 KB, nuvem ~1990 KB, ou seja, ~10 KB de folga (artes institucionais já recomprimidas na S35; wordmark embutido uma vez só na S36). Próxima alavanca: minificar os scripts só do editor (cuidado com as âncoras dos patches da nuvem e os hashes da CSP). Antes de subir o limite: deduplicar os logos embutidos (3× o mesmo PNG) ou recomprimir de novo, conferindo a fidelidade do S34.
+- Orçamento do arquivo do editor: **≤ 2000 KB** (`test-s90-perf.js`) — vale também para o editor em nuvem (`platform/tests/cloud/preservacao.test.js` PR-07), que soma ~146 KB ao autônomo. Hoje (S37): autônomo ~1649 KiB, nuvem ~1769 KB (~230 KB de folga). Desde a S37 o `assemble.py` monta **sem comentários, indentação e linhas vazias** (`strip_js`/`strip_css`, cada pedaço passa por `node --check`; `AM_NOSTRIP=1` monta com comentários para depurar) e `test-s37-montagem.js` prova que os tokens são os mesmos. Consequências: escreva comentários à vontade nas fontes (não pesam); âncoras de patch da nuvem (`platform/studio-cloud/patches.json`) **nunca** incluem comentário; `assemble.py` fora do `qa-map.txt` (mudou a montagem → portão completo).
 
 ## Invariantes que não podem quebrar
 
