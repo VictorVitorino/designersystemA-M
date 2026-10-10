@@ -31,7 +31,7 @@ Em `local`/`test` com `http://` os nomes não têm prefixo e não há `Secure`. 
 
 1. Lê `am_at`, verifica o JWT (`src/auth/jwt.js`): ES256/RS256 por JWKS **ou** HS256 por segredo; exige `iss`, `aud=authenticated`, `exp`, `sub`, papel `authenticated`. `alg: none` e confusão de algoritmo são recusados.
 2. Mapeia (provedor, `sub`) → usuário com `app.resolve_identity(provedor, sub, …)` (só funciona para convidados). O provedor vem do token: `sso:<id-do-provedor>` quando `app_metadata.provider` é de SSO; `supabase` para e-mail/senha (convite, recuperação, login). Resultado em cache de memória por **no máximo 15 s**.
-3. Estados: sem cookie → `user=null`; expirado → 401 `session_expired`; adulterado → 401; sem convite → 403 `not_invited`; suspenso → 403 `suspended`; `invited` (ainda sem senha) → só `/api/auth/*`.
+3. Estados: sem cookie → `user=null`; expirado → 401 `session_expired`; adulterado → 401; sem convite → 403 `not_invited` (inclui convite **vencido, expirado ou revogado**: desde a migração 0010, `resolve_identity` só reconhece um usuário `invited` com convite `pending` dentro do prazo `invites.ttl_days` — o administrador reenvia o convite); suspenso → 403 `suspended`; `invited` (ainda sem senha) → só `/api/auth/*`.
 4. `GET /api/auth/session` renova sozinho (pelo refresh token) se o access token sumiu/expirou — é o que o app chama ao abrir. Renovações simultâneas com o mesmo refresh token viram uma só chamada ao GoTrue.
 
 Suspender alguém: o banco passa a recusar na hora (cache invalidado nesta instância; nas outras, em até 15 s). O bloqueio no GoTrue (`ban_duration`) impede novo login e renovação.

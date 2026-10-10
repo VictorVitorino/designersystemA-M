@@ -213,6 +213,30 @@ describe('usuários, convites, configurações e auditoria', () => {
     assert.equal((await call('s-1', other.email, true, true)).length, 1); // continua sendo o MESMO usuário (identidade não é sequestrada)
     assert.equal((await call('s-1', other.email, true, true))[0].user_id, inv.id);
   });
+  test('resolve_identity: convite VENCIDO (prazo passado, expirado ou revogado) não vincula nem ativa; convite válido continua funcionando', async () => {
+    const call = (sub, email, touch = true) => db.anon((tx) => tx`select * from app.resolve_identity('supabase', ${sub}, ${email}, true, true, ${touch})`);
+    const mkInvited = async (name, invite) => {
+      const u = await mkUser(ops, { status: 'invited', name });
+      await ops.asSystem((tx) => tx`insert into app.invites(email, user_id, role, status, expires_at) values (${u.email}, ${u.id}, 'member', ${invite.status}, ${invite.expiresAt})`);
+      return u;
+    };
+    const past = new Date(Date.now() - 86400000), future = new Date(Date.now() + 86400000);
+    for (const [name, inv] of [['Prazo passado', { status: 'pending', expiresAt: past }], ['Expirado', { status: 'expired', expiresAt: past }], ['Revogado', { status: 'revoked', expiresAt: future }]]) {
+      const u = await mkInvited(name, inv);
+      assert.equal((await call('venc-' + u.id, u.email)).length, 0, `${name}: não vincula identidade nova`);
+      const [st] = await ops.asSystem((tx) => tx`select status from app.users where id = ${u.id}`); assert.equal(st.status, 'invited', `${name}: a conta não é ativada`);
+      assert.equal((await ops.asSystem((tx) => tx`select count(*)::int n from app.user_identities where user_id = ${u.id}`))[0].n, 0, `${name}: nenhuma identidade gravada`);
+    }
+    // identidade vinculada ANTES do convite vencer (abriu o link e não definiu a senha) também não ativa depois do prazo
+    const late = await mkInvited('Vinculou e sumiu', { status: 'pending', expiresAt: future });
+    assert.equal((await call('late-1', late.email, false)).length, 1, 'dentro do prazo resolve (sem ativar)');
+    await ops.asSystem((tx) => tx`update app.invites set expires_at = ${past} where user_id = ${late.id}`);
+    assert.equal((await call('late-1', '', true)).length, 0, 'vencido: a identidade já vinculada não ativa a conta');
+    // convite válido: comportamento de sempre
+    const ok = await mkInvited('Dentro do prazo', { status: 'pending', expiresAt: future });
+    const r = await call('ok-' + ok.id, ok.email); assert.equal(r.length, 1); assert.equal(r[0].status, 'active');
+    assert.equal((await ops.asSystem((tx) => tx`select status from app.invites where user_id = ${ok.id}`))[0].status, 'accepted');
+  });
   test('resolve_identity: uma SEGUNDA identidade (SSO) vincula ao MESMO usuário pelo e-mail verificado — conta, papel e apresentações preservados', async () => {
     const u = await mkUser(ops, { status: 'active', name: 'Pessoa com SSO futuro' });
     const sup = await db.anon((tx) => tx`select * from app.resolve_identity('supabase', 'sub-sup-1', ${u.email}, true, true, true)`); assert.equal(sup.length, 1); assert.equal(sup[0].user_id, u.id);

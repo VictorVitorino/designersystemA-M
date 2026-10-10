@@ -84,6 +84,18 @@ describe('cota por pessoa (1 MB neste teste)', () => {
     assert.equal(await env.storage.head(sha), null, 'nenhum objeto foi promovido');
   });
 
+  test('PUTs SIMULTÂNEOS de hashes que a própria pessoa pré-registrou (/uploads com tamanho declarado de 1 KB) não passam juntos do limite', async () => {
+    // regressão (auditoria 10/10): o register via a linha pendente ainda com o tamanho DECLARADO; a cota só é segura se reconferida na transação do mark_ready
+    const E2 = await env.mkUser({ name: 'Pré-registro próprio' }); const files = [await pngOf(600), await pngOf(600)];
+    for (const f of files) await env.sys((tx) => tx`insert into app.assets(sha256, size_bytes, mime, kind, status, uploaded_by) values (${sha256Hex(f)}, 1000, 'image/png', 'image', 'pending', ${E2.id}::uuid)`);
+    const res = await Promise.all(files.map((f, i) => env.request(E2, 'PUT', `/api/assets/${sha256Hex(f)}`, { body: f, headers: { 'content-type': 'application/octet-stream', 'x-asset-kind': 'image' }, ip: `198.51.100.${60 + i}` })));
+    assert.deepEqual(res.map((r) => (r.status === 201 ? 200 : r.status)).sort(), [200, 413], res.map((r) => r.status + ' ' + r.text).join(' | '));   // a linha já existia (pré-registro): sucesso = 200
+    assert.ok(await usedBy(E2) <= 1048576, `uso ${await usedBy(E2)} acima da cota`);
+    const loser = files[res.findIndex((r) => r.status === 413)];
+    assert.equal((await env.sys((tx) => tx`select count(*)::int n from app.assets where sha256 = ${sha256Hex(loser)} and status = 'ready'`))[0].n, 0, 'o recusado não fica ready');
+    const au = await env.sys((tx) => tx`select meta from app.audit_log where action = 'asset.reject' and entity_id = ${sha256Hex(loser)}`); assert.deepEqual(au.at(-1).meta.reasons, ['quota_exceeded']);
+  });
+
   test('admin: GET /api/admin/users devolve storageBytes por pessoa (mesmo critério da cota)', async () => {
     // o mini-app não monta /api/admin: compõe aqui só essa rota, com o mesmo onError e o usuário admin "logado"
     const h = new Hono(); h.use('*', async (c, next) => { c.set('deps', env.deps); c.set('user', { id: ADM.id, role: 'admin', status: 'active', email: 'adm@am.test', displayName: 'Admin' }); await next(); });

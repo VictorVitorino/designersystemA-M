@@ -126,7 +126,12 @@ export function assetsRoutes(deps) {
 
     let created;
     try { created = await txAsUser(c, (tx) => register(tx, user.id, meta)); }
-    catch (e) { if (e && e.code === 'quota_exceeded') await auditReject(c, want, e, { size: info.size, kind }); throw e; }
+    catch (e) {
+      if (e && e.code === 'quota_exceeded') await auditReject(c, want, e, { size: info.size, kind });
+      // a coleta de lixo apagou a linha entre o INSERT … ON CONFLICT e a posse (chave estrangeira): pedir para tentar de novo, não 500
+      if (e && e.code === '23503') throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');
+      throw e;
+    }
     // grava ANTES de marcar pronto; objeto já presente com o mesmo tamanho = deduplicação (nada é regravado)
     const have = await storage.head(want);
     // HEAD confirma somente o tamanho: um objeto corrompido pode ter os mesmos bytes.
@@ -134,11 +139,26 @@ export function assetsRoutes(deps) {
     // nem conceder posse de dados adulterados silenciosamente.
     const reused = !!have && have.size === bytes.length && (await storage.verify(want)).ok;
     if (!reused) await storage.put(want, bytes, { mime: info.mime, verify: false, overwrite: !!have });   // o hash acabou de ser conferido acima
-    const status = await txAsUser(c, async (tx) => {
-      const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
-      if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind, deduplicated: !created && reused });
-      return m.status;
-    });
+    let status;
+    try {
+      status = await txAsUser(c, async (tx) => {
+        // Cota reconferida na MESMA transação que promove a ready (como no finalize): no registro, uma linha pendente pré-registrada por /uploads
+        // ainda tinha o tamanho DECLARADO, e dois PUTs simultâneos passavam juntos do limite. A trava por pessoa serializa soma e mark_ready.
+        if (quota) {
+          const [now] = await tx`select status from app.assets where sha256 = ${want}`;
+          if (!now || now.status !== 'ready') await assertQuota(tx, user.id, { sha: want, size: info.size });
+        }
+        const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
+        if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind, deduplicated: !created && reused });
+        return m.status;
+      });
+    } catch (e) {
+      if (e && e.code === 'quota_exceeded') {
+        await txAsUser(c, async (tx) => { await tx`select app.asset_discard_pending(${want})`; }).catch(() => {});   // só apaga se a pendência é dela e ninguém mais a usa
+        await auditReject(c, want, e, { size: info.size, kind });
+      }
+      throw e;
+    }
     if (status !== 'ready') { log.error('asset_not_ready', { sha: want, status }); throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.'); }
     return c.json(publicInfo(meta, !created && reused), created ? 201 : 200);
   });
@@ -194,14 +214,17 @@ export function assetsRoutes(deps) {
       if (!cur) { await dropStaging(); throw E.notFound(); }
       if (cur.status === 'ready') { await dropStaging(); return done(cur, true); }
     }
-    const cap = await txAsUser(c, (tx) => capFor(tx, cur.kind));
+    // Finalidade: a declarada por QUEM finaliza (X-Asset-Kind). Sem o cabeçalho, a do registro pendente — mas esse registro pode ser de outra
+    // pessoa (o primeiro /uploads do hash vence), e um "attachment" pré-registrado por terceiros não pode recusar a imagem de quem tem os bytes.
+    const kind = c.req.header('x-asset-kind') ? kindOf(c) : cur.kind;
+    const cap = await txAsUser(c, (tx) => capFor(tx, kind));
     let info;
-    try { info = await validateUpload(stg.body, { kind: cur.kind, maxBytes: cap }); }
-    catch (e) { if (e && e.status) await discard(e, { kind: cur.kind }); throw e; }
+    try { info = await validateUpload(stg.body, { kind, maxBytes: cap }); }
+    catch (e) { if (e && e.status) await discard(e, { kind }); throw e; }
     // cota com o tamanho REAL (o declarado em /uploads podia ser menor), antes de promover o objeto: barrado, nada chega à chave canônica
     if (quota) {
       try { await txAsUser(c, (tx) => assertQuota(tx, user.id, { sha: want, size: info.size })); }
-      catch (e) { if (e && e.code === 'quota_exceeded') await discard(e, { kind: cur.kind }); throw e; }
+      catch (e) { if (e && e.code === 'quota_exceeded') await discard(e, { kind: kind }); throw e; }
     }
     // chave canônica: cópia condicional ao ETag conferido (se o preparo mudou depois da conferência → 422); nada é regravado se já existir; o preparo é apagado
     const prom = await storage.promoteStaging(user.id, want, { mime: info.mime, etag: stg.etag || null, body: stg.body });
@@ -226,14 +249,14 @@ export function assetsRoutes(deps) {
         // O advisory lock de assertQuota serializa a soma e o mark_ready.
         if (quota) await assertQuota(tx, user.id, { sha: want, size: info.size });
         await grantOwnership(tx, user.id, want);
-        const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${cur.kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
-        if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: cur.kind, direct: true, deduplicated });
+        const [m] = await tx`select app.asset_mark_ready(${want}, ${info.size}::bigint, ${info.mime}, ${kind}, ${info.width ?? null}::int, ${info.height ?? null}::int) as status`;
+        if (m.status === 'ready') await audit(tx, c, 'asset.upload', 'asset', want, { size: info.size, mime: info.mime, kind: kind, direct: true, deduplicated });
         return m.status;
       });
     } catch (e) {
       // Se a cota foi consumida por outro finalize, não deixar pendência
       // no banco. O objeto canônico sem referência é coletado pelo GC.
-      if (e && e.code === 'quota_exceeded') await discard(e, { kind: cur.kind });
+      if (e && e.code === 'quota_exceeded') await discard(e, { kind: kind });
       throw e;
     }
     if (status !== 'ready') throw E.conflict('Não foi possível concluir o envio deste arquivo. Tente novamente.');

@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import sharp from 'sharp';
 import { makeEnv, deck, png, sha256Hex } from '../helpers/mini-app.js';
+import postgres from 'postgres';
+import { ADMIN_URL } from '../db/helpers.js';
 
 let env, A, B, C, ADM;
 before(async () => {
@@ -14,6 +16,8 @@ before(async () => {
 after(async () => { await env.stop(); });
 
 const putRaw = (u, sha, buf, headers = {}) => env.put(u, `/api/assets/${sha}`, { body: buf, headers: { 'content-type': 'application/octet-stream', ...headers } });
+/** Conexão de superusuário do banco de TESTE (só para simular corridas com gatilhos temporários). */
+const asAdmin = async (fn) => { const sql = postgres(ADMIN_URL, { max: 1, onnotice: () => {} }); try { return await fn(sql); } finally { await sql.end(); } };
 const rowOf = async (sha) => (await env.sys((tx) => tx`select * from app.assets where sha256 = ${sha}`))[0];
 const ownersOf = async (sha) => (await env.sys((tx) => tx`select user_id from app.asset_uploads where sha256 = ${sha} order by user_id`)).map((r) => r.user_id);   // posses (prova de bytes)
 const owners = async (sha) => (await env.sys((tx) => tx`select user_id from app.asset_uploads where sha256 = ${sha}`)).map((r) => r.user_id).sort();
@@ -299,6 +303,32 @@ describe('upload direto (arquivos grandes) e finalize', () => {
       assert.equal((await env.post(A, `/api/assets/${sha}/finalize`)).status, 200, 'finalize repetido é idempotente');
       const au = await audits('asset.upload', sha); assert.equal(au.length, 1); assert.equal(au[0].meta.direct, true);
     } finally { real(); }
+  });
+  test('finalize: um "attachment" pré-registrado por TERCEIROS no mesmo hash não recusa a imagem de quem tem os bytes (X-Asset-Kind de quem finaliza)', async () => {
+    fakeS3();
+    try {
+      const buf = await tiny(188); const sha = sha256Hex(buf);
+      // B (atacante) pré-registra o hash da imagem que A vai enviar como anexo PDF de 1 byte
+      assert.equal((await env.post(B, '/api/assets/uploads', { json: { sha256: sha, size: 1, mime: 'application/pdf', kind: 'attachment' } })).status, 200);
+      assert.equal((await env.post(A, '/api/assets/uploads', { json: { sha256: sha, size: buf.length, mime: 'image/png', kind: 'image' } })).status, 200);
+      stage(A, sha, buf);
+      const fin = await env.post(A, `/api/assets/${sha}/finalize`, { headers: { 'x-asset-kind': 'image' } }); assert.equal(fin.status, 201, fin.text);
+      const row = await rowOf(sha); assert.equal(row.status, 'ready'); assert.equal(row.kind, 'image'); assert.equal(row.mime, 'image/png'); assert.equal(row.uploaded_by, A.id);
+      const bad = await tiny(190); const badSha = sha256Hex(bad);
+      assert.equal((await env.post(A, '/api/assets/uploads', { json: { sha256: badSha, size: bad.length, mime: 'image/png', kind: 'image' } })).status, 200); stage(A, badSha, bad);
+      assert.equal((await env.post(A, `/api/assets/${badSha}/finalize`, { headers: { 'x-asset-kind': 'outro' } })).status, 400, 'finalidade inválida → 400');
+    } finally { real(); }
+  });
+  test('PUT: a coleta de lixo apagar a linha entre o registro e a posse (FK 23503) → 409 "tente novamente", nunca 500', async () => {
+    const buf = await tiny(189); const sha = sha256Hex(buf);
+    // simula a corrida: a posse falha com violação de chave estrangeira, como quando o GC remove a linha no meio da transação
+    await asAdmin((sql) => sql.unsafe(`create or replace function app.t_fk_race() returns trigger language plpgsql as $f$ begin if new.sha256 = '${sha}' then raise foreign_key_violation using message = 'simulado'; end if; return new; end $f$;
+      create trigger t_fk_race before insert on app.asset_uploads for each row execute function app.t_fk_race();`));
+    try {
+      const r = await env.put(A, `/api/assets/${sha}`, { body: buf, headers: { 'content-type': 'application/octet-stream', 'x-asset-kind': 'image' } });
+      assert.equal(r.status, 409, r.text); assert.equal(r.json.error.code, 'conflict');
+    } finally { await asAdmin((sql) => sql.unsafe('drop trigger if exists t_fk_race on app.asset_uploads; drop function if exists app.t_fk_race();')); }
+    const ok = await env.put(A, `/api/assets/${sha}`, { body: buf, headers: { 'content-type': 'application/octet-stream', 'x-asset-kind': 'image' } }); assert.ok([200, 201].includes(ok.status), ok.text);
   });
   test('finalize direto repara objeto canônico corrompido com tamanho idêntico e não informa deduplicação falsa', async () => {
     fakeS3();
