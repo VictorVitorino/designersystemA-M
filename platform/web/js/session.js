@@ -26,8 +26,21 @@ export async function logout(btn) {
     if (!ok) return undefined;
   }
   setBusy(btn, true);
-  try { await core?.clearLocalData?.(); } catch { /* melhor esforço: a saída não fica presa */ }
+  // Não impedir a saída da conta, mas também não afirmar que os dados deste
+  // computador foram apagados se outra aba bloqueou a exclusão do IndexedDB.
+  let localCleared = false;
+  try { localCleared = core?.clearLocalData ? (await core.clearLocalData()) === true : false; }
+  catch { localCleared = false; }
   try { await api.post('/api/auth/logout', undefined, { auth: false }); } catch { /* mesmo com falha de rede, sai da tela */ }
+  if (!localCleared) {
+    try {
+      await confirmDialog({
+        title: 'Não foi possível apagar todos os dados locais',
+        message: 'A saída foi solicitada, mas este navegador não confirmou a exclusão de todos os dados do Canteiro. Em um computador compartilhado, feche as outras abas do Canteiro e limpe os dados deste site no navegador antes de permitir que outra pessoa use o computador.',
+        confirmLabel: 'Entendi', cancelLabel: 'Ir para entrar', danger: true,
+      });
+    } catch { /* continuar a saída mesmo se o aviso não puder ser aberto */ }
+  }
   location.assign('/entrar');
   return never();
 }
