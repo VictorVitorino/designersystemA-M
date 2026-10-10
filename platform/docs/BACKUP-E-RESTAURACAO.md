@@ -140,7 +140,12 @@ O dump principal contém o **schema `app`** (usuários, apresentações, permiss
 | Backup de Auth ativado (`BACKUP_INCLUDE_AUTH=1`) | cada backup traz também `db/<nome>.authdata.enc` (dados de `auth.users`/`auth.identities`, cifrados) | no projeto novo (que já criou o schema `auth` vazio): `node tools/restore.js auth --to <banco-do-projeto-novo>` (recusa tabela não vazia; confere contagens). Em seguida o login funciona com as mesmas senhas |
 
 O backup das contas do login está **ligado por padrão** nos workflows `backup.yml` e `deploy-production.yml` (variável do repositório `BACKUP_INCLUDE_AUTH`, padrão `1`; `0` desliga). Do terminal, o padrão do `tools/backup.js` continua desligado: use `BACKUP_INCLUDE_AUTH=1`. **Não validado contra um Supabase real** (sem acesso): o primeiro backup manual (`docs/PUBLICACAO.md` etapa 2) é o teste — em particular se o papel `postgres` consegue ler `auth.users` (confirmado na imagem oficial `supabase/postgres:17.6.1.011`: o backup com as contas do login roda como `postgres`, sem superusuário, e o ensaio o confere). O arquivo contém hashes de senha: está **cifrado** como o resto. O ensaio mensal confere esse arquivo também.
-Se nada disso existir: cada pessoa precisa de **novo convite** (pendência: ferramenta de reconvite em lote, **não implementada**).
+Se nada disso existir: cada pessoa precisa de **novo convite** — use o **reconvite em lote**:
+```bash
+DATABASE_OPS_URL=…  SUPABASE_URL=…  SUPABASE_SERVICE_ROLE_KEY=…  node tools/reinvite.js            # simula (conta e lista, e-mails mascarados)
+DATABASE_OPS_URL=…  SUPABASE_URL=…  SUPABASE_SERVICE_ROLE_KEY=…  node tools/reinvite.js --apply    # envia
+```
+Convida quem está ativo ou convidado em `app.users` e **não** tem conta no Auth (suspensos nunca); renova o convite pendente dos convidados (`invites.ttl_days`); audita cada envio (`invite.resend`, `{bulk:true}`). Pelo link a pessoa define a senha e entra na **mesma** conta (papel e apresentações preservados). Rodar de novo não reenvia a quem já recebeu. No limite de e-mails do provedor (429; o SMTP padrão do Supabase envia poucos por hora — configure o SMTP próprio antes), o lote para e diz quantas faltam: rode de novo depois. Opções: `--status active|invited`, `--limit N`, `--delay-ms` (padrão 1000). Teste: `tests/api/reinvite.test.js`.
 
 ## 9. Limitações conhecidas (e decisões)
 

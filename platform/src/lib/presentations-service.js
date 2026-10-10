@@ -229,6 +229,14 @@ export async function saveContent(tx, { userId, aud, id, input, prep }) {
   // 1) Idempotência por conteúdo: mesmo hash → nada é gravado (cobre o reenvio depois de uma resposta perdida). Só um ponto manual pode sair daqui.
   if (row.content_hash === prep.hash && input.baseRev <= row.rev) {
     let snapshotNo; let savedAt = row.updated_at;
+    // Miniatura nova com o MESMO conteúdo (ex.: a anterior não chegou a ser enviada): grava só a miniatura, sem nova revisão — o editor
+    // considera a miniatura salva depois do 200 e não a reenviaria; ignorá-la deixava o acervo com a miniatura velha (ou nenhuma).
+    if (input.thumbSha !== undefined && input.thumbSha !== row.thumb_sha) {
+      await validateThumb(tx, input.thumbSha);
+      const [t] = await tx`update app.presentations set thumb_sha = ${input.thumbSha} where id = ${id}::uuid returning updated_at`;
+      savedAt = t.updated_at;
+      await touchAssets(tx, [row.thumb_sha]);
+    }
     if (input.snapshot) {
       const [last] = await tx`select version_no, kind, content_hash from app.presentation_versions where presentation_id = ${id}::uuid order by version_no desc limit 1`;
       if (last && last.kind === 'manual' && last.content_hash === row.content_hash) snapshotNo = last.version_no;
