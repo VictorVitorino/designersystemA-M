@@ -3,7 +3,8 @@
   var RT = window.AMRT, W = RT.W, H = RT.H;
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
-  var BRAND = { perfW: '%%LOGO_PERF_W%%', perfN: '%%LOGO_PERF_N%%', wmW: '%%WM_W%%', wmN: '%%WM_N%%' };
+  /* S36: o wordmark branco fica embutido uma vez só (no <img class="brand-wm"> do topo, que já existe quando este script roda); a capa também lê dele */
+  var BRAND = { perfW: '%%LOGO_PERF_W%%', perfN: '%%LOGO_PERF_N%%', wmW: (document.querySelector('img.brand-wm') || {}).src || '', wmN: '%%WM_N%%' };
   var BRAND_SIZE = { perfW: [743, 134], perfN: [743, 134], wmW: [262, 42], wmN: [262, 42] };
   /* paleta A&M: navy, azuis-aço, gelos, branco e um único laranja */
   var SW = ['#002A46', '#001E32', '#13315C', '#43698F', '#4A6FA5', '#7EA1C3', '#A3B8D6', '#E3EAF2', '#EBEEF1', '#FFFFFF', '#F78C16', '#3E4C5E', '#6B7A90'];
@@ -316,7 +317,8 @@
   function redo() { if (editingId) endEdit(); flush(); if (!fut.length) return; hist.push(last); last = fut.pop(); rev++; restore(last); updUndo(); }
   function updUndo() { $('#bUndo').disabled = !hist.length; $('#bRedo').disabled = !fut.length; }
   /* ---------- validação de dados vindos de fora (arquivo, área de transferência) ---------- */
-  var COLOR_RE = /^(#[0-9a-f]{3,8}|none|transparent|rgba?\([\d.,\s%]+\)|[a-z]{3,20})$/i, TOKEN_RE = /^[\w\s.%-]{0,40}$/, DATA_TOKENS = ['style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort'];
+  var COLOR_RE = /^(#[0-9a-f]{3,8}|none|transparent|rgba?\([\d.,\s%]+\)|[a-z]{3,20})$/i, TOKEN_RE = /^[\w\s.%-]{0,40}$/, DATA_TOKENS = ['style', 'weight', 'color', 'tcolor', 'c1', 'c2', 'variant', 'name', 'trig', 'accent', 'bg', 'stroke', 'pair', 'layout', 'mode', 'sort',
+    'hat', 'hair', 'lashes', 'glasses', 'outfit', 'tool', 'mood', 'mood2', 'act', 'act2', 'dir', 'look', 'bubble', 'side', 'bcol', 'aim', 'tail', 'grp']; /* S35: personagens (partes, movimentos, balão, alvo) */
   /* DATA_TOKENS: data.* que viram classe/atributo (ícones, SmartArt, gráficos). Só texto simples (TOKEN_RE) ou cor; texto livre usa outras chaves e sai com esc().
      EL_TOKENS: campos do elemento com valores fechados (linhas e cards); os booleanos antigos dash/headStart/headEnd continuam valendo */
   var HEADS = ['arrow', 'open', 'dot', 'diamond', 'bar'], EL_TOKENS = { curve: ['straight', 'elbow', 'curve'], dashS: ['dash', 'dot', 'dashdot', 'long'], headS: HEADS, headE: HEADS, look: ['flat', 'outline', 'lift', 'accent', 'topbar', 'header', 'gradient', 'ice'] };
@@ -369,7 +371,7 @@
     if (o.grp != null && !(typeof o.grp === 'string' && /^[\w-]{1,40}$/.test(o.grp))) delete o.grp; /* S27: grupo = id compartilhado */
     if (o.type === 'image') { o.src = safeSrc(o.src); if (!o.src) return null; }
     var a = o.anim && typeof o.anim === 'object' ? o.anim : {}; o.anim = { in: TOKEN_RE.test(a.in || '') ? a.in || 'none' : 'none' };
-    ['loop', 'hover'].forEach(function (k) { if (typeof a[k] === 'string' && /^\w{1,20}$/.test(a[k])) o.anim[k] = a[k]; });
+    ['loop', 'hover'].forEach(function (k) { if (typeof a[k] === 'string' && /^\w{1,20}$/.test(a[k]) && (!F || typeof F.animOk !== 'function' || F.animOk(k, a[k], o))) o.anim[k] = a[k]; }); /* S35: efeito que o componente recusa sai ao abrir */
     ['delay', 'dur'].forEach(function (k) { if (a[k] != null && isFinite(+a[k])) o.anim[k] = +a[k]; });
     if (a.spd != null) o.anim.spd = pickN(a.spd, [0.5, 0.75, 1, 1.5, 2], 1);
     if (a.rep != null) o.anim.rep = pickN(a.rep, [0, 1, 3], 0);
@@ -421,7 +423,8 @@
     ['font', 'align', 'valign', 'fit', 'shape', 'variant', 'ds'].forEach(function (k) { if (typeof v[k] === 'string' && TOKEN_RE.test(v[k])) o[k] = v[k]; });
     Object.keys(EL_TOKENS).forEach(function (k) { if (EL_TOKENS[k].indexOf(v[k]) >= 0) o[k] = v[k]; });
     var pl = safePal(v.pal); if (pl) o.pal = pl;
-    if (v.dsel && typeof v.dsel === 'object' && !Array.isArray(v.dsel)) { var dd = {}; Object.keys(v.dsel).slice(0, 12).forEach(function (k) { var x = v.dsel[k]; if (/^[a-z][\w-]{0,30}$/i.test(k) && !/^(__proto__|constructor|prototype)$/.test(k) && ((typeof x === 'string' && (TOKEN_RE.test(x) || COLOR_RE.test(x))) || (typeof x === 'number' && isFinite(x)))) dd[k] = x; }); o.dsel = dd; }
+    ['a1', 'a2'].forEach(function (k) { var a = v[k]; if (a && typeof a === 'object' && !Array.isArray(a) && typeof a.id === 'string' && /^[\w-]{1,40}$/.test(a.id)) o[k] = { id: a.id, s: /^[nesw]$/.test(a.s) ? a.s : 'c' }; }); /* S32/S35: pontas presas da base sobrevivem a salvar e reabrir */
+    if (v.dsel && typeof v.dsel === 'object' && !Array.isArray(v.dsel)) { var dd = {}; Object.keys(v.dsel).slice(0, 32).forEach(function (k) { var x = v.dsel[k]; if (/^[a-z][\w-]{0,30}$/i.test(k) && !/^(__proto__|constructor|prototype)$/.test(k) && ((typeof x === 'string' && (TOKEN_RE.test(x) || COLOR_RE.test(x))) || (typeof x === 'number' && isFinite(x)))) dd[k] = x; }); o.dsel = dd; }
     if (Array.isArray(v.cols)) { var dc = v.cols.slice(0, 6).map(function (c) { return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : ''; }); while (dc.length && !dc[dc.length - 1]) dc.pop(); if (dc.length) o.cols = dc; }
     return o;
   }
@@ -517,7 +520,13 @@
   function linkedLines(s, id) { return ((s && s.els) || []).filter(function (e) { return e.type === 'line' && ((e.a1 && e.a1.id === id) || (e.a2 && e.a2.id === id)); }); }
   function refreshLinks(el) { var s = slide(); linkedLines(s, el.id).forEach(function (ln) { syncLine(s, ln); if (stage && stage.querySelector('.am-el[data-id="' + ln.id + '"]')) rerenderEl(ln); }); }
   function detachMoved(list) { var ids = list.map(function (e) { return e.id; }); list.forEach(function (e) { if (e.type !== 'line') return; ['a1', 'a2'].forEach(function (k) { if (e[k] && ids.indexOf(e[k].id) < 0) delete e[k]; }); }); } /* mover a linha sozinha solta as pontas; mover junto com a forma mantém */
-  function remapLinks(list, map) { list.forEach(function (e) { if (e.type !== 'line') return; ['a1', 'a2'].forEach(function (k) { if (!e[k]) return; if (map[e[k].id]) e[k] = { id: map[e[k].id], s: e[k].s }; else delete e[k]; }); }); return list; }
+  function remapLinks(list, map) { list.forEach(function (e) { if (e.type === 'fx' && e.data && typeof e.data.aim === 'string' && map[e.data.aim]) { e.data.aim = map[e.data.aim]; return; } /* S35: alvo do personagem acompanha a cópia (fora do mapa, continua no original) */ if (e.type !== 'line') return; ['a1', 'a2'].forEach(function (k) { if (!e[k]) return; if (map[e[k].id]) e[k] = { id: map[e[k].id], s: e[k].s }; else delete e[k]; }); }); return list; }
+  /* S35: a base do “Redefinir” de um slide copiado também aponta para os ids novos (pontas presas e alvo do personagem) */
+  function remapBase(b, map) {
+    if (!b || typeof b !== 'object') return;
+    Object.keys(b.els || {}).forEach(function (k) { var sn = b.els[k]; if (!sn) return; ['a1', 'a2'].forEach(function (a) { if (sn[a] && map[sn[a].id]) sn[a] = { id: map[sn[a].id], s: sn[a].s }; }); if (sn.dsel && typeof sn.dsel.aim === 'string' && map[sn.dsel.aim]) sn.dsel.aim = map[sn.dsel.aim]; });
+    Object.keys(b.tpl || {}).forEach(function (k) { var t = b.tpl[k]; if (!t) return; if (map[t.id]) t.id = map[t.id]; ['a1', 'a2'].forEach(function (a) { if (t[a] && map[t[a].id]) t[a] = { id: map[t[a].id], s: t[a].s }; }); if (t.data && typeof t.data.aim === 'string' && map[t.data.aim]) t.data.aim = map[t.data.aim]; }); /* o elemento restaurado volta com o id da cópia */
+  }
   /* alvo para prender a ponta arrastada: elemento (não linha) sob o ponteiro (até 12 px fora da caixa); a 22 px do meio de um lado = esse lado, senão automático; o menor elemento ganha */
   function snapTarget(x, y, selfId) {
     var best = null;
@@ -587,7 +596,7 @@
     }
     if (el && editingId !== el.id) {
       var FDx = el.type === 'fx' ? RT.FX[el.kind] : null, lbl, bx = aabb(el);
-      if (FDx && FDx.variants) { var vv = el.variant || FDx.variant; lbl = (FDx.gal === 'icon' ? 'Movimento' : 'Efeito') + ': <b>' + esc((FDx.variants.find(function (x) { return x[0] === vv; }) || FDx.variants[0])[1]) + '</b>'; }
+      if (FDx && FDx.variants) { var vv = el.variant || FDx.variant; lbl = (FDx.vlabel || (FDx.gal === 'icon' ? 'Movimento' : 'Efeito')) + ': <b>' + esc((FDx.variants.find(function (x) { return x[0] === vv; }) || FDx.variants[0])[1]) + '</b>'; }
       else { var ai = (el.anim && el.anim.in) || 'none'; lbl = 'Animação: <b>' + esc((ANIM_IN.find(function (x) { return x[0] === ai; }) || ANIM_IN[0])[1]) + '</b>'; }
       var ax = Math.min(bx.x + bx.w, W - 10), ay = Math.max(bx.y, 40);
       html += '<button class="fxarrow" id="fxArrow" style="left:' + pc(ax, W) + ';top:' + pc(ay, H) + ';transform:translate(-100%,calc(-100% - 8px))" title="Escolher o efeito deste elemento"><svg viewBox="0 0 24 24" style="stroke:#F78C16"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>' + lbl + '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>';
@@ -750,7 +759,7 @@
   /* ---------------- propriedades ---------------- */
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function fld(label, inner) { return '<label class="pf"><span>' + label + '</span>' + inner + '</label>'; }
-  function num(p, v, step, min, max) { return '<input type="number" data-p="' + p + '" data-n="1" value="' + (v == null ? '' : Math.round(v * 100) / 100) + '" step="' + (step || 1) + '"' + (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') + '>'; }
+  function num(p, v, step, min, max) { return '<input type="number" data-p="' + p + '" data-n="1" value="' + (v == null || v === '' || !isFinite(+v) ? '' : Math.round(v * 100) / 100) + '" step="' + (step || 1) + '"' + (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') + '>'; }
   function txtIn(p, v) { return '<input type="text" data-p="' + p + '" value="' + esc(v) + '">'; }
   function area(p, v) { return '<textarea data-p="' + p + '">' + esc(v) + '</textarea>'; }
   function selIn(p, v, opts, isNum) { return '<select data-p="' + p + '"' + (isNum ? ' data-n="1"' : '') + '>' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(v) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>'; }
@@ -867,6 +876,7 @@
     'rot-0': '<path d="M3 20h18"/><rect x="6" y="9" width="12" height="8" rx="1.5"/><path d="M12 3v3"/>',
     side: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
     form: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    persona: '<path d="M12 3c4.4 0 7 3.6 7 8.5V16c0 2.5-3 4-7 4s-7-1.5-7-4v-4.5C5 6.6 7.6 3 12 3z"/><circle cx="9.5" cy="11" r="1"/><circle cx="14.5" cy="11" r="1"/><path d="M9.5 14.5c1.5 1.2 3.5 1.2 5 0"/>', bubble: '<path d="M4 5h16v10h-9l-4 4v-4H4z"/>',
     note: '<path d="M4 4h16v11l-5 5H4z"/><path d="M15 20v-5h5"/>',
     csv: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
     unlink: '<path d="M10 14a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7L11.5 6.8"/><path d="M14 10a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.3-1.3"/><path d="M4 4l16 16"/>',
@@ -902,9 +912,17 @@
   function canDraw(el) { return isStroke(el) || isIcon(el); }
   /* o efeito f:k serve para este elemento? ('ln' = só traços, 'tx' = só textos e formas com texto) */
   function hasText(el) { return el.type === 'text' || (el.type === 'shape' && /\S/.test(String(el.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' '))); }
-  function animFits(el, f, k) { var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
+  /* S35: o componente pode recusar efeitos (FX.animOk: o personagem recusa os que recortam o desenho, contornam a caixa vazia ou, com “Andar até”, giram/escalam em volta da caixa de origem) */
+  function fxAnimOk(el, f, k) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !(F && typeof F.animOk === 'function' && !F.animOk(f, k, el)); }
+  /* S35: tira do elemento os efeitos (contínuo e de mouse) que o componente recusa no estado atual e avisa */
+  var stripTimer = 0;
+  function stripRefused(el) { /* quem chama faz o commit (um passo de desfazer só) */
+    var out = []; ['loop', 'hover'].forEach(function (f) { var k = el.anim && el.anim[f]; if (k && k !== 'none' && !fxAnimOk(el, f, k)) { var a = RT.ANIMS[f].filter(function (x) { return x[0] === k; })[0]; out.push(a ? a[1] : k); el.anim[f] = 'none'; } });
+    if (!out.length) return; rerenderEl(el); clearTimeout(stripTimer); stripTimer = setTimeout(function () { renderProps(); toast(out.join(' e ') + (out.length > 1 ? ' saíram' : ' saiu') + ': não combina com “Andar até” (giraria em volta do lugar de origem) · Ctrl+Z desfaz'); }, 0);
+  }
+  function animFits(el, f, k) { if (!fxAnimOk(el, f, k)) return false; var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
   var ONLY_MSG = { ln: 'funciona em linhas, setas e Linhas A&M', lnIn: 'funciona em linhas, setas, Linhas A&M e ícones animados', tx: 'funciona em textos e formas com texto' };
-  function onlyMsg(it) { return ONLY_MSG[it.only === 'ln' && it.fam === 'in' ? 'lnIn' : it.only]; }
+  function onlyMsg(it) { return ONLY_MSG[it.only === 'ln' && it.fam === 'in' ? 'lnIn' : it.only] || 'não serve para personagens (recortaria, contornaria a caixa vazia ou deslocaria o desenho)'; }
   var holdProps = false;
   function animChips(el, f, v) { return RT.ANIMS[f].filter(function (o) { return o[0] === 'none' || animFits(el, f, o[0]) || o[0] === v; }).map(function (o) { return '<button class="chip' + ((v || 'none') === o[0] ? ' on' : '') + '" data-set="anim.' + f + '" data-v="' + o[0] + '" title="' + esc(o[2] || '') + '">' + esc(o[1]) + '</button>'; }).join(''); }
   function renderProps() { renderPropsBody(); galSync(); }
@@ -951,7 +969,7 @@
     var FD = el.type === 'fx' ? RT.FX[el.kind] : null, h0 = h; /* ícone: Conteúdo (qual ícone) vem antes da lista de movimentos */
     if (FD && FD.variants) {
       var cv = el.variant || FD.variant, cvd = FD.variants.find(function (x) { return x[0] === cv; }) || FD.variants[0];
-      h += '<div class="sec"><h3>' + esc(FD.vtitle || 'Efeito do modelo') + '</h3><div class="chips">' + FD.variants.map(function (o) { return '<button class="chip' + (o[0] === cv ? ' on' : '') + '" data-var="' + o[0] + '" title="' + esc(o[2] || '') + '">' + esc(o[1]) + '</button>'; }).join('') + '</div><p class="note">' + esc(cvd[2]) + '</p><div class="row r1" style="margin-top:8px"><button class="btnw pri" data-act="pvel">▶ Ver ' + (FD.gal === 'icon' ? 'movimento' : 'efeito') + ' no slide</button></div>' + (FD.gal === 'icon' ? '<div class="row r1"><button class="btnw ic" data-act="gallery-icon">' + svgI('models') + 'Comparar os movimentos em caixas</button></div>' : '') + (FD.tip ? '<p class="vtip">' + esc(FD.tip) + '</p>' : '') + '</div>';
+      h += '<div class="sec"><h3>' + esc(FD.vtitle || 'Efeito do modelo') + '</h3><div class="chips">' + FD.variants.map(function (o) { return '<button class="chip' + (o[0] === cv ? ' on' : '') + '" data-var="' + o[0] + '" title="' + esc(o[2] || '') + '">' + esc(o[1]) + '</button>'; }).join('') + '</div><p class="note">' + esc(cvd[2]) + '</p><div class="row r1" style="margin-top:8px"><button class="btnw pri" data-act="pvel">▶ Ver ' + (FD.pvl || (FD.gal === 'icon' ? 'movimento' : 'efeito')) + ' no slide</button></div>' + (FD.gal === 'icon' ? '<div class="row r1"><button class="btnw ic" data-act="gallery-icon">' + svgI('models') + 'Comparar os movimentos em caixas</button></div>' : '') + (FD.tip ? '<p class="vtip">' + esc(FD.tip) + '</p>' : '') + '</div>';
     }
     if (el.type === 'fx') {
       h += '<div class="sec"><h3>Conteúdo</h3>' + RT.FX[el.kind].fields.map(function (f) {
@@ -960,6 +978,7 @@
         if (t === 'lines') return '<div class="row r1">' + fld(f[1], '<textarea data-p="' + k + '" data-codec="lines">' + esc((Array.isArray(v) ? v : String(v || '').split(/\n/)).join('\n')) + '</textarea>') + '</div>';
         if (t.indexOf('rows:') === 0) return '<div class="row r1">' + fld(f[1], '<textarea data-p="' + k + '" data-codec="' + t + '" style="min-height:120px">' + esc(rowsToText(v, t.slice(5))) + '</textarea>') + '</div>';
         if (t === 'number') return '<div class="row r1">' + fld(f[1], num(k, v, 'any')) + '</div>';
+        if (t === 'numopt') return '<div class="row r1">' + fld(f[1], num(k, v, 'any').replace('data-n="1"', 'data-n="1" data-opt="1"')) + '</div>'; /* S35: número opcional (apagar = vazio) */
         if (t === 'area') return '<div class="row r1">' + fld(f[1], area(k, v)) + '</div>';
         var co = colorOpts(t); if (co) return '<div class="cfld"><span class="pf"><span>' + esc(f[1]) + '</span></span>' + swatches(k, v, false, co) + '</div>';
         if (t.indexOf('colors:') === 0) return colorsField(el, f);
@@ -1022,7 +1041,7 @@
   }
   /* “Cores do componente” (S20): el.pal = {p, a}; o runtime (rt-05-pal.js) troca o azul-marinho/azuis pela cor principal e o laranja
      pela de destaque, só neste elemento. Não vale para a Marca A&M nem para ícones (que já têm cores próprias) */
-  function palOk(el) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !!(F && RT.palTag && F.cat !== 'Marca A&M' && !isIcon(el)); }
+  function palOk(el) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !!(F && RT.palTag && F.cat !== 'Marca A&M' && F.cat !== 'Personagens' && !isIcon(el)); } /* S35: personagens só com as cores A&M (seletores do painel) */
   /* S29: kit de marca — cada chamada é um passo de desfazer; devolvem o que ficou gravado / quantos elementos mudaram */
   function setBrand(b, msg) { var nb = safeBrand(b); if (editingId) endEdit(); flush(); if (nb) deck.brand = nb; else delete deck.brand; ensureFonts(); renderAll(); commit(); if (msg) toast(msg); return nb; }
   function fxHasFont(e) { var F = e.type === 'fx' && RT.FX[e.kind]; return !!(F && F.fields && F.fields.some(function (f) { return f[0] === 'font'; })); }
@@ -1228,7 +1247,7 @@
   $('#drawer').addEventListener('pointerdown', function () { if (zone === 'thumbs') setZone('panel'); }, true);
   props.addEventListener('input', function (e) {
     var t = e.target, p = t.dataset.p; if (!p) return;
-    var v = t.value; if (t.dataset.n) { v = parseFloat(v); if (isNaN(v)) return; }
+    var v = t.value; if (t.dataset.n) { v = parseFloat(v); if (isNaN(v)) { if (t.dataset.opt && !String(t.value).trim()) v = ''; else return; } }
     if (t.dataset.codec === 'lines') v = v.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
     else if (t.dataset.codec === 'outline') { var oe = sel(), OF = oe && oe.type === 'fx' && RT.FX[oe.kind]; v = OF && OF.outlineParse ? OF.outlineParse(v) : RT.smartParse ? RT.smartParse(v) : v; } /* codec próprio do modelo (FX.outlineParse), senão o do SmartArt */
     else if (t.dataset.codec && t.dataset.codec.indexOf('rows:') === 0) v = textToRows(v, t.dataset.codec.slice(5));
@@ -1257,7 +1276,7 @@
     g.querySelector('.icf-none').hidden = n > 0;
   });
   props.addEventListener('change', function (e) {
-    var t = e.target; if (!t.dataset.p) return; commit(); if (t.tagName === 'SELECT' || t.type === 'color' || t.dataset.p === 'rot') renderProps();
+    var t = e.target; if (!t.dataset.p) return; if (t.dataset.p === 'data.walk' && sel()) stripRefused(sel()); /* S35: com “Andar até”, saem os efeitos que giram/escalam em volta da caixa de origem (no mesmo passo de desfazer) */ commit(); if (t.tagName === 'SELECT' || t.type === 'color' || t.dataset.p === 'rot') renderProps();
     /* campos do slide: o cabeçalho (capítulo), os placeholders e a dica dependem deles; redesenha depois que o foco saiu do painel, sem engolir o clique */
     else if (/^s\.(title|sec|secSub|notes)$/.test(t.dataset.p)) setTimeout(function () { if (!props.contains(document.activeElement) && !sel()) renderProps(); }, 0);
   });
@@ -1289,7 +1308,7 @@
   }
   function rowsToText(v, spec) {
     var cols = spec.split('|');
-    return (v || []).map(function (o) { return cols.map(function (c) { if (c[0] === '*') return (o[c.slice(1)] || []).join(' | '); return o[c.split(':')[0]] == null ? '' : o[c.split(':')[0]]; }).join(' | '); }).join('\n');
+    return (Array.isArray(v) ? v : []).filter(function (o) { return o && typeof o === 'object'; }).map(function (o) { return cols.map(function (c) { if (c[0] === '*') return (Array.isArray(o[c.slice(1)]) ? o[c.slice(1)] : []).join(' | '); return o[c.split(':')[0]] == null ? '' : o[c.split(':')[0]]; }).join(' | '); }).join('\n');
   }
   function textToRows(txt, spec) {
     var cols = spec.split('|');
@@ -1320,13 +1339,17 @@
     /* ícone: a prévia mostra o movimento sem esperar o mouse ou o clique (só a prévia; o elemento guarda o gatilho escolhido) */
     if (c.kind === 'icon' && c.data && c.data.trig !== 'loop') c.data.trig = 'in-loop';
     if (c.kind === 'iconmorph') c.variant = 'loop';
+    var pzn = c.kind === 'persona' && stage.querySelector('.am-el[data-id="' + el.id + '"] .pz'); /* S35: personagem sozinho na prévia, com o lado e a mira do slide; o movimento toca como “ao entrar” */
+    if (pzn && RT.personas) RT.personas.aimNode(pzn); /* nó recém-redesenhado (trocar o preset): mira já, antes de copiar */
+    if (pzn) { c._pzAim = { face: pzn.dataset.face, deg: pzn.style.getPropertyValue('--aim').trim() || '-100deg' }; c.data = clone(c.data || {}); if (c.data.trig !== 'loop') c.data.trig = 'in'; }
     st = RT.renderSlide({ bg: 'transparent', els: [c] }, { play: true });
     st.querySelector('.am-el').style.zIndex = slide().els.indexOf(el) + 1;
     ov.appendChild(st); wrap.insertBefore(ov, selLayer);
     var node = stage.querySelector('.am-el[data-id="' + el.id + '"]'); if (node) node.classList.add('previewing');
     void st.offsetWidth; st.classList.remove('am-pre'); st.classList.add('am-in'); ov._clean = RT.runFx(st);
     var cyc = !!st.querySelector('[data-cycle="g"],[data-cycle="1"]');
-    clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : 4200);
+    var pzw = pzn && st.querySelector('.pz'), pzMs = pzw ? (+((c.anim || {}).delay) || 0) + (+((c.anim || {}).dur) || 700) + 150 + (+((pzw.style.getPropertyValue('--wt') || '0').replace('ms', '')) || 0) + ((RT.personas.ACT_MS || {})[pzw.dataset.act] || 0) + 600 : 0; /* entrada + caminhada (se houver) + movimento */
+    clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : Math.max(4200, pzMs));
   }
 
   /* ---------------- ações ---------------- */
@@ -1372,7 +1395,7 @@
   function groupSel() { var list = sels(); if (list.length < 2) { toast('Selecione 2 ou mais elementos para agrupar (Shift+clique ou laço)'); return; } var g = 'g' + uid().slice(1); list.forEach(function (e) { e.grp = g; }); drawSel(); renderProps(); commit(); toast(list.length + ' elementos agrupados · clicar em um seleciona o grupo · Ctrl+Shift+G desagrupa'); }
   function ungroupSel() { var list = sels().filter(function (e) { return e.grp; }); if (!list.length) { toast('A seleção não tem grupo'); return; } list.forEach(function (e) { delete e.grp; }); drawSel(); renderProps(); commit(); toast('Grupo desfeito · Ctrl+Z desfaz'); }
   function lockSel(on) { var list = sels(); if (!list.length) return; if (on == null) on = !list.every(isLocked); list.forEach(function (e) { if (on) e.lock = true; else delete e.lock; }); renderStage(); renderProps(); commit(); toast(on ? (list.length > 1 ? list.length + ' elementos bloqueados' : 'Bloqueado') + ': não move, não redimensiona, não apaga · Ctrl+Shift+L desbloqueia' : 'Desbloqueado · Ctrl+Z desfaz'); }
-  function remapGrp(list) { var m = {}; list.forEach(function (e) { if (typeof e.grp === 'string') { if (!m[e.grp]) m[e.grp] = 'g' + uid().slice(1); e.grp = m[e.grp]; } }); return list; }
+  function remapGrp(list) { var m = {}; list.forEach(function (e) { if (typeof e.grp === 'string') { if (!m[e.grp]) m[e.grp] = 'g' + uid().slice(1); e.grp = m[e.grp]; } var F = e.type === 'fx' && RT.FX[e.kind]; if (F && typeof F.onCopy === 'function') F.onCopy(e); }); return list; } /* S36: FX.onCopy = o componente ajusta a cópia (duplicar/colar) */
   /* pincel de formato: copia o formato (nunca o conteúdo) de um elemento e aplica à seleção; texto e forma compartilham o formato do texto */
   var FMT = { text: ['font', 'size', 'weight', 'color', 'align', 'valign', 'lh', 'ls', 'bg', 'italic', 'upper', 'radius', 'opacity'], shape: ['font', 'size', 'weight', 'color', 'align', 'valign', 'lh', 'ls', 'italic', 'upper', 'fill', 'stroke', 'strokeW', 'dash', 'shadow', 'look', 'radius', 'opacity'], line: ['stroke', 'strokeW', 'dash', 'dashS', 'headS', 'headE', 'headStart', 'headEnd', 'curve', 'opacity'], image: ['radius', 'shadow', 'fit', 'opacity'], fx: ['pal', 'opacity'] }, FMT_TX = ['font', 'size', 'weight', 'color', 'align', 'valign', 'lh', 'ls', 'italic', 'upper'], fmtClip = null;
   function copyFmt() {
@@ -1386,9 +1409,9 @@
     var list = sels(), n = 0;
     list.forEach(function (e) {
       var ok = false, same = fmtClip.type === e.type, txt = /^(text|shape)$/.test(e.type) && /^(text|shape)$/.test(fmtClip.type);
-      (FMT[e.type] || []).forEach(function (k) { if (!(k in fmtClip)) return; if (same || (txt && FMT_TX.indexOf(k) >= 0)) { e[k] = clone(fmtClip[k]); ok = true; } });
+      (FMT[e.type] || []).forEach(function (k) { if (!(k in fmtClip)) return; if (k === 'pal' && !palOk(e)) return; /* S35: cores do componente só onde o painel as oferece (personagem, ícone e Marca A&M ficam fora) */ if (same || (txt && FMT_TX.indexOf(k) >= 0)) { e[k] = clone(fmtClip[k]); ok = true; } });
       if (same && !('bg' in fmtClip) && e.type === 'text') delete e.bg; if (same && e.type === 'shape' && !('look' in fmtClip)) delete e.look;
-      if (e.type === 'fx' && same) { e.data = e.data || {}; if (fmtClip.cols) { e.data.colors = fmtClip.cols.slice(); ok = true; } if (fmtClip.ds != null && fxStyleField(e.kind)) { e.data.style = fmtClip.ds; ok = true; } if ('pal' in fmtClip) ok = true; }
+      if (e.type === 'fx' && same) { e.data = e.data || {}; if (fmtClip.cols) { e.data.colors = fmtClip.cols.slice(); ok = true; } if (fmtClip.ds != null && fxStyleField(e.kind)) { e.data.style = fmtClip.ds; ok = true; } if ('pal' in fmtClip && palOk(e)) ok = true; }
       if (ok) { n++; rerenderEl(e); }
     });
     if (n) { renderProps(); commit(); toast('Formato aplicado em ' + (n > 1 ? n + ' elementos' : '1 elemento') + ' · Ctrl+Z desfaz'); } else toast('O formato copiado (' + fmtClip.name + ') não se aplica a esta seleção');
@@ -1665,7 +1688,7 @@
   }
   function openVarMenu(btn) {
     var el = sel(); if (!el) return; var m = $('#mVar'), FDx = el.type === 'fx' ? RT.FX[el.kind] : null, opts, cv, title;
-    if (FDx && FDx.variants) { opts = FDx.variants; cv = el.variant || FDx.variant; title = 'Efeitos para ' + FDx.name; }
+    if (FDx && FDx.variants) { opts = FDx.variants; cv = el.variant || FDx.variant; title = FDx.vlabel ? FDx.vlabel + ': ' + FDx.name : 'Efeitos para ' + FDx.name; }
     else { opts = ANIM_IN.filter(function (a) { return a[0] === 'none' || animFits(el, 'in', a[0]); }).map(function (a) { return [a[0], a[1], ANIM_TIP[a[0]] || '']; }); cv = (el.anim && el.anim.in) || 'none'; title = 'Animação de entrada'; }
     m.innerHTML = '<div class="vh"><b>' + esc(title) + '</b><button data-vprev="1">▶ Ver</button></div><div class="vlist">' + opts.map(function (o) { return '<button class="vo' + (o[0] === cv ? ' on' : '') + '" data-v="' + o[0] + '"><i></i><b>' + esc(o[1]) + '</b><span>' + esc(o[2] || '') + '</span></button>'; }).join('') + '</div>' + (FDx && FDx.tip ? '<p class="vtip">' + esc(FDx.tip) + '</p>' : '') +
       '<button class="vall" data-vall="1">' + svgI('models') + 'Ver todos em caixas, com prévia…</button>';
@@ -1924,7 +1947,7 @@
   }
 
   /* ---------------- slides (lateral) ---------------- */
-  function freshSlide(s) { var c = clone(s), map = {}; c.id = uid(); c.els = (c.els || []).map(function (x) { map[x.id] = uid(); x.id = map[x.id]; return x; }); remapLinks(c.els, map); return c; }
+  function freshSlide(s) { var c = clone(s), map = {}; c.id = uid(); c.els = (c.els || []).map(function (x) { map[x.id] = uid(); x.id = map[x.id]; return x; }); remapLinks(c.els, map); remapBase(c.base, map); return c; }
   function dupSlide(i) { if (i == null) i = cur; if (editingId) endEdit(); deck.slides.splice(i + 1, 0, freshSlide(deck.slides[i])); cur = i + 1; pick([]); renderAll(); commit(); }
   function delSlide(i) {
     if (i == null) i = cur; if (editingId) endEdit();
@@ -2771,7 +2794,7 @@
   function icTrigNote(els) { var tr = (els[0].data && els[0].data.trig) || 'in-hover', o = (RT.IC_TRIGS || []).filter(function (x) { return x[0] === tr; })[0]; return 'na apresentação: ' + (o ? o[1].toLowerCase() : 'ao entrar'); }
   var GX_TAG = { in: 'Entrada', emph: 'Ênfase', loop: 'Contínuo', hover: 'Mouse', tr: 'Transição' };
   var GX_PATH = { in: 'in', emph: 'emph', loop: 'loop', hover: 'hover' };
-  var GX_WHEN = { counter: 'Um KPI que conta até o valor diante da plateia.', progress: 'Meta × realizado, em barra ou anel.', beacon: 'Chamar atenção para um risco ou uma pendência.', headline: 'Título de abertura que entra palavra a palavra.', card: 'Iniciativas, pilares ou serviços em blocos.', holo: 'Destaque nobre que inclina com o mouse.', glass: 'Mensagem sobre foto ou fundo colorido.', quote: 'A mensagem-chave que o comitê deve levar.', amlines: 'Assinatura visual A&M em capas e encerramentos.' };
+  var GX_WHEN = { counter: 'Um KPI que conta até o valor diante da plateia.', progress: 'Meta × realizado, em barra ou anel.', beacon: 'Chamar atenção para um risco ou uma pendência.', headline: 'Título de abertura que entra palavra a palavra.', card: 'Iniciativas, pilares ou serviços em blocos.', holo: 'Destaque nobre que inclina com o mouse.', glass: 'Mensagem sobre foto ou fundo colorido.', quote: 'A mensagem-chave que o comitê deve levar.', amlines: 'Assinatura visual A&M em capas e encerramentos.', persona: 'Um personagem A&M que fala, aponta, anda e reage ao clique na apresentação.', bubble: 'Fala, pensamento ou grito ao lado de quem fala; prende-se a conectores.' };
   var GX_SAMPLE = { 'in:draw': 'line', 'in:words': 'text', 'in:iris': 'photo', 'in:grow': 'bar', 'loop:flow': 'line', 'loop:beacon': 'badge', 'loop:wiggle': 'badge', 'hover:spot': 'trio', 'hover:uline': 'text', 'hover:inzoom': 'photo', 'hover:zoom': 'photo' };
   var GX_DUR = { draw: 1000, iris: 900, land: 950, flip: 850, grow: 800 };
   var GX_IMG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0B3A63"/><stop offset="1" stop-color="#7EA1C3"/></linearGradient></defs><rect width="640" height="400" fill="url(#s)"/><circle cx="462" cy="140" r="48" fill="#F78C16"/><path d="M0 270L120 186L232 252L352 164L474 258L566 206L640 246V400H0Z" fill="#43698F"/><path d="M0 326L152 250L304 314L436 240L640 322V400H0Z" fill="#002A46"/></svg>');
@@ -2784,7 +2807,7 @@
     Object.keys(RT.FX).forEach(function (k) {
       var d = RT.FX[k], fam = d.model ? 'model' : 'cmp';
       /* ícones: uma caixa de componente por tipo; cada movimento do ícone vira uma caixa da família “Ícones animados” */
-      if (d.gal) { L.push({ id: 'cmp:' + k, fam: 'cmp', kind: k, name: d.name, tip: d.tip || '', when: d.gal === 'icon' ? '54 ícones que se desenham e se movem; escolha o ícone no painel.' : 'Dois estados que se alternam: problema → solução, queda → alta…', cat: d.cat });
+      if (d.gal) { L.push({ id: 'cmp:' + k, fam: 'cmp', kind: k, name: d.name, tip: d.tip || '', when: d.gal === 'icon' ? '54 ícones que se desenham e se movem; escolha o ícone no painel.' : GX_WHEN[k] || 'Dois estados que se alternam: problema → solução, queda → alta…', cat: d.cat });
         if (d.gal === 'icon') d.variants.forEach(function (v) { L.push({ id: 'icon:' + v[0], fam: 'icon', kind: k, variant: v[0], name: v[1], host: d.name, tip: v[2] || '', when: v[2] || '', cat: d.cat }); });
         return; }
       if (d.variants && d.variants.length) d.variants.forEach(function (v) { L.push({ id: fam + ':' + k + ':' + v[0], fam: fam, kind: k, variant: v[0], name: v[1], host: d.name, tip: v[2] || '', when: d.name + ' · ' + (v[2] || ''), cat: d.cat || GX_CHIP[fam] }); });
@@ -2904,11 +2927,29 @@
   }
   function gxApply() {
     var q = norm(gx.q).trim().split(/\s+/).filter(Boolean), n = 0;
-    $$('#drawerBody .gx-box').forEach(function (bx) { var ok = (gx.fam === 'all' || bx._it.fam === gx.fam) && q.every(function (w) { return bx.dataset.kw.indexOf(w) >= 0; }); bx.hidden = !ok; if (ok) n++; });
+    $$('#drawerBody .gx-box').forEach(function (bx) { var ok = (gx.fam === 'all' || bx._it.fam === gx.fam) && q.every(function (w) { return bx.dataset.kw.indexOf(w) >= 0; }); bx.hidden = !ok; if (ok) n++; if (bx._it.kind === 'persona' && bx._it.fam === 'cmp') gxPreset(bx, q); });
     $$('#drawerBody .gx-sec').forEach(function (s) { s.hidden = !$$('.gx-box', s).some(function (bx) { return !bx.hidden; }); });
     $$('#drawerBody [data-gf]').forEach(function (c) { var on = c.dataset.gf === gx.fam; c.classList.toggle('on', on); c.setAttribute('aria-pressed', on ? 'true' : 'false'); });
     $('#gxShown').textContent = n === gx.items.length ? '' : 'mostrando ' + n + ' de ' + gx.items.length;
     $('#gxEmpty').hidden = n > 0;
+  }
+  /* S35: a busca casou com um personagem do elenco (“mestre de obras”): o card mostra, prova e insere esse personagem */
+  var GX_GEN = { personagem: 1, personagens: 1, boneco: 1, bonecos: 1, mascote: 1, avatar: 1, am: 1, a: 1, de: 1, da: 1, do: 1 }, GX_SYN = { robo: 'ia', robos: 'ia', inteligencia: 'ia', artificial: 'ia' };
+  /* casamento por palavra (prefixo de uma palavra inteira), com prioridade: nome igual > todas as palavras no nome > todas no nome ou na descrição */
+  function gxPresetOf(q) {
+    var P = RT.personas; if (!P) return ''; var ws = q.map(function (w) { return GX_SYN[w] || w; }).filter(function (w) { return !GX_GEN[w]; }); if (!ws.length) return '';
+    var tk = function (s) { return norm(s).split(/[^a-z0-9]+/).filter(Boolean); }, all = function (toks) { return ws.every(function (w) { return toks.some(function (t) { return t === w || t.indexOf(w) === 0; }); }); };
+    var best = '', score = 0;
+    P.PRESETS.forEach(function (p) { var nt = tk(p[1]), sc = nt.join(' ') === ws.join(' ') ? 3 : all(nt) ? (ws.every(function (w) { return nt.indexOf(w) >= 0; }) ? 2.5 : 2) : all(nt.concat(tk(p[3]))) ? 1 : 0; if (sc > score) { score = sc; best = p[0]; } });
+    return best;
+  }
+  function gxPreset(bx, q) {
+    var P = RT.personas, it = bx._it, v = gxPresetOf(q);
+    if ((it.variant || '') === v) return;
+    var b = bx.querySelector('.gx-ins'), nm = bx.querySelector('.gx-ft b'), pr = v && P.PRESETS.filter(function (p) { return p[0] === v; })[0];
+    if (!it._name) it._name = it.name; it.name = pr ? 'Personagem · ' + pr[1] : it._name; if (nm) { nm.textContent = it.name; nm.title = it.name; }
+    if (v) { it.variant = v; bx.dataset.v = v; if (b) b.dataset.v = v; } else { delete it.variant; delete bx.dataset.v; if (b) delete b.dataset.v; }
+    if (bx._st) { if (bx._clean) { bx._clean(); bx._clean = null; } bx._st.remove(); bx._st = null; gxRender(bx); }
   }
   function gxFilter(f) { gx.fam = f; gxApply(); $('#drawerBody').scrollTop = 0; }
   function gxNames(list) { var n = list.slice(0, 2).map(function (e) { return '<b>' + esc(elName(e)) + '</b>'; }).join(', '); return n + (list.length > 2 ? ' e mais ' + (list.length - 2) : ''); }
@@ -3251,6 +3292,12 @@
     ['board', 'Quadro inserido. Defina as colunas e as notas iniciais no painel; na apresentação, cada coluna ganha “+ Nota”.', 'note'],
     ['vote', 'Votação inserida. Escreva as opções e os pontos por pessoa no painel; na apresentação, cada um distribui os pontos e vota.', 'vote'],
     ['timer', 'Cronômetro inserido. Defina minutos e segundos no painel; na apresentação, Iniciar/Pausar, Reiniciar e ±1 min.', 'timer']];
+  /* S35: personagens A&M (rt-70-personas.js): um item por preset do elenco + o balão solto */
+  function personaItems() {
+    var P = RT.personas; if (!P || !RT.FX.persona) return [];
+    return P.PRESETS.map(function (p) { return { t: p[1], ic: 'persona', tip: p[3], fn: function () { insertFx('persona', null, null, p[0]); toast('Personagem inserido. Roupa, ferramenta, expressão, fala e movimento ficam no painel à direita; na apresentação ele reage ao clique.'); } }; })
+      .concat(RT.FX.bubble ? [{ sep: 1 }, { t: 'Balão de fala', ic: 'bubble', fn: function () { insertFx('bubble'); toast('Balão inserido: duplo clique escreve; prenda uma linha a ele para ligar a quem fala.'); } }] : []);
+  }
   function interactiveItems() { return INTERACTIVE.filter(function (o) { return RT.FX[o[0]]; }).map(function (o) { return { t: RT.FX[o[0]].name, ic: o[2] || 'form', fn: function () { insertFx(o[0]); toast(o[1]); } }; }); }
   function cardItems() { return $$('#mCard button').map(function (b) { return { t: b.textContent, ic: 'card', fn: function () { insertFx(b.dataset.fx, b.dataset.style || (b.dataset.fx === 'card' && dark() ? 'dark' : null)); } }; }); }
   function alignItems() {
@@ -3301,7 +3348,7 @@
         RT.ICONS ? { t: 'Ícone animado', ic: 'icons', sub: iconItems } : null,
         { t: 'Gráfico', ic: 'chart', sub: chartItems },
         RT.SMART_LAYOUTS ? { t: 'SmartArt', ic: 'smart', sub: smartItems } : null,
-        { t: 'Cards', ic: 'card', sub: cardItems }, RT.FX.form ? { t: 'Interativo', ic: 'form', sub: interactiveItems } : null, { t: 'Marca A&M', ic: 'brand', sub: brandItems }, { sep: 1 },
+        { t: 'Cards', ic: 'card', sub: cardItems }, RT.FX.form ? { t: 'Interativo', ic: 'form', sub: interactiveItems } : null, RT.FX.persona ? { t: 'Personagens', ic: 'persona', sub: personaItems } : null, { t: 'Marca A&M', ic: 'brand', sub: brandItems }, { sep: 1 },
         { t: 'Modelos…', ic: 'models', fn: function () { openDrawer(true, 'models'); } }, { t: 'Efeitos…', ic: 'fx', fn: function () { openDrawer(true, 'fx'); } }];
     },
     slide: function () {
@@ -3675,6 +3722,8 @@
     safeDeck: safeDeck, exportDeck: function (d) { return exportHTML(d); }, slug: slug, download: download, openObras: goObras,
     setTitle: function (t) { t = String(t == null ? '' : t).slice(0, 300); if (editingId) endEdit(); deck.title = t; $('#title').value = t; commit(); },
     openDrawer: openDrawer, renderAll: renderAll, commit: commit,
+    /* S38: atualização leve para extensões — redesenha só o elemento (do slide atual) e o painel, e as miniaturas dos slides i (sem o renderAll inteiro) */
+    refresh: function (el, slides) { if (el && slide().els.indexOf(el) >= 0) rerenderEl(el); (slides || []).forEach(function (i) { if (deck.slides[i]) renderThumb(i); }); if (el) renderProps(); },
     /* vazia = intocada: um slide branco, sem elementos, título padrão e sem histórico (título, fundo e desfazer contam como obra) */
     isEmpty: isBlank, get cur() { return cur; }, HK: HK, save: save,
     getDraft: function () { try { var r = localStorage.getItem('amStudio.draft'), d = r && JSON.parse(r); return d && Array.isArray(d.slides) && d.slides.length ? d : null; } catch (e) { return null; } },

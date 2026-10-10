@@ -1,8 +1,8 @@
 /* tests/load/editor-open.cjs — mede o tempo de abertura do editor em nuvem (/editor/<id> até a pílula "Salvo" e o conteúdo pronto)
-   e do editor original em file:// (até AMStudio pronto), em Chromium real (Playwright), N aberturas "frias" (contexto novo a cada vez).
+   e do editor autônomo publicado (AM-Studio-Editor.html da raiz) em file:// (até AMStudio pronto), em Chromium real (Playwright), N aberturas "frias" (contexto novo a cada vez).
    Roda como processo filho de run.js (NODE_PATH aponta para o Playwright global). Entrada por variáveis de ambiente:
      LOAD_BASE  (http://localhost:4402)   LOAD_COOKIES (JSON do context.addCookies)   LOAD_PRES (id da apresentação de referência)
-     LOAD_HEAVY (id de uma apresentação com muitas imagens, opcional)   LOAD_ORIGINAL (caminho do HTML original)   LOAD_N (10)
+     LOAD_HEAVY (id de uma apresentação com muitas imagens, opcional)   LOAD_ORIGINAL (caminho do editor autônomo: AM-Studio-Editor.html da raiz)   LOAD_N (10)
      LOAD_FONTS (pasta com gf.css e .woff2)   LOAD_OUT (pasta para capturas)   LOAD_RESULT (arquivo JSON de saída)
    Instantes medidos DENTRO da página com performance.now() (origem = início da navegação); precisão ≈ 1 quadro (16 ms) por ser sondagem por rAF. */
 'use strict';

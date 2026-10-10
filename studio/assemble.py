@@ -15,6 +15,76 @@ def rd(f): return open(f, encoding='utf-8').read() if os.path.exists(f) else ''
 def ext(pat): return sorted(glob.glob(pat))
 out = sys.argv[1] if len(sys.argv) > 1 else 'AM-Studio-Editor.html'
 
+# S37: o HTML montado vai SEM comentários, indentação e linhas vazias (as fontes continuam comentadas). Tokenizador mínimo e conservador:
+# strings e regex passam intactas; comentário de várias linhas vira quebra de linha (a inserção automática de ';' do JS não muda);
+# marcadores /*%%...%%*/ ficam. Cada pedaço limpo passa por node --check. AM_NOSTRIP=1 monta com os comentários (depuração).
+STRIP = os.environ.get('AM_NOSTRIP') != '1'
+_RE_OK = set('(,=:[!&|?{};+-*%<>~^')
+_RE_KW = {'return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'instanceof'}
+def strip_js(s):
+    if not STRIP or not s: return s
+    o = []; lit = 0; i = 0; n = len(s); bol = True
+    def sig():
+        k = len(o) - 1
+        while k >= 0 and o[k] in ' \t\n': k -= 1
+        if k < 0: return '', ''
+        c = o[k]
+        if not (c.isalnum() or c in '_$'): return c, ''
+        j = k
+        while j >= 0 and (o[j].isalnum() or o[j] in '_$'): j -= 1
+        return c, ''.join(o[j + 1:k + 1])
+    def nl():
+        nonlocal bol
+        while len(o) > lit and o[-1] in ' \t': o.pop()
+        if not bol: o.append('\n'); bol = True
+    while i < n:
+        c = s[i]
+        if c == '\n': nl(); i += 1; continue
+        if c in ' \t\r' and bol: i += 1; continue
+        if c in '"\'`':
+            j = i + 1
+            while j < n and s[j] != c: j += 2 if s[j] == '\\' else 1
+            o.extend(s[i:j + 1]); lit = len(o); bol = False; i = j + 1; continue
+        if c == '/' and s.startswith('//', i):
+            j = s.find('\n', i); i = n if j < 0 else j; continue
+        if c == '/' and s.startswith('/*', i):
+            j = s.find('*/', i + 2); j = n if j < 0 else j + 2; body = s[i:j]
+            if body.startswith('/*%%'): o.extend(body); lit = len(o); bol = False
+            elif '\n' in body: nl()
+            elif not bol and o[-1] not in ' \t': o.append(' ')
+            i = j; continue
+        if c == '/':
+            p, w = sig()
+            if not p or p in _RE_OK or w in _RE_KW:
+                j = i + 1; cls = False
+                while j < n and s[j] != '\n':
+                    if s[j] == '\\': j += 2; continue
+                    if s[j] == '[': cls = True
+                    elif s[j] == ']': cls = False
+                    elif s[j] == '/' and not cls: break
+                    j += 1
+                if j < n and s[j] == '/':
+                    j += 1
+                    while j < n and s[j].isalpha(): j += 1
+                    o.extend(s[i:j]); lit = len(o); bol = False; i = j; continue
+        o.append(c); bol = False; i += 1
+    return ''.join(o).strip('\n') + '\n'
+def strip_css(s):
+    if not STRIP or not s: return s
+    o = []; i = 0; n = len(s)
+    while i < n:
+        c = s[i]
+        if c in '"\'':
+            j = i + 1
+            while j < n and s[j] != c: j += 2 if s[j] == '\\' else 1
+            o.append(s[i:j + 1]); i = j + 1; continue
+        if s.startswith('/*', i) and not s.startswith('/*%%', i):
+            j = s.find('*/', i + 2); i = n if j < 0 else j + 2; continue
+        j = i + 1
+        while j < n and s[j] not in '"\'/': j += 1
+        o.append(s[i:j]); i = j
+    return re.sub(r'\n[ \t]*(?=\n)|(?<=\n)[ \t]+', '', ''.join(o))
+
 RTJS, RTCSS, EDJS, EDCSS = ext('rt-*.js'), ext('rt-*.css'), ext('ed-*.js'), ext('ed-*.css')
 # extensões: sintaxe conferida antes de montar (um erro num rt-*.js derrubaria o runtime inteiro)
 node = shutil.which('node')
@@ -51,16 +121,27 @@ if INST:
     lit = json.dumps(INST, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/')
     edjs = [(n, t.replace('/*%%INST_SPECS%%*/null', lit)) for n, t in edjs]
 # ';' entre arquivos: um arquivo terminado em "})(window.AMRT)" sem ponto e vírgula não vira chamada do próximo
-rt = rd('runtime.js') + ''.join('\n;/* ---- %s ---- */\n' % f + rd(f) for f in RTJS)
-css = rd('runtime.css') + ''.join('\n/* ---- %s ---- */\n' % f + rd(f) for f in RTCSS)
-edcss = ''.join('/* ---- %s ---- */\n' % f + rd(f) + '\n' for f in EDCSS)
-xe = rd('xedit.js'); hj = rd('history.js')
+rtraw = rd('runtime.js') + ''.join(rd(f) for f in RTJS); cssraw = rd('runtime.css') + ''.join(rd(f) for f in RTCSS); xeraw = rd('xedit.js')
+rt = strip_js(rd('runtime.js')) + ''.join('\n;/* ---- %s ---- */\n' % f + strip_js(rd(f)) for f in RTJS)
+css = strip_css(rd('runtime.css')) + ''.join('\n/* ---- %s ---- */\n' % f + strip_css(rd(f)) for f in RTCSS)
+edcss = ''.join('/* ---- %s ---- */\n' % f + strip_css(rd(f)) + '\n' for f in EDCSS)
+xe = strip_js(xeraw); hj = strip_js(rd('history.js'))
+js = strip_js(js); cjs = strip_js(cjs); ccss = strip_css(ccss); edjs = [(n, strip_js(t)) for n, t in edjs]
+h = re.sub(r'(<style[^>]*>)(.*?)(</style>)', lambda m: m.group(1) + strip_css(m.group(2)) + m.group(3), h, flags=re.S)
+if node and STRIP:  # o que foi limpo continua JS válido (um erro do tokenizador derrubaria o editor inteiro)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        for nm, t in [('editor.js', js), ('cover.js', cjs), ('history.js', hj), ('runtime+rt.js', rt)] + edjs:
+            if not t: continue
+            fp = os.path.join(td, re.sub(r'[^\w.+-]', '_', nm)); open(fp, 'w', encoding='utf-8').write(t)
+            r = subprocess.run([node, '--check', fp], capture_output=True, text=True)
+            assert r.returncode == 0, 'limpeza de comentários quebrou %s:\n%s' % (nm, r.stderr)
 
 alljs = rt + js + cjs + xe + hj + ''.join(t for n, t in edjs)
 assert '</script' not in alljs.lower(), '"</script" no JS'
 assert '</style' not in (css + ccss + edcss).lower(), '"</style" no CSS'
 # CR-04: o arquivo exportado (runtime + rt-* + xedit) nunca contém onerror/onmouseover/onclick, nem em comentários
-bad = re.search(r'onerror|onmouseover|onclick', rt + css + xe, re.I)
+bad = re.search(r'onerror|onmouseover|onclick', rtraw + cssraw + xeraw + rt + css + xe, re.I)
 assert not bad, 'texto proibido no runtime exportado: %r' % bad.group(0)
 
 h = h.replace('/*%%RTCSS%%*/', css).replace('/*%%RTJS%%*/', rt).replace('/*%%EDITOR%%*/', js)

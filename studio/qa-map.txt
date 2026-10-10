@@ -1,0 +1,27 @@
+# qa-map.txt — mapa do `./qa-gate.sh affected`: padrões (glob do arquivo alterado, relativo a studio/) : baterias que o exercitam.
+# test.js e test2.js rodam sempre; teste alterado roda ele mesmo. Arquivo que não casa com nenhuma linha (ou mudança em ../am, ../fonts2)
+# → portão completo. Uma linha com “:” e nada depois = não aciona bateria. Etapa nova: acrescente a linha do módulo novo.
+editor.js editor.html ed-slide.css : test-core.js test-s00.js
+runtime.js runtime.css : test-core.js test-s00.js test-s01.js
+cover.* : test-cover.js test-s02.js test-s34-institucional.js test-s36-estudio.js
+history.js : test-s02.js
+ed-40-export.* : test-core.js test-s22-pdf.js test-s21b-revisao.js test-s23-pptx.js
+ed-41-pptx.* : test-core.js test-s23-pptx.js test-s24-import.js test-s21b-revisao.js
+ed-42-import.* : test-core.js test-s24-import.js test-s34-institucional.js test-s29-marca.js
+ed-43-brand.* : test-core.js test-s29-marca.js test-s34-institucional.js test-s20-recolor.js
+ed-44-batch.* : test-core.js test-s33-lote.js
+ed-45-institucional.js inst/* tools/inst-check.js : test-core.js test-s34-institucional.js test-s28-layouts.js test-cover.js test-s90-perf.js
+ed-46-personas.* rt-70-personas.* : test-s35-personagens.js test-s36-estudio.js test-s38-acabamento.js
+ed-colors.* : test-core.js test-s19-cores.js test-s20-recolor.js test-s29-marca.js
+rt-05-pal.js : test-s20-recolor.js test-s29-marca.js test-s35-personagens.js test-s36-estudio.js
+rt-10-shapes.js : test-s04.js test-s17-girar.js test-s32-conectores.js
+rt-150-nav.* : test-s15-nav.js test-s21-ocultar.js
+rt-20-icons.* : test-s03.js
+rt-30-charts.* : test-s05.js test-s19-cores.js
+rt-40-smartart.* : test-s06.js test-s32-conectores.js
+rt-60-forms.* : test-s30-forms.js
+rt-61-workshop.* : test-s31-workshop.js
+rt-models2.* : test-s07.js test-s20-recolor.js
+rt-models3.* : test-s07b.js test-s20-recolor.js
+docs/* *.md qa-map.txt qa-gate.sh publish.sh test-sNN-template.js .gitignore :
+# assemble.py fica fora do mapa de propósito: mudar a montagem muda o HTML inteiro → portão completo

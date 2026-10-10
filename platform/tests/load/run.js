@@ -10,7 +10,7 @@
         mix de tests/load/scenario.cjs (autosave a cada 3–5 s, 20 % com imagem nova, cópias, comentários, versões, downloads, sondas);
      5. mede por endpoint (req/s, p50/p95/p99, erros por código), Postgres (pg_stat_activity, tamanho antes/depois), arquivos (nº/bytes),
         memória e CPU do processo da API; verifica integridade (último PUT 200 = estado do servidor), vazamento (sondas) e deduplicação;
-     6. abre o editor em nuvem 10× com Playwright (até "Salvo") e o original em file:// 10× (até AMStudio pronto);
+     6. abre o editor em nuvem 10× com Playwright (até "Salvo") e o editor autônomo publicado (AM-Studio-Editor.html da raiz) em file:// 10× (até AMStudio pronto);
      7. escreve docs/evidencias/carga.md (+ JSON bruto em .tmp/load/) e encerra o dev.js (kill <pid>).
    Opções: --port 4402 --db canteiro_t_load --phases "50x180:keep,50x180:clear,100x60:clear" --pool 30 --browser-n 10 --skip-browser --no-report
    Sai com código 1 se algum critério falhar nas fases de 50 usuários (p95 PUT /content ≤ 800 ms, p95 GET ≤ 300 ms, 0 erros 5xx, 0 perda de dados). */
@@ -262,7 +262,7 @@ async function browserPhase(users, images, world, sql) {
   const heavy = world.presentations.find((p) => p.ownerId === u0.user.id);
   const [hv] = heavy ? await sql`select slide_count, octet_length(content::text)::int as bytes, (select count(*)::int from app.asset_refs r where r.presentation_id = p.id and r.version_no = 0) as assets from app.presentations p where id = ${heavy.id}::uuid` : [null];
   const resultFile = path.join(OUT, `editor-open-${STAMP}.json`);
-  const env = { ...process.env, NODE_PATH: '/opt/node22/lib/node_modules', LOAD_BASE: ORIGIN, LOAD_COOKIES: JSON.stringify(u0.exportCookies('localhost')), LOAD_PRES: r.json.id, LOAD_HEAVY: heavy ? heavy.id : '', LOAD_ORIGINAL: path.join(REPO, 'original', 'Canteiro-AM (3).html'), LOAD_N: String(BROWSER_N), LOAD_FONTS: path.join(REPO, 'fonts2'), LOAD_OUT: OUT, LOAD_RESULT: resultFile };
+  const env = { ...process.env, NODE_PATH: '/opt/node22/lib/node_modules', LOAD_BASE: ORIGIN, LOAD_COOKIES: JSON.stringify(u0.exportCookies('localhost')), LOAD_PRES: r.json.id, LOAD_HEAVY: heavy ? heavy.id : '', LOAD_ORIGINAL: path.join(REPO, 'AM-Studio-Editor.html'), LOAD_N: String(BROWSER_N), LOAD_FONTS: path.join(REPO, 'fonts2'), LOAD_OUT: OUT, LOAD_RESULT: resultFile };
   const t0 = Date.now();
   await new Promise((res, rej) => { const p = spawn(process.execPath, [path.join(HERE, 'editor-open.cjs')], { env, stdio: ['ignore', 'inherit', 'inherit'] }); p.on('exit', (c) => (c === 0 ? res() : rej(new Error('editor-open.cjs saiu com ' + c)))); });
   const data = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
@@ -318,8 +318,8 @@ async function main() {
   log(`banco: ${round(result.baseline.db.bytes / 1048576)} → ${round(result.after.db.bytes / 1048576)} MB · objetos criados nesta execução: ${result.after.objects.countSince} (${round(result.after.objects.bytesSince / 1048576)} MB)`);
 
   if (!args['skip-browser']) {
-    log('Playwright: abrindo o editor em nuvem e o original…');
-    try { result.browser = await browserPhase(users, images, world, sql); log(`  nuvem: até "Salvo" p50 ${result.browser.cloud.saved?.p50} ms (${result.browser.cloud.ok}/${result.browser.cloud.n}) · original: AMStudio pronto p50 ${result.browser.original.studio?.p50} ms (${result.browser.original.ok}/${result.browser.original.n})`); }
+    log('Playwright: abrindo o editor em nuvem e o autônomo publicado…');
+    try { result.browser = await browserPhase(users, images, world, sql); log(`  nuvem: até "Salvo" p50 ${result.browser.cloud.saved?.p50} ms (${result.browser.cloud.ok}/${result.browser.cloud.n}) · autônomo: AMStudio pronto p50 ${result.browser.original.studio?.p50} ms (${result.browser.original.ok}/${result.browser.original.n})`); }
     catch (e) { result.browser = { error: String(e.message) }; log('  Playwright falhou: ' + e.message); }
   }
   result.serverLog = parseServerLog(devLogPath, result.phases);

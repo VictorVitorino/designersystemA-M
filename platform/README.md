@@ -5,7 +5,9 @@ continua em outro computador, e todo o acervo fica visível para a equipe. **Só
 outra pessoa cria uma cópia.** Um administrador convida e gerencia; os demais são membros.
 
 O editor em si (`../studio/`) **não foi alterado**: a versão em nuvem é o mesmo editor com uma extensão acrescentada no build e **seis ajustes de texto de uma linha**, verificados (cada um precisa existir exatamente uma vez no fonte, senão o build falha; `studio-cloud/patches.json`).
-A prova disso está em [`docs/evidencias/paridade.md`](docs/evidencias/paridade.md) (todos os efeitos, modelos, layouts e quadros de animação comparados pixel a pixel com o original).
+A prova disso está em [`docs/evidencias/paridade.md`](docs/evidencias/paridade.md) (todos os efeitos, modelos, layouts e quadros de animação comparados pixel a pixel com o editor autônomo publicado na raiz, `../AM-Studio-Editor.html`).
+`../original/` guarda só a cópia preservada do arquivo enviado (S34b, conferida por `original/SHA256SUMS`); o build em nuvem segue o build publicado na raiz,
+que cada etapa de `studio/` atualiza depois do portão.
 
 ## Comece em um comando (local)
 
@@ -42,9 +44,9 @@ npm run build:web        # gera dist/public (o test:security lê o site gerado: 
 npm run test:security    # suíte ofensiva, CSRF, cabeçalhos, sessões e limites
 npm run test:e2e         # ponta a ponta com a pilha real (Playwright)
 npm run test:load        # 50 usuários simultâneos
-npm run test:parity      # prova de paridade original × editor em nuvem (≈ 1 h); depois: npm run test:parity:evidence
+npm run test:parity      # prova de paridade autônomo publicado (../AM-Studio-Editor.html) × editor em nuvem (≈ 1 h); depois: npm run test:parity:evidence
 npm run build:web        # dist/public + csp.json + vercel.json
-npm run build:cloud      # editor em nuvem (e prova que o autônomo segue byte-idêntico)
+npm run build:cloud      # editor em nuvem (e prova que o autônomo de studio/ = o build publicado na raiz e que original/ confere)
 node tools/backup.js all # backup cifrado do banco e dos arquivos (ver docs/BACKUP-E-RESTAURACAO.md)
 ```
 

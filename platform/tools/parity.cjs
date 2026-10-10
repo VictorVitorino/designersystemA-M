@@ -6,6 +6,7 @@
    Uso:  node tools/parity.cjs --a <original.html> --b <candidato.html> --out <pasta> [--groups anims,gallery,models,structure] [--no-frames] [--quick]
                                [--deck <pasta de uma execução anterior>] [--only 12,57,300]   (reutiliza o deck de prova; compara só esses índices)
                                [--resume]   (continua uma execução interrompida: lê <out>/progress.jsonl e <out>/deck-prova.json; cada slide é gravado ao terminar)
+                               [--part k/n] [--no-final]   (uma fatia dos slides, sem exportações nem relatório: usado por tools/parity-split.cjs)
 
    Como funciona
    1. Abre A e B no MESMO Chromium (--disable-lcd-text, viewport 1280×720), fontes do Google roteadas para ../fonts2 (sem rede),
@@ -68,6 +69,12 @@ const INIT = `
   Math.random = function(){ return rnd(); };
   /* crypto.getRandomValues só para ids: também determinístico (xorshift) */
   if (window.crypto && crypto.getRandomValues) { var x = 123456789; crypto.getRandomValues = function(arr){ for (var i = 0; i < arr.length; i++){ x ^= x << 13; x ^= x >>> 17; x ^= x << 5; arr[i] = (x >>> 0) & (arr.BYTES_PER_ELEMENT === 1 ? 255 : arr.BYTES_PER_ELEMENT === 2 ? 65535 : 4294967295); } return arr; }; }
+  /* rAF com a fase presa ao instante do pedido (pelo setTimeout do relógio falso): o page.clock alinha os quadros a uma grade de 16 ms contada da
+     origem da página, que varia com o tempo REAL de carga; um contador que mede o próprio início com performance.now() caía em quadros diferentes
+     a cada carga (A × A divergia em t = 400 ms: "2,8" × "2,9"). Assim A e B veem a mesma sequência de quadros relativa ao início de cada efeito. */
+  var _st = window.setTimeout, _ct = window.clearTimeout;
+  window.requestAnimationFrame = function(cb){ return _st(function(){ cb(performance.now()); }, 16); };
+  window.cancelAnimationFrame = function(id){ _ct(id); };
   window.__amErrors = [];
   window.addEventListener('error', function(e){ window.__amErrors.push(String(e.message)); });
 })();`;
@@ -430,7 +437,9 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     n.clockWarnings = clockFailures - cf0; if (n.clockWarnings) row.clockWarnings = n.clockWarnings;
     return { row, mism, noise, files, n };
   }
-  const idx = [...Array(N).keys()].filter((i) => !ONLY || ONLY.has(i)); report.only = ONLY ? idx : null;
+  /* --part k/n (tools/parity-split.cjs): este processo compara só os slides i com i % n === k (intercalados, carga equilibrada) */
+  const PART = /^(\d+)\/(\d+)$/.exec(String(args.part || '')), PK = PART ? +PART[1] : 0, PN = PART ? +PART[2] : 1;
+  const idx = [...Array(N).keys()].filter((i) => (!ONLY || ONLY.has(i)) && i % PN === PK); report.only = ONLY || PART ? idx : null;
   const identity = { deckSha: sha(deckJson).slice(0, 16), aSha: report.aSha.slice(0, 16), bSha: report.bSha.slice(0, 16), harnessSha: HARNESS_SHA, frameT: FRAME_T.join(','), trT: TR_T.join(','), hoverT: HOVER_T.join(','), noise: `${NOISE.px}/${NOISE.pct}/${NOISE.maxCh}`, promote: PROMOTE };
   report.identity = identity; report.frameT = FRAME_T; report.trT = TR_T; report.hoverT = HOVER_T; report.promote = PROMOTE;
   const sameIdentity = (rec) => rec.identity && Object.keys(identity).every((k) => String(rec.identity[k]) === String(identity[k]));
@@ -470,20 +479,21 @@ function b64png(dataUrl) { return Buffer.from(String(dataUrl).split(',')[1] || '
     addN(r.n);
     if (k % 25 === 0 || k === idx.length - 1) log(`slide ${i + 1}/${N}${ONLY ? ' (' + (k + 1) + '/' + idx.length + ')' : ''} · dom ${domSame} · raster ${rasterSame} · quadros ${framesSame}/${framesTotal} · transições ${trSame}/${trTotal} · hover ${hoverSame}/${hoverTotal} · animações ${animsSame}/${animsTotal} · divergências ${report.mismatches.length} · recapturas ${retried} (instáveis ${unstable})`);
   }
+  if (args['no-final']) { log(`parte concluída (--no-final): ${idx.length} slides em ${PROG}; camadas globais e relatório ficam para o --resume que junta as partes`); await browser.close(); process.exit(0); }
   const NC = idx.length;   /* slides comparados (todos, salvo --only) */
   /* segmentos de execução (retomadas): lacunas > 10 min entre carimbos separam trechos; duração total = soma dos trechos */
   const segs = []; for (const t of stamps.map((x) => Date.parse(x)).sort((a, b) => a - b)) { const last = segs[segs.length - 1]; if (last && t - last.toMs <= 600000) { last.toMs = t; last.count++; } else segs.push({ fromMs: t, toMs: t, count: 1 }); }
   report.segments = segs.map((g) => ({ from: new Date(g.fromMs).toISOString(), to: new Date(g.toMs).toISOString(), slides: g.count, minutes: Math.round((g.toMs - g.fromMs) / 60000) }));
 
-  /* 5. exportações: HTML, PPTX */
-  const exA = await A.p.evaluate(() => AMStudio.exportHTML()), exB = await B.p.evaluate(() => AMStudio.exportHTML());
+  /* 5. exportações: HTML, PPTX (cada etapa conta como progresso para o watchdog: o PowerPoint de ~425 slides leva mais de 1 min por lado) */
+  lastProgress = Date.now(); const exA = await A.p.evaluate(() => AMStudio.exportHTML()), exB = await B.p.evaluate(() => AMStudio.exportHTML());
   report.exportHtml = { same: exA === exB, shaA: sha(exA).slice(0, 16), shaB: sha(exB).slice(0, 16), bytes: exA.length }; if (!report.exportHtml.same) { report.mismatches.push({ layer: 'export-html' }); fs.writeFileSync(path.join(OUT, 'diff', 'export-a.html'), exA); fs.writeFileSync(path.join(OUT, 'diff', 'export-b.html'), exB); }
   /* PowerPoint nos DOIS modos do editor: 'edit' (formas e textos editáveis — o caminho que mais exercita o conversor) e 'image' (uma imagem por slide) */
   async function pptx(p, mode) { return p.evaluate(async (mode) => { const b = await AMExport.pptxBuild(AMStudio.deck, { includeHidden: true, mode }); if (!b) return null; const ab = await b.arrayBuffer(); let s = ''; const u = new Uint8Array(ab); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }, mode); }
   report.exportPptx = {};
   for (const mode of ['edit', 'image']) {
     try {
-      const [pA, pB] = [await pptx(A.p, mode), await pptx(B.p, mode)];
+      lastProgress = Date.now(); const pA = await pptx(A.p, mode); lastProgress = Date.now(); const pB = await pptx(B.p, mode); lastProgress = Date.now();
       if (pA && pB) {
         fs.writeFileSync(path.join(OUT, `a-${mode}.pptx`), Buffer.from(pA, 'base64')); fs.writeFileSync(path.join(OUT, `b-${mode}.pptx`), Buffer.from(pB, 'base64'));
         const py = `import zipfile,hashlib,sys,json\nout={}\nfor t in ('a','b'):\n  z=zipfile.ZipFile(sys.argv[1]+'/'+t+'-'+sys.argv[2]+'.pptx'); out[t]={n:hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n!='docProps/core.xml'}\nsame=out['a']==out['b']\ndiff=[n for n in set(out['a'])|set(out['b']) if out['a'].get(n)!=out['b'].get(n)]\nprint(json.dumps({'same':same,'entries':len(out['a']),'diff':sorted(diff)[:30]}))`;

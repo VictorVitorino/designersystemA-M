@@ -17,7 +17,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.resolve(HERE, '../../web');
 const SCREENS = path.resolve(HERE, '../screens');
 const FONTS = process.env.AM_FONTS_DIR || path.resolve(HERE, '../../../fonts2');
-const ORIGINAL = path.resolve(HERE, '../../../original/Canteiro-AM (3).html');   // editor ORIGINAL montado: a fonte da verdade visual
+const EDITOR_PUBLICADO = path.resolve(HERE, '../../../AM-Studio-Editor.html');   // build autônomo publicado na raiz (o editor atual de studio/, montado): a fonte da verdade visual
 const COVER_JS = path.resolve(HERE, '../../../studio/cover.js');
 fs.mkdirSync(SCREENS, { recursive: true });
 
@@ -1275,7 +1275,7 @@ async function a11yAndResponsive() {
   check('pares de cor dos dois temas passam em AA (texto 4,5:1; borda de campo #7A8DA3 sobre branco 3:1, WCAG 1.4.11)', lowP.length === 0, lowP);
 }
 
-/* ═════════════════════════════ 9b. Família visual = editor original (medidas computadas) ═════════════════════════════ */
+/* ═════════════════════════════ 9b. Família visual = editor autônomo publicado (medidas computadas) ═════════════════════════════ */
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k]]));
 const same = (a, b, keys) => keys.every((k) => a[k] === b[k]);
 const fam0 = (f) => String(f).split(',')[0].replace(/["']/g, '').trim();
@@ -1283,13 +1283,13 @@ const PROPS = ['background-color', 'color', 'border-top-color', 'border-top-left
 /** Estilos computados (as mesmas propriedades) de um seletor ou elemento, num pseudo-elemento opcional. Roda na página. */
 const STYLE_FN = `window.__cs = (el, pseudo) => { const c = getComputedStyle(typeof el === 'string' ? document.querySelector(el) : el, pseudo || null); return Object.fromEntries(${JSON.stringify(PROPS)}.map((p) => [p, c.getPropertyValue(p)])); };`;
 
-/** Lê, no editor ORIGINAL (original/Canteiro-AM (3).html) com as mesmas fontes, os estilos dos componentes que a plataforma copia. */
+/** Lê, no editor autônomo publicado (AM-Studio-Editor.html da raiz; original/ é só a cópia do upload S34b) com as mesmas fontes, os estilos dos componentes que a plataforma copia. */
 async function editorStyles() {
   const ctx = await newCtx({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();   // fora de newPage(): o console do editor não conta como erro das páginas da plataforma
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: fs.readFileSync(path.join(FONTS, 'gf.css'), 'utf8') }));
   await page.route('https://fonts.gstatic.com/**', (r) => { const f = path.join(FONTS, path.basename(new URL(r.request().url()).pathname)); return fs.existsSync(f) ? r.fulfill({ status: 200, contentType: 'font/woff2', body: fs.readFileSync(f) }) : r.abort(); });
-  await page.goto(pathToFileURL(ORIGINAL).href);
+  await page.goto(pathToFileURL(EDITOR_PUBLICADO).href);
   await page.waitForFunction(() => window.AMCover && window.AMStudio, null, { timeout: 30000 });
   await page.evaluate(() => document.fonts.ready);
   await page.evaluate(STYLE_FN);
@@ -1334,7 +1334,7 @@ async function editorStyles() {
 }
 
 async function familiaVisual() {
-  head('9b. Família visual = editor original (estilos COMPUTADOS no editor × na plataforma)');
+  head('9b. Família visual = editor autônomo publicado (estilos COMPUTADOS no editor × na plataforma)');
   mock.reset();
   const E = await editorStyles();
   const u = await asUser('bia@am.test', { viewport: { width: 1440, height: 900 }, tag: 'familia' });

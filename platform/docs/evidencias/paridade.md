@@ -1,5 +1,43 @@
 # Prova de paridade — original × editor em nuvem (todos os efeitos, modelos, layouts e quadros)
 
+## Rodada da S38 (2026-10-10) — nuvem idêntica e acervo preservado
+
+**1. Build autônomo publicado × editor em nuvem: IDÊNTICO** — A `../AM-Studio-Editor.html` (`631ad7213fb7b63f…`), B `cloud-editor.html` (`9be82a9b0f3dd059…`), `npm run test:parity:split` retomado com `--resume` depois de uma queda do navegador (as partes continuam do último slide gravado). Catálogo, runtime e deck idênticos; DOM 425/425; raster 425/425; quadros 1263/1275 + 12 no envelope de ruído; transições 7/7; mouse 21/21; inventário de animações 425/425; HTML e os dois PowerPoints idênticos; 0 recapturas; 0 erros.
+
+**2. Acervo preservado: original (`original/Canteiro-AM (3).html`, S34b, antes dos personagens) × build atual** — o deck de prova é montado pelo catálogo do ORIGINAL (196 itens da gaveta, biblioteca 42, ícones 54, transformações 7, layouts 18, blocos 5, SmartArt 14, projetos prontos; 423 slides) e cada item é comparado nos dois builds:
+
+| Camada | Resultado |
+|---|---|
+| DOM renderizado por slide · raster 1280×720 · inventário de animações | **423/423 · 423/423 · 423/423 idênticos** |
+| Quadros do player (t = 0, 400, 1500 ms) | 1261/1269 idênticos + 8 no envelope de ruído |
+| Transições · mouse | 6/7 + 1 remedida (abaixo) · 19/21 + 2 no envelope de ruído |
+| PowerPoint editável · PowerPoint imagem | idênticos (1271 e 1285 entradas) |
+| Catálogo · runtime · HTML exportado | diferentes **por projeto**: o atual tem os 2 cartões novos (Personagem, Balão de fala), o runtime dos personagens e a montagem sem comentários (S37) |
+
+A transição `tr:slide` (slide 40) divergiu numa captura; remedida duas vezes: A × B → 0,024 % (costura de 1 px) e idêntica; A × A (o original contra ele mesmo) → idêntica e 0,006 % — ruído do compositor, não mudança. **Conclusão: nada do que existia antes dos personagens mudou de aparência, estrutura, animação ou exportação.**
+
+---
+
+## Rodada da S37 (build autônomo publicado × editor em nuvem, 2026-10-10)
+
+**Resultado: equivalentes** — lado A `../AM-Studio-Editor.html` (sha256 `e0cc4c0845f80e90…`, montagem enxuta da S37), lado B `.tmp/cloud-build/cloud-editor.html` (sha256 `2a7664233fe2b5f2…`); `npm run test:parity:split` (`--quick`, 2 processos, **54 min**; antes, um processo levava ~2 h), com `NODE_OPTIONS=--require tools/pw-local.cjs`.
+
+| Camada | Resultado |
+|---|---|
+| Catálogo (198 itens da gaveta, biblioteca 42, ícones 54, transformações 7, layouts 18, blocos 5, SmartArt 14), runtime embutido (CSS 153 894 B, JS 372 849 B), deck de prova (425 slides) | idênticos |
+| DOM por slide · raster 1280×720 (caminho do PDF) · inventário de animações | 425/425 · 425/425 · 425/425 idênticos |
+| Quadros do player (t = 0, 400, 1500 ms) | 1262/1275 idênticos + 11 no envelope de ruído + 2 divergências (Bolas de Harvey, contorno dos círculos: 543–613 px, máx. 53–58/255) |
+| Transições (t = 250 ms) · mouse (t = 250 ms) | 5/7 + 1 ruído + 1 divergência (`tr:slide`: coluna de 1 px na borda da lâmina, x = 1218) · 20/21 + 1 ruído |
+| HTML exportado · PowerPoint editável · PowerPoint imagem | idênticos (1277 e 1291 entradas, exceto a data) |
+| Erros de console/página · avisos de relógio · capturas que não estabilizaram | 0 · 0 · 0 |
+
+**As 3 divergências foram medidas de novo** (`--only 39,136,202 --no-final`): A × B duas vezes → as três idênticas nas duas (com recaptura da 1ª foto em parte delas); A × A (o MESMO arquivo nos dois lados) duas vezes → a Bola de Harvey divergiu numa delas com o mesmo padrão (543 px, máx. 53/255, só no anti-aliasing do contorno). São ruído de rasterização/compositor do Chromium, não diferença do editor em nuvem.
+
+**Harness corrigido nesta rodada** (`tools/parity.cjs`): (1) `requestAnimationFrame` passa pelo `setTimeout` do relógio falso com a fase presa ao pedido — o `page.clock` alinha os quadros a uma grade de 16 ms contada da origem da página, que varia com o tempo real de carga, e o contador (`data-count`) caía em quadros diferentes (A × A divergia em todo slide animado: “2,8” × “2,9”); (2) as exportações (HTML + 2 PowerPoints de 425 slides, > 1 min cada por lado) contam como progresso para o cão de guarda de 5 min; (3) `--part k/n` e `--no-final`, usados por `tools/parity-split.cjs`.
+
+---
+
+
 **Resultado: IDÊNTICO** — gerado em 2026-10-07T02:19:29.941Z por `platform/tools/parity.cjs` (33 min 12 s), documento montado por `tools/parity-evidence.cjs`. Relatório bruto: `platform/.tmp/parity/cloud/relatorio.{json,md}` (não versionado; reproduza com `npm run test:parity`).
 
 | Lado | Arquivo | SHA-256 |

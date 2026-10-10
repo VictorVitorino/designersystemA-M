@@ -1,4 +1,5 @@
-/* miniaturas-modelos.mjs — gera web/assets/modelos/modelo-1..6.png: o 1º slide de cada "Projeto pronto" da capa do editor ORIGINAL,
+/* miniaturas-modelos.mjs — gera web/assets/modelos/modelo-1..6.png: o 1º slide de cada "Projeto pronto" da capa do editor autônomo
+   publicado na raiz (AM-Studio-Editor.html = o build atual de studio/, que o build em nuvem segue; original/ é só a cópia do upload S34b),
    renderizado pelo próprio runtime (AMRT.renderSlide de AMCover.buildTemplate(i)). O acervo mostra estas imagens no diálogo
    "Nova a partir de projeto pronto" (a plataforma não carrega o runtime do editor). Rode de novo se os projetos prontos mudarem:
      /opt/node22/bin/node platform/tests/web/miniaturas-modelos.mjs
@@ -16,7 +17,7 @@ const { chromium } = require('playwright');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../../..');
 const FONTS = path.join(REPO, 'fonts2');
-const ORIGINAL = path.join(REPO, 'original', 'Canteiro-AM (3).html');
+const EDITOR_PUBLICADO = path.join(REPO, 'AM-Studio-Editor.html');
 const OUT = path.resolve(HERE, '../../web/assets/modelos');
 const W = 640, H = 360;
 
@@ -27,7 +28,7 @@ try {
   await ctx.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/css', body: fs.readFileSync(path.join(FONTS, 'gf.css'), 'utf8') }));
   await ctx.route('https://fonts.gstatic.com/**', (r) => { const f = path.join(FONTS, path.basename(new URL(r.request().url()).pathname)); return fs.existsSync(f) ? r.fulfill({ status: 200, contentType: 'font/woff2', body: fs.readFileSync(f) }) : r.abort(); });
   const page = await ctx.newPage();
-  await page.goto(`${pathToFileURL(ORIGINAL).href}?nocover`);
+  await page.goto(`${pathToFileURL(EDITOR_PUBLICADO).href}?nocover`);
   await page.waitForFunction(() => window.AMCover && window.AMRT && window.AMCover.templates.length === 6);
   await page.evaluate(() => document.fonts.ready);
   for (let i = 0; i < 6; i++) {

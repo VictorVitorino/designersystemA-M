@@ -3,13 +3,20 @@
 Este documento descreve o build "cloud" do editor Canteiro, a extensão `ed-50-cloud.js`, o módulo compartilhado `cloud-core.js`, o build do site com CSP
 e as provas de preservação. O contrato da API é `platform/docs/API.md` (fonte da verdade); aqui só o que o cliente faz com ele.
 
-## 1. Princípio: o editor original não muda
+## 1. Princípio: a plataforma não muda o editor
 
 - `studio/` e `original/` ficam **intocados** (os testes calculam o hash de cada arquivo antes e depois do build e conferem `git status`).
-- `python3 studio/assemble.py` continua produzindo o arquivo **byte-idêntico** ao original: sha256 `dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099`.
+- Duas garantias, separadas:
+  - **Original**: `original/Canteiro-AM (3).html` é a cópia preservada do arquivo enviado (S34b) e confere com `original/SHA256SUMS`
+    (`ORIGINAL_SHA256` = `dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099`). Ele **não** precisa ser igual ao build atual: `studio/` evolui, o original não.
+  - **Build publicado**: `AM-Studio-Editor.html` e `Canteiro-AM.html` na raiz são o build que a última etapa de `studio/` publicou depois do portão
+    (regra 5 do processo no `CLAUDE.md`). `python3 studio/assemble.py` tem de produzir esse arquivo **byte a byte** (`node tools/build-cloud-editor.js --verify-standalone`;
+    hoje sha256 `631ad7213fb7b63f…`, S38). O build em nuvem e a prova de paridade (lado A = `../AM-Studio-Editor.html`) seguem esse build, não o `original/`.
+  - Uma etapa nova em `studio/` muda o SHA-256 do build sem quebrar a plataforma: passa o portão de `studio/`, publica na raiz e roda de novo
+    `--verify-standalone`, `tests/cloud/preservacao.test.js` e `npm run test:parity`. Os patches continuam sendo conferidos 1× cada (se o trecho mudou, o build falha).
 - O build cloud trabalha numa **cópia** (`platform/.tmp/cloud-build`): acrescenta `ed-49-cloud-core.js` e `ed-50-cloud.js/.css` e aplica **6 patches** de texto
   (`studio-cloud/patches.json`, cada `antes` exatamente 1×). `preservacao.test.js` prova que *build cloud − extensão = build autônomo + patches* por igualdade exata de texto.
-- Sem `window.AM_CLOUD` o editor cloud é o original (modo inerte): o portão de `studio/` roda sobre ele numa cópia (`platform/.tmp/preserve`).
+- Sem `window.AM_CLOUD` o editor cloud é o editor autônomo (modo inerte): o portão de `studio/` roda sobre ele numa cópia (`platform/.tmp/preserve`).
 
 ## 2. Como o editor sabe que está na nuvem
 
@@ -19,11 +26,11 @@ O build acrescenta ao `<head>` um pequeno script (com hash na CSP) que lê `loca
 |---|---|
 | `/editor/<uuid>` | `{apiBase:'/api', presentationId, mode:'edit', pdfjsBase:'/vendor/pdfjs-4.10.38/'}` |
 | `/visualizar/<uuid>` | idem, `mode:'view'` |
-| qualquer outro (inclusive `file://`) | não define nada → editor original |
+| qualquer outro (inclusive `file://`) | não define nada → editor autônomo (modo inerte) |
 
 A Vercel serve o **mesmo** HTML nas duas rotas (rewrites `/editor/:id(<uuid>)` e `/visualizar/:id(<uuid>)`). **Sem o UUID** de uma apresentação
 (`/editor`, `/editor/`, `/editor/abc`, `/editor/index.html`, `/visualizar/x`…) o servidor responde **302 → `/acervo`** — nos `redirects` do `vercel.json`
-(gerados por `tools/build-web.js`) e em `src/static.js` (`editorWithoutId`). Assim um link cortado nunca abre o editor original fora da nuvem (sem salvar
+(gerados por `tools/build-web.js`) e em `src/static.js` (`editorWithoutId`). Assim um link cortado nunca abre o editor autônomo fora da nuvem (sem salvar
 no servidor e sem aviso). O modo inerte continua existindo para `file://` e para o portão de preservação (cópia local do HTML).
 
 ## 3. Fluxos
@@ -165,7 +172,7 @@ dono da apresentação"; depois: "Resposta enviada com o seu nome ao dono da apr
 
 ## 4. CSP e cabeçalhos (`tools/csp.js`, `tools/build-web.js`)
 - Páginas comuns: `default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`.
-- Editor (`/editor/`, `/visualizar/`): `script-src` = **um `'sha256-…'` por `<script>` inline executável do HTML montado** (hoje 15) + `'strict-dynamic'`; `style-src 'self' 'unsafe-inline' fonts.googleapis.com` (o editor usa `style=""` em centenas de pontos);
+- Editor (`/editor/`, `/visualizar/`): `script-src` = **um `'sha256-…'` por `<script>` inline executável do HTML montado** (hoje 16) + `'strict-dynamic'`; `style-src 'self' 'unsafe-inline' fonts.googleapis.com` (o editor usa `style=""` em centenas de pontos);
   `font-src fonts.gstatic.com data:`; `connect-src 'self' fonts.googleapis.com fonts.gstatic.com script.google.com script.googleusercontent.com`; `worker-src 'self' blob:`; `frame-src 'self' blob:`; `frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests`.
   Blocos `application/json`/`text/plain` não executam e não levam hash. O hash é calculado do HTML final (inclui o script de boot).
 - Todas as páginas: HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP `same-origin`, `X-Robots-Tag: noindex`.
@@ -237,8 +244,8 @@ viram no-op e "Minhas obras…" leva ao acervo da nuvem. O que ainda fica neste 
 |---|---|---|
 | `node --test tests/cloud/cloud-core.test.js` | hash e JSON canônico idênticos ao `src/lib/canonical.js` em 300 valores gerados (+ erros iguais para NaN/BigInt/ciclos…); `dataUrl` ida-e-volta byte a byte; externalizar/hidratar sem alterar a entrada, dedup (2× a mesma imagem = 1 envio), cache (0 hashes e 0 consultas no 2º salvamento), concorrência limitada, lotes de 200, falha parcial (aviso SVG + `stats.missing`, e a referência volta ao salvar), `shrink` para imagens grandes, `extractDeckFromHtml`, `parseAcervoJson`, desenho em PNG de SVG/BMP/AVIF/ICO antes de externalizar (entrada intacta, cache, falha mantém o original), dados locais (troca de pessoa e Sair) | **17 de 17** |
 | `node tests/cloud/editor-cloud.test.js` | Chromium real contra o mock em memória, servido **com a CSP de `dist/csp.json`**: 20 cenários — boot/modo inerte/hashes da CSP, hidratação, autosave (debounce, `baseRev`, sem `data:` no corpo, dedup, miniatura, Ctrl+Z, título), imagem > 4 MB, offline→online, fechar com pendência e recuperar/descartar, backoff, conflito 409 (3 saídas), histórico (listar/pré-visualizar/restaurar/baixar), Ctrl+S × botão Salvar, menu e teclado, atalhos do editor (F1, F5/Esc, Ctrl+A/D/Delete), sessão (refresh, expirada, nova aba), dono × não-dono × admin, visualizar, criar cópia, formulário/quadro/votação ↔ API (inclusive 503 e restauração em outro computador), exportar HTML/PDF/PowerPoint, importar PPTX e PDF, Abrir…, beforeunload, pílula de 1180 a 1920 px (online e offline), 390 px; e as correções da auditoria (cenários 21–38): SVG/BMP/ICO salvos como PNG, Novo cria outra, Abrir… com escolha nova × substituir, ?modelo/?historico/?exportar, Minhas obras → acervo e capa só com o manual, computador compartilhado e Sair, 422 com o slide e sem repetir o PUT, 429 sem "Sem conexão", tetos 64/256 KB e clientId, preferências (outro computador, 429 com Retry-After, ler e mesclar antes de gravar), textos do formulário (aviso antes de responder, "Limpar" só deste computador) e das notas do player, comentários (editor e visualizar), teclado (menu, caixas, telas de abertura/erro), rótulos, imagens https, visual = modal do editor, relógio atrasado, limite de 4 MB em bytes UTF-8 | **171 de 171** (38 cenários), 0 violações de CSP, 0 erros de console/página |
-| `node tests/cloud/preservacao.test.js` (`PRESERVE_FULL=1`: portão completo) | `studio/` e `original/` intactos; build autônomo byte-idêntico (sha256 `dc93ceac…5099`); *cloud − extensão = autônomo + 6 patches* (igualdade exata); patches errados quebram o build; 1994 KB ≤ 2000 KB; portão de `studio/` sobre o build cloud sem `AM_CLOUD` | **15 de 15**, incluindo `GATE PASS` com as **35 baterias** (526 s) |
-| `node tools/build-web.js --check` | `vercel.json` (CSP com os hashes dos 15 scripts inline) confere com o build | ok |
+| `node tests/cloud/preservacao.test.js` (`PRESERVE_FULL=1`: portão completo) | `studio/` e `original/` intactos; build autônomo byte-idêntico ao **build publicado na raiz** (`AM-Studio-Editor.html` = `Canteiro-AM.html`, sha256 `70a14b05081732b1…`; PR-01/PR-02); `original/` conferindo com `SHA256SUMS` (`dc93ceac…5099`; PR-11/PR-11b); *cloud − extensão = autônomo + 6 patches* (igualdade exata); patches errados quebram o build; 1989 KB ≤ 2000 KB; portão de `studio/` sobre o build cloud sem `AM_CLOUD` | **16/16**, incluindo `GATE PASS` com as **36 baterias** (619 s) |
+| `node tools/build-web.js --check` | `vercel.json` (CSP com os hashes dos 16 scripts inline) confere com o build | ok |
 
 Capturas (ignoradas pelo git) em `platform/tests/screens/cloud-*.png`: barra com a pílula em 1180/1440/1920 (e offline), conflito, histórico, sessão expirada, recuperação, visualizar (1440 e 390 px), editor salvo e importado.
 
