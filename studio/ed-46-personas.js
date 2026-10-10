@@ -41,10 +41,12 @@
       var w = e.data && e.data.walk; if (pz.dataset.walk != null && w !== '' && w != null && isFinite(+w)) pz.dataset.walk = String(Math.round(+w - e.x));
     });
   }
-  function reaim() { clearTimeout(t); t = setTimeout(function () { var st = document.querySelector('#wrap .am-stage'); if (st && st.querySelector('.pz[data-aim]')) { sync(st); RT.personas.aimStage(st); } }, 0); }
+  /* o aviso de fala que não cabe acompanha edições feitas no próprio painel (texto, largura, altura), que não redesenham o painel */
+  function tipSync() { var v = document.querySelector('#props .vtip'), s = A.selected(), sl = A.deck && A.deck.slides[A.cur], e = s.length === 1 && sl && sl.els.filter(function (x) { return x && x.id === s[0]; })[0]; if (v && e && e.kind === 'persona') v.textContent = F.tip; }
+  function reaim() { clearTimeout(t); t = setTimeout(function () { var st = document.querySelector('#wrap .am-stage'); if (st && st.querySelector('.pz[data-aim]')) { sync(st); RT.personas.aimStage(st); } tipSync(); }, 0); }
   document.addEventListener('pointerup', reaim, true);
   document.addEventListener('keyup', function (e) { if (/^Arrow/.test(e.key)) reaim(); }, true);
-  var pr = document.getElementById('props'); if (pr) pr.addEventListener('input', reaim);
+  var pr = document.getElementById('props'); if (pr) { pr.addEventListener('input', reaim); pr.addEventListener('change', reaim); }
   /* Marca ▾: personagens à mão, sem passar pelo menu Inserir */
   var mb = document.getElementById('mBrand');
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }

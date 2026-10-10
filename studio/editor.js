@@ -915,9 +915,9 @@
   function fxAnimOk(el, f, k) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !(F && typeof F.animOk === 'function' && !F.animOk(f, k, el)); }
   /* S35: tira do elemento os efeitos (contínuo e de mouse) que o componente recusa no estado atual e avisa */
   var stripTimer = 0;
-  function stripRefused(el, live) {
+  function stripRefused(el) { /* quem chama faz o commit (um passo de desfazer só) */
     var out = []; ['loop', 'hover'].forEach(function (f) { var k = el.anim && el.anim[f]; if (k && k !== 'none' && !fxAnimOk(el, f, k)) { var a = RT.ANIMS[f].filter(function (x) { return x[0] === k; })[0]; out.push(a ? a[1] : k); el.anim[f] = 'none'; } });
-    if (!out.length) return; rerenderEl(el); clearTimeout(stripTimer); stripTimer = setTimeout(function () { if (!live) commit(); renderProps(); toast(out.join(' e ') + (out.length > 1 ? ' saíram' : ' saiu') + ': não combina com “Andar até” (giraria em volta do lugar de origem) · Ctrl+Z desfaz'); }, 0);
+    if (!out.length) return; rerenderEl(el); clearTimeout(stripTimer); stripTimer = setTimeout(function () { renderProps(); toast(out.join(' e ') + (out.length > 1 ? ' saíram' : ' saiu') + ': não combina com “Andar até” (giraria em volta do lugar de origem) · Ctrl+Z desfaz'); }, 0);
   }
   function animFits(el, f, k) { if (!fxAnimOk(el, f, k)) return false; var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
   var ONLY_MSG = { ln: 'funciona em linhas, setas e Linhas A&M', lnIn: 'funciona em linhas, setas, Linhas A&M e ícones animados', tx: 'funciona em textos e formas com texto' };
@@ -1275,7 +1275,7 @@
     g.querySelector('.icf-none').hidden = n > 0;
   });
   props.addEventListener('change', function (e) {
-    var t = e.target; if (!t.dataset.p) return; commit(); if (t.dataset.p === 'data.walk' && sel()) stripRefused(sel(), false); /* S35: com “Andar até”, saem os efeitos que giram/escalam em volta da caixa de origem */ if (t.tagName === 'SELECT' || t.type === 'color' || t.dataset.p === 'rot') renderProps();
+    var t = e.target; if (!t.dataset.p) return; if (t.dataset.p === 'data.walk' && sel()) stripRefused(sel()); /* S35: com “Andar até”, saem os efeitos que giram/escalam em volta da caixa de origem (no mesmo passo de desfazer) */ commit(); if (t.tagName === 'SELECT' || t.type === 'color' || t.dataset.p === 'rot') renderProps();
     /* campos do slide: o cabeçalho (capítulo), os placeholders e a dica dependem deles; redesenha depois que o foco saiu do painel, sem engolir o clique */
     else if (/^s\.(title|sec|secSub|notes)$/.test(t.dataset.p)) setTimeout(function () { if (!props.contains(document.activeElement) && !sel()) renderProps(); }, 0);
   });
@@ -1347,7 +1347,7 @@
     var node = stage.querySelector('.am-el[data-id="' + el.id + '"]'); if (node) node.classList.add('previewing');
     void st.offsetWidth; st.classList.remove('am-pre'); st.classList.add('am-in'); ov._clean = RT.runFx(st);
     var cyc = !!st.querySelector('[data-cycle="g"],[data-cycle="1"]');
-    var pzw = pzn && st.querySelector('.pz[data-walk]'), pzMs = pzw ? (+((c.anim || {}).delay) || 0) + (+((c.anim || {}).dur) || 700) + 150 + (+((pzw.style.getPropertyValue('--wt') || '0').replace('ms', '')) || 0) + ((RT.personas.ACT_MS || {})[pzw.dataset.act] || 0) + 600 : 0; /* entrada + caminhada + movimento */
+    var pzw = pzn && st.querySelector('.pz'), pzMs = pzw ? (+((c.anim || {}).delay) || 0) + (+((c.anim || {}).dur) || 700) + 150 + (+((pzw.style.getPropertyValue('--wt') || '0').replace('ms', '')) || 0) + ((RT.personas.ACT_MS || {})[pzw.dataset.act] || 0) + 600 : 0; /* entrada + caminhada (se houver) + movimento */
     clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : Math.max(4200, pzMs));
   }
 

@@ -8,6 +8,7 @@
    decisões (foco, salto cancelado), ponteiro só no desenho, giro, alvo acima da cabeça, texto que cabe, vitrine e Marca ▾.
    Rodada 3 (S35-55…65): chegada só com a pose, gesto na virada do ciclo, laço sem gesto intacto, “Fala ao clicar” cortada, decisões alcançáveis,
    efeitos recusados ao ligar “Andar até”, pontas presas da base depois de reabrir, vitrine por palavra, prévia depois de trocar o preset e sua duração.
+   Verificação final (S35-66…69): aviso vivo no painel, um passo de desfazer, classe de espessura sem colisão, prévia sem caminhada.
    Uso: python3 assemble.py && node test-s35-personagens.js */
 process.env.NODE_PATH='/opt/node22/lib/node_modules'; require('module').Module._initPaths();
 const {chromium}=require('playwright'); const path=require('path'); const fs=require('fs');
@@ -454,6 +455,21 @@ async function open(ctx, url, tag){ const p=await ctx.newPage(); await fonts(p);
     await new Promise(r=>setTimeout(r,300+1500+wt+350)); const q=document.querySelector('.prevov .pz'); const r={wt, open:!!q, arr:!!q&&q.classList.contains('pz-arr'), dt:Math.round(performance.now()-t0)};
     while(document.querySelector('.prevov') && performance.now()-t0<20000) await new Promise(r=>setTimeout(r,200)); r.closed=Math.round(performance.now()-t0); return r; });
   check('S35-65: prévia com entrada longa + caminhada: fica aberta até o personagem chegar e fazer o movimento, e depois fecha sozinha', pd.wt>1000 && pd.open && pd.arr && pd.closed>pd.dt && pd.closed<20000, pd);
+  const tp=await p.evaluate(async()=>{ const A=AMStudio; const z=A.insertFx('persona',null,null,'consultora'); z.x=40; z.y=40; z.w=200; z.h=260; z.data.say='Oi!'; A.selectMany([z.id]); A.renderAll(); await new Promise(r=>setTimeout(r,150));
+    const set=async v=>{ const t=document.querySelector('#props textarea[data-p="data.say"]'); t.value=v; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(r=>setTimeout(r,150)); return (document.querySelector('#props .vtip')||{}).textContent||''; };
+    const long=await set('Uma fala comprida demais para este tamanho: '.repeat(12)), short=await set('Oi de novo!'); return {long:/^⚠/.test(long), short:/^⚠/.test(short)}; });
+  check('S35-66: o aviso “a fala não cabe” acompanha a edição feita no próprio painel (aparece com a fala longa e some ao encurtar)', tp.long && !tp.short, tp);
+  const un=await p.evaluate(async()=>{ const A=AMStudio; const z=A.insertFx('persona',null,null,'mestre'); z.x=40; z.y=40; z.anim=Object.assign(z.anim||{},{loop:'pulse'}); A.selectMany([z.id]); A.renderAll(); A.commit(); await new Promise(r=>setTimeout(r,150));
+    const i=document.querySelector('#props input[data-p="data.walk"]'); i.value='700'; i.dispatchEvent(new Event('input',{bubbles:true})); i.dispatchEvent(new Event('change',{bubbles:true})); await new Promise(r=>setTimeout(r,150));
+    if(document.activeElement) document.activeElement.blur(); document.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true})); await new Promise(r=>setTimeout(r,150));
+    const e=A.deck.slides[A.cur].els.find(x=>x.id===z.id); return {walk:e.data.walk, loop:e.anim.loop}; });
+  check('S35-67: um só Ctrl+Z desfaz “Andar até” e a retirada dos efeitos juntos (nunca sobra caminhada com Pulsar)', (un.walk===''||un.walk==null) && un.loop==='pulse', un);
+  const vs=await p.evaluate(async()=>{ const A=AMStudio; const z=A.insertFx('persona',null,null,'ia'); z.data.tool='prancheta'; A.selectMany([]); A.renderAll(); await new Promise(r=>setTimeout(r,120));
+    const n=document.querySelector('#cv .am-edit .am-el[data-id="'+z.id+'"] .pz'), v=n.querySelector('.pz-vs path'), k=n.querySelector('.pz-tR .pz-k2'); return {vis:v&&getComputedStyle(v).display, vw:v&&v.getBoundingClientRect().width, tool:k&&getComputedStyle(k).display, sw:k&&getComputedStyle(k).strokeWidth}; });
+  check('S35-68: a linha do visor da IA e os traços da prancheta são desenhados (a classe de espessura não colide mais com a “Fala ao clicar”)', vs.vis!=='none' && vs.vw>5 && vs.tool!=='none' && vs.sw==='2px', vs);
+  const pn=await p.evaluate(async()=>{ const A=AMStudio; const ch=A.insertFx('bars'); ch.x=880; ch.y=60; const z=A.insertFx('persona',null,null,'consultor'); z.x=300; z.y=300; Object.assign(z.data,{aim:ch.id,act:'apontar',trig:'in',bubble:'none'}); z.anim=Object.assign(z.anim||{},{in:'rise',dur:1500,delay:1500}); A.selectMany([z.id]); A.renderAll(); await new Promise(r=>setTimeout(r,150));
+    A.previewEl(); await new Promise(r=>setTimeout(r,5300)); const open=!!document.querySelector('.prevov'); while(document.querySelector('.prevov')) await new Promise(r=>setTimeout(r,200)); return {open}; });
+  check('S35-69: prévia de um personagem sem caminhada, com entrada lenta: fica aberta até o movimento terminar', pn.open, pn);
   }
   check('Zero erros de console', errs.length===0, errs);
   console.log(results.join('\n'));

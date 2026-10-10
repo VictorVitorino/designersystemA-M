@@ -11,7 +11,7 @@
 /* cores da marca A&M (fixas: o personagem fica fora do kit “Cores do componente”) */
 .pz-b{fill:var(--c1,#4A6FA5)}.pz-o{fill:var(--c2,#002A46)}.pz-w{fill:#FFFFFF}.pz-n{fill:#002A46}.pz-or{fill:#F78C16}.pz-i{fill:#A3B8D6}.pz-g{fill:#3E4C5E}.pz-h{fill:#13315C}
 .pz-hand{fill:#FCD1A2}.pz-lg{fill:#13315C}.pz-sh{fill:#3E4C5E}.pz-shd{fill:#002A46;opacity:.12}.pz-ck{fill:#F78C16;opacity:.32}
-.pz-st{fill:none;stroke:#002A46;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}.pz-s2{stroke-width:2}.pz-s25{stroke-width:2.5}.pz-s3{stroke-width:3}.pz-zip{stroke-width:2}.pz-lash{stroke-width:2.5}
+.pz-st{fill:none;stroke:#002A46;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}.pz-k2{stroke-width:2}.pz-s25{stroke-width:2.5}.pz-s3{stroke-width:3}.pz-zip{stroke-width:2}.pz-lash{stroke-width:2.5}
 .pz-arc{fill:none;stroke:#002A46;stroke-width:3.5;stroke-linecap:round}
 .pz-so{fill:none;stroke:#F78C16;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.5}
 .pz-sl{fill:none;stroke:#A3B8D6;stroke-width:2.5;stroke-linecap:round}.pz-sv{fill:none;stroke:#A3B8D6;stroke-width:2;stroke-linecap:round;opacity:.9}

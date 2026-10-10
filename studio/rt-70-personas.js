@@ -78,7 +78,7 @@
     martelo: ['Martelo', '<g transform="translate(164 196) rotate(-40)"><rect class="pz-i" x="-5" y="-16" width="10" height="58" rx="3"/><rect class="pz-n" x="-19" y="-30" width="38" height="18" rx="4"/></g>'],
     laptop: ['Notebook', '<g transform="translate(164 196)"><rect class="pz-n" x="-32" y="-8" width="46" height="30" rx="3"/><rect class="pz-i" x="-28" y="-4" width="38" height="20" rx="1.5"/><path class="pz-so pz-s25" d="M-22 10L-14 2L-6 6L2 -2"/><rect class="pz-g" x="-36" y="22" width="54" height="5" rx="2.5"/></g>'],
     tablet: ['Tablet', '<g transform="translate(164 196) rotate(-8)"><rect class="pz-n" x="-14" y="-26" width="30" height="44" rx="4"/><rect class="pz-i" x="-10" y="-22" width="22" height="34" rx="2"/><rect class="pz-or" x="-7" y="0" width="5" height="8"/><rect class="pz-n" x="0" y="-6" width="5" height="14"/><rect class="pz-or" x="7" y="-12" width="5" height="20"/></g>'],
-    prancheta: ['Prancheta', '<g transform="translate(164 196) rotate(-8)"><rect class="pz-g" x="-15" y="-26" width="32" height="44" rx="3"/><rect class="pz-w" x="-11" y="-20" width="24" height="34" rx="1.5"/><rect class="pz-n" x="-7" y="-29" width="16" height="7" rx="2"/><path class="pz-st pz-s2" d="M-6 -8H10M-6 -1H10M-6 6H4"/></g>'],
+    prancheta: ['Prancheta', '<g transform="translate(164 196) rotate(-8)"><rect class="pz-g" x="-15" y="-26" width="32" height="44" rx="3"/><rect class="pz-w" x="-11" y="-20" width="24" height="34" rx="1.5"/><rect class="pz-n" x="-7" y="-29" width="16" height="7" rx="2"/><path class="pz-st pz-k2" d="M-6 -8H10M-6 -1H10M-6 6H4"/></g>'],
     lupa: ['Lupa', '<g transform="translate(164 196) rotate(-30)"><circle class="pz-lp" cx="0" cy="-32" r="16"/><rect class="pz-n" x="-4" y="-14" width="8" height="32" rx="3"/></g>'],
     chave: ['Chave inglesa', '<g transform="translate(164 196) rotate(-40)"><rect class="pz-g" x="-4" y="-16" width="8" height="50" rx="3"/><path class="pz-g" d="M-13 -36H13V-24L5 -18H-5L-13 -24Z"/><rect class="pz-i" x="-5" y="-35" width="10" height="9"/></g>'],
     grafico: ['Gráfico', '<g transform="translate(164 196)"><rect class="pz-w pz-jl" x="-32" y="-32" width="46" height="42" rx="4"/><rect class="pz-i" x="-26" y="-10" width="8" height="16"/><rect class="pz-n" x="-15" y="-18" width="8" height="24"/><rect class="pz-or" x="-4" y="-26" width="8" height="32"/></g>'],
@@ -90,7 +90,7 @@
     none: ['Sem óculos', ''],
     round: ['Redondos', '<g class="pz-gl"><circle cx="84" cy="104" r="15"/><circle cx="116" cy="104" r="15"/><path d="M99 103H101"/><path d="M69 102L60 100M131 102L140 100"/></g>'],
     square: ['Quadrados', '<g class="pz-gl pz-gq"><rect x="69" y="92" width="30" height="24" rx="5"/><rect x="101" y="92" width="30" height="24" rx="5"/><path d="M99 103H101"/></g>'],
-    visor: ['Visor (IA)', '<g class="pz-vs"><rect x="62" y="90" width="76" height="28" rx="14"/><path class="pz-so pz-s2" d="M70 98H130"/></g>']
+    visor: ['Visor (IA)', '<g class="pz-vs"><rect x="62" y="90" width="76" height="28" rx="14"/><path class="pz-so pz-k2" d="M70 98H130"/></g>']
   };
   var MOODS = { /* [nome, sobrancelhas (um path), boca] */
     feliz: ['Feliz', 'M74 88Q84 82 94 88M106 88Q116 82 126 88', '<path class="pz-st" d="M86 136Q100 150 114 136"/>'],
