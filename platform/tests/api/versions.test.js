@@ -264,6 +264,17 @@ describe('integridade das referências a arquivos', () => {
     const keep = await save(A, p, deck('Miniatura', { text: 'b' }), {}, ok.json.rev); assert.equal((await row(p.id)).thumb_sha, th, 'omitir thumbSha mantém a atual');
     const clear = await save(A, p, deck('Miniatura', { text: 'c' }), { thumbSha: null }, keep.json.rev); assert.equal(clear.status, 200); assert.equal((await row(p.id)).thumb_sha, null);
   });
+  test('miniatura nova num salvamento SEM mudança de conteúdo é gravada (antes era ignorada e o editor achava que já estava salva)', async () => {
+    const th1 = await env.upload(A, await png(74, 16), 'thumb'); const th2 = await env.upload(A, await png(75, 16), 'thumb');
+    const p = await env.create(A, 'Miniatura idêntica', deck('Idêntica'));
+    const first = await save(A, p, deck('Idêntica', { text: 'x' }), { thumbSha: th1 }); assert.equal(first.status, 200);
+    const same = await save(A, p, deck('Idêntica', { text: 'x' }), { thumbSha: th2 }, first.json.rev);
+    assert.equal(same.status, 200, same.text); assert.equal(same.json.unchanged, true); assert.equal(same.json.rev, first.json.rev, 'só a miniatura mudou: a revisão não muda (não gera conflito em outro dispositivo)');
+    assert.equal((await row(p.id)).thumb_sha, th2, 'a miniatura nova foi gravada');
+    const img = await env.upload(A, await png(76));
+    assert.equal((await save(A, p, deck('Idêntica', { text: 'x' }), { thumbSha: img }, first.json.rev)).status, 422, 'continua validando a miniatura');
+    const clear = await save(A, p, deck('Idêntica', { text: 'x' }), { thumbSha: null }, first.json.rev); assert.equal(clear.status, 200); assert.equal((await row(p.id)).thumb_sha, null);
+  });
 });
 
 describe('concorrência: 20 salvamentos da MESMA apresentação', () => {
