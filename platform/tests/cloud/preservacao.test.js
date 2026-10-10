@@ -96,7 +96,7 @@ const lines = out.split('\n').filter((l) => /^(PASS|FAIL|GATE|tempo)/.test(l));
 console.log(lines.join('\n'));
 check('PR-14 portão de studio/ ' + (full ? 'COMPLETO' : 'rápido (4 baterias)') + ' sobre o build cloud sem AM_CLOUD: GATE PASS (' + Math.round((Date.now() - t0) / 1000) + ' s)', g.status === 0 && /GATE PASS/.test(out), lines.slice(-8));
 const nb = (out.match(/^PASS /gm) || []).length;
-check('PR-15 baterias aprovadas: ' + nb + (full ? ' (esperado 38)' : ' (esperado 4)'), full ? nb >= 38 : nb === 4, nb); /* S35–S37: + test-s35-personagens.js, test-s36-estudio.js, test-s37-montagem.js */
+check('PR-15 baterias aprovadas: ' + nb + (full ? ' (esperado 39)' : ' (esperado 4)'), full ? nb >= 39 : nb === 4, nb); /* S35–S38: + test-s35-personagens.js, test-s36-estudio.js, test-s37-montagem.js, test-s38-acabamento.js */
 
 console.log('\n' + results.join('\n'));
 console.log('\nPASS ' + passed + ' · FAIL ' + failed);
