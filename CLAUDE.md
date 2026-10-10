@@ -86,7 +86,8 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
   um ouvinte de `animationend` no documento (vale na prévia do editor); durante a caminhada os braços balançam em volta da pose neutra. Trilhas de gesto têm
   nomes próprios (`…G`): o mesmo nome do laço não reiniciaria a animação. **O gesto do clique só começa em repouso** (S38: `busy()` = nenhuma animação
   finita tocando no personagem, fora `pzNone` e transições CSS); ocupado (entrada, caminhada, pose de chegada, outro gesto), o clique troca expressão/fala
-  na hora e não corta nada. Em laço/mouse o gesto entra na próxima virada do ciclo (`turn()` lê o laço em execução) e `.pz-g1` faz o laço voltar sem atraso;
+  na hora, nada é cortado e o gesto fica **guardado** até o personagem ficar livre (`wait()`, reavaliado quando vence). Em laço/mouse o gesto entra na próxima
+  virada do ciclo (medida no laço em execução) e `.pz-g1` faz o laço voltar sem atraso;
   clique sem gesto não mexe no laço (`.pz-done` só vale para `trig=in`). A ferramenta existe nas duas mãos (`.pz-tL/.pz-tR`): o
   gesto usa a mão livre e, sem mão livre, a ferramenta some durante o gesto. Ligar “Andar até” tira os efeitos recusados (`stripRefused`, no `change`).
   Fala que não cabe nem com 8 px (fala 1 ou “Fala ao clicar”): `.pz-over` corta as duas com reticências, o editor contorna e o painel avisa; em
@@ -102,8 +103,9 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
   anda da posição do slide anterior até a nova (`pz-from` + `data-walk` temporário). `data.link` (inteiro 1–999) = o clique leva ao slide N.
 - Gesto do clique (`act2`) em todos os gatilhos (S38 desfez o corte da S36; “Só ao clicar” usa o próprio movimento). O observador de palcos trata cada palco uma vez por lote.
 - Estúdio sem travamento (S38): cliques mudam o modelo e chamam `AMStudio.refresh(el, slides)` (só o elemento, o painel e as miniaturas dos slides do grupo; nunca
-  `renderAll`); miniaturas do estúdio em cache; o foco volta ao controle equivalente. “Ao passar o mouse” usa o quadro `.pz-svg` como alvo (o boneco pula por dentro
-  dele); guia que já está no ponto de chegada do próprio “Andar até” chega na hora (`.pz-here`); texto do grito/nuvem limitado à faixa que o cálculo da letra supõe.
+  `renderAll`); miniaturas do estúdio em cache; o foco volta ao controle equivalente. “Ao passar o mouse” usa também uma coluna fixa e transparente do corpo (`<rect class="pz-hit">`, fora do
+  `.pz-char`: não pula) — **nunca** a caixa inteira do `.pz-svg`, cujo vazio tem de deixar o clique chegar às zonas de avançar/voltar e aos elementos de baixo;
+  o foco do estúdio só volta ao botão quando o clique veio do teclado; a faixa de texto do grito/nuvem vale só no balão do personagem (`.pz` na frente); guia que já está no ponto de chegada do próprio “Andar até” chega na hora (`.pz-here`); texto do grito/nuvem limitado à faixa que o cálculo da letra supõe.
 - Wordmark branco embutido uma vez só (`img.brand-wm` do topo); `BRAND.wmW` e a capa leem o `src` dele. Não volte a usar `%%WM_W%%` em outro arquivo.
 
 ## Convenções

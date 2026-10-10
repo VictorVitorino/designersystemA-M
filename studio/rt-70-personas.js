@@ -162,7 +162,7 @@
     var hr = HAIRS[p.hair], ht = HATS[p.hat], of = OUTFITS[p.outfit], tl = TOOLS[p.tool][1], gl = GLASSES[p.glasses], brows = '', mouths = '';
     Object.keys(MOODS).forEach(function (k) { brows += '<path class="pz-st" data-m="' + k + '" d="' + MOODS[k][1] + '"/>'; mouths += '<g class="pz-mouth" data-m="' + k + '">' + MOODS[k][2] + '</g>'; });
     /* a ferramenta existe nas duas mãos (a esquerda é o espelho da direita): o CSS mostra uma só, conforme o braço que está livre */
-    return '<g class="pz-char"><ellipse class="pz-shd" cx="100" cy="226" rx="56" ry="8"/>' +
+    return '<rect class="pz-hit" x="46" y="0" width="108" height="240" rx="54"/><g class="pz-char"><ellipse class="pz-shd" cx="100" cy="226" rx="56" ry="8"/>' +
       '<g class="pz-legs"><g class="pz-leg pz-lgL"><rect class="pz-lg" x="70" y="178" width="28" height="42" rx="13"/><ellipse class="pz-sh" cx="82" cy="222" rx="21" ry="9"/></g><g class="pz-leg pz-lgR"><rect class="pz-lg" x="102" y="178" width="28" height="42" rx="13"/><ellipse class="pz-sh" cx="118" cy="222" rx="21" ry="9"/></g></g>' +
       '<g class="pz-torso">' + BODY + of[1] + hr[1] + FACE + CHEEKS + EYES + (p.lashes ? LASH : '') + brows + mouths + gl[1] + hr[2] + ht[1] +
       '<g class="pz-arm pz-aL"><rect class="pz-b" x="25" y="146" width="22" height="50" rx="11"/>' + (tl ? '<g class="pz-tL" transform="translate(200 0) scale(-1 1)">' + tl + '</g>' : '') + '<circle class="pz-hand" cx="36" cy="196" r="11"/></g>' +
@@ -349,26 +349,32 @@
      próprio laço (braços, corpo, tronco e boca têm a mesma duração e o mesmo atraso: na virada estão todos na pose de onde o gesto parte). */
   function anims(pz) { return pz.getAnimations ? pz.getAnimations({ subtree: true }) : []; }
   function timing(a) { return a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null; }
-  function busy(pz) { return anims(pz).some(function (a) { var t = timing(a); return a.playState === 'running' && !!t && isFinite(t.endTime) && a.animationName !== 'pzNone' && !(window.CSSTransition && a instanceof CSSTransition); }); } /* pzNone = trilha inerte do motor */
-  function turn(pz) {
-    var w = -1; anims(pz).forEach(function (a) {
-      var t = timing(a), c = a.effect && a.effect.target && a.effect.target.getAttribute ? a.effect.target.getAttribute('class') || '' : '';
-      if (a.playState !== 'running' || !t || isFinite(t.endTime) || !(t.duration > 0) || !/\bpz-(aR|aL|char|torso|mouth)\b/.test(c)) return;
-      var l = (a.currentTime || 0) - (t.delay || 0), r = l < 0 ? -l : t.duration - (l % t.duration); if (r > w) w = r;
+  function live(a) { return a.playState === 'running' && a.animationName !== 'pzNone' && !(window.CSSTransition && a instanceof CSSTransition); } /* pzNone = trilha inerte do motor */
+  function busy(pz) { return anims(pz).some(function (a) { var t = timing(a); return live(a) && !!t && isFinite(t.endTime); }); }
+  /* quanto falta para o personagem ficar livre: ocupado → fim da animação finita mais longa; em laço → próxima virada (since = quanto já passou dela) */
+  function wait(pz) {
+    var w = -1, since = 1e9; anims(pz).forEach(function (a) {
+      var t = timing(a); if (!t || !live(a)) return;
+      if (isFinite(t.endTime)) { var r = t.endTime - (a.currentTime || 0); if (r > w) { w = r; since = 1e9; } return; }
+      var c = a.effect && a.effect.target && a.effect.target.getAttribute ? a.effect.target.getAttribute('class') || '' : '';
+      if (!(t.duration > 0) || !/\bpz-(aR|aL|char|torso|mouth)\b/.test(c) || busy(pz)) return;
+      var l = (a.currentTime || 0) - (t.delay || 0), r2 = l < 0 ? -l : t.duration - (l % t.duration); if (r2 > w) { w = r2; since = l < 0 ? 1e9 : l % t.duration; }
     });
-    return w;
+    return { w: w, since: since };
   }
   function go(pz, a2) { pz.classList.remove('pz-pose'); if (/^(loop|hover)$/.test(pz.dataset.trig)) pz.classList.add('pz-g1'); flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
-  function gesture(pz) {
-    var a2 = pz.dataset.act2; if (!a2 || a2 === 'none' || walking(pz) || busy(pz) || pz._gw) return;
-    var w = turn(pz); if (w < 34) { go(pz, a2); return; }
-    pz._gw = setTimeout(function () { pz._gw = 0; if (pz.closest('.am-in') && !busy(pz)) go(pz, a2); }, w);
+  /* o gesto do clique nunca se perde nem corta nada: toca já em repouso, ou fica guardado até o personagem terminar o que está fazendo (entrada,
+     caminhada, pose, outro gesto) ou até a virada do laço; quando o tempo vence, tudo é medido de novo (o laço pode ter recomeçado) */
+  function gesture(pz, n) {
+    var a2 = pz.dataset.act2; if (!a2 || a2 === 'none' || pz._gw || pz.classList.contains('pz-go')) return;
+    var q = wait(pz); if (q.w < 34 || q.since < 60) { if (pz.dataset.trig === 'in') pz.classList.add('pz-done'); go(pz, a2); return; }
+    if ((n || 0) >= 6) return;
+    pz._gw = setTimeout(function () { pz._gw = 0; if (pz.closest('.am-in')) gesture(pz, (n || 0) + 1); }, Math.min(q.w, 4000));
   }
   function react(pz) {
     var on = pz.classList.toggle('pz-on'), m2 = pz.dataset.mood2;
     if (m2) pz.dataset.mood = on ? m2 : (pz.dataset.mood1 || pz.dataset.mood);
-    if (!walking(pz) && !busy(pz)) { pz.classList.add('pz-done'); gesture(pz); } /* em repouso: a entrada não recomeça depois do gesto; ocupado: nada é cortado no meio */
-    hilite(pz);
+    gesture(pz); hilite(pz); /* em repouso toca já; ocupado, espera (nada é cortado no meio) */
   }
   function visOf(hd, idx) { var m = hd.map || []; for (var k = 0; k < m.length; k++) if (m[k] >= idx) return k; return m.length - 1; }
   R.hooks.player.push(function (hd) {
@@ -423,7 +429,7 @@
       var ch = e.target.closest ? e.target.closest('.pz-ch') : null;
       if (ch) {
         var pz = ch.closest('.pz'), m = ch.dataset.cm, go = +ch.dataset.go; e.stopPropagation();
-        if (m) pz.dataset.mood = m; if (!walking(pz) && !busy(pz)) { pz.classList.add('pz-done'); gesture(pz); }
+        if (m) pz.dataset.mood = m; gesture(pz);
         Array.prototype.forEach.call(pz.querySelectorAll('.pz-ch'), function (b) { b.classList.toggle('pz-pick', b === ch); });
         clearTimeout(goT); goT = 0; /* a decisão nova vale: cancela um salto ainda pendente */
         if (go > 0) { var at = hd.cur(); goT = setTimeout(function () { goT = 0; if (hd.cur() === at) hd.go(visOf(hd, go - 1)); }, 420); }
