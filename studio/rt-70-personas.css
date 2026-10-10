@@ -3,7 +3,7 @@
    editor, as miniaturas e o PDF/PowerPoint mostram. Cada movimento tem três trilhas: entrada (--kX, toca uma vez e TERMINA na pose),
    laço (--lX, cíclica em volta da pose, para “Sem parar” e “Ao passar o mouse”) e gesto (--gX, começa e termina na pose, para o
    clique). O gatilho arma a trilha (--aX). Nome inerte: pzNone (nunca “none”, que o atalho animation lê como fill-mode). */
-.pz{overflow:visible;font-family:Inter,Roboto,Arial,sans-serif;--kC:pzNone;--kB:pzNone;--kR:pzNone;--kL:pzNone;--kG:pzNone;--kG2:pzNone;--kM:pzNone;--kF:pzNone;--dur:1.6s;--gd:.5s;--ease:ease-in-out;--n1:1;--rR:-16deg;--rL:16deg;--rGL:0deg;--rGR:0deg}
+.pz{overflow:visible;font-family:Inter,Roboto,Arial,sans-serif;--kC:pzNone;--kB:pzNone;--kR:pzNone;--kL:pzNone;--kG:pzNone;--kG2:pzNone;--kM:pzNone;--kF:pzNone;--kT:pzNone;--dur:1.6s;--gd:.5s;--ease:ease-in-out;--n1:1;--rR:-16deg;--rL:16deg;--rGL:0deg;--rGR:0deg;--rT:0deg}
 .am-el:not([data-in]) .pz{--t:0ms} /* sem entrada: o movimento começa logo (sem esperar uma entrada que não existe) */
 .pz-mv{position:absolute;inset:0}
 .pz-svg{position:absolute;display:block;overflow:visible}
@@ -48,11 +48,13 @@
 .pz[data-act=pensar]{--rL:-118deg}
 .pz[data-act=comemorar]{--rL:160deg;--rR:-160deg}
 .pz[data-act=andar]{--rGL:-12deg;--rGR:12deg;--rL:4deg;--rR:-4deg}
-/* ferramenta: passa para a mão esquerda quando a direita acena ou aponta; fica de pé quando os braços sobem para comemorar */
+/* ferramenta: passa para a mão esquerda quando a direita acena ou aponta (no gesto do clique, só se a esquerda estiver livre);
+   fica de pé quando os braços sobem para comemorar (trilha própria --aT, sincronizada com o braço) */
 .pz-tL{display:none}
-.pz:is([data-act=acenar],[data-act=apontar]) .pz-tL,.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]) .pz-tL{display:inline}
-.pz:is([data-act=acenar],[data-act=apontar]) .pz-tR,.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]) .pz-tR{display:none}
-.pz[data-act=comemorar] .pz-tR{rotate:160deg}
+.pz:is([data-act=acenar],[data-act=apontar]) .pz-tL,.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]):not([data-act=pensar]):not([data-act=comemorar]) .pz-tL{display:inline}
+.pz:is([data-act=acenar],[data-act=apontar]) .pz-tR,.pz.pz-go:is([data-act2=acenar],[data-act2=apontar]):not([data-act=pensar]):not([data-act=comemorar]) .pz-tR{display:none}
+.pz-tR{rotate:var(--rT)}
+.pz[data-act=comemorar]{--rT:160deg}
 /* motor: cada parte toca a trilha armada (--aX) */
 .pz-char{animation:var(--aC,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
 .pz-torso{animation:var(--aB,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
@@ -62,44 +64,50 @@
 .pz-lgR{animation:var(--aG2,pzNone) var(--gd,.5s) linear var(--d0,0ms) var(--ln,var(--n,1)) both}
 .pz-mouth{animation:var(--aM,pzNone) var(--dur,2s) ease-in-out var(--d0,0ms) var(--n,1) both}
 .pz-conf circle{animation:var(--aF,pzNone) 1.3s ease-out var(--d0,0ms) var(--n,1) both}
+.pz-tR{animation:var(--aT,pzNone) var(--dur,1.6s) var(--ease,ease-in-out) var(--d0,0ms) var(--n,1) both}
 /* trilhas por movimento: entrada (--k) e laço (--l, só onde a entrada não é cíclica) */
 .pz[data-act=acenar]{--kR:pzWave;--lR:pzWaveL;--dur:1.8s}
 .pz[data-act=apontar]{--kR:pzPoint;--lR:pzPointL;--dur:2.4s}
 .pz[data-act=andar]{--kG:pzLegA;--kG2:pzLegB;--kB:pzBob;--kL:pzSwingL;--kR:pzSwingR;--dur:.5s;--gd:.5s;--ease:linear;--n1:4}
 .pz[data-act=pular]{--kC:pzJump;--kG:pzTuck;--kG2:pzTuck;--dur:.9s;--gd:.9s;--ease:cubic-bezier(.3,.7,.4,1)}
 .pz[data-act=pensar]{--kL:pzChin;--lL:pzChinL;--dur:2.2s}
-.pz[data-act=comemorar]{--kL:pzCheerL;--kR:pzCheerR;--lL:pzCheerLL;--lR:pzCheerRL;--kC:pzHop;--kF:pzConf;--dur:2.2s}
+.pz[data-act=comemorar]{--kL:pzCheerL;--kR:pzCheerR;--lL:pzCheerLL;--lR:pzCheerRL;--kC:pzHop;--kF:pzConf;--kT:pzToolUp;--dur:2.2s}
 .pz[data-act=falar]{--kM:pzTalk;--dur:2s}
 .pz[data-act=concordar]{--kB:pzNod;--dur:1.4s}
 .pz[data-act=negar]{--kB:pzShake;--dur:1.4s}
 /* gatilhos (só na apresentação e nas prévias: .am-play) */
-.am-play.am-in .pz[data-trig=in]{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:var(--n1,1);--d0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
+.am-play.am-in .pz[data-trig=in]{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--aT:var(--kT);--n:var(--n1,1);--d0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
 .am-play.am-in .pz[data-trig=loop]{--aC:var(--kC);--aB:var(--kB);--aR:var(--lR,var(--kR));--aL:var(--lL,var(--kL));--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:infinite;--d0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
 .am-play .pz[data-trig=hover]:hover{--aC:var(--kC);--aB:var(--kB);--aR:var(--lR,var(--kR));--aL:var(--lL,var(--kL));--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--n:infinite;--d0:0ms}
 /* a entrada já tocou (houve clique ou decisão): não recomeça quando a reação termina */
-.am-play.am-in .pz.pz-done[data-trig=in]{--aC:pzNone;--aB:pzNone;--aR:pzNone;--aL:pzNone;--aG:pzNone;--aG2:pzNone;--aM:pzNone;--aF:pzNone}
+.am-play.am-in .pz.pz-done[data-trig=in]{--aC:pzNone;--aB:pzNone;--aR:pzNone;--aL:pzNone;--aG:pzNone;--aG2:pzNone;--aM:pzNone;--aF:pzNone;--aT:pzNone}
+.am-play.am-in .pz.pz-done[data-trig=loop]{--d0:0ms} /* laço: depois do gesto, volta na hora (sem esperar a entrada do slide de novo) */
 /* andar até: balão e boneco (.pz-mv) deslizam até --wq/--wqy (cqw, no referencial do elemento) enquanto as pernas dão --wn passos de
    --ws; o lado da caminhada é data-wf. Na chegada (animationend → .pz-arr) o movimento escolhido toca e a mira vale */
 .pz[data-walk]{--wd0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
 .am-play.am-in .pz[data-walk] .pz-mv{animation:pzWalkTo var(--wt,1.6s) linear var(--wd0,0ms) 1 both}
-.am-play.am-in .pz[data-walk]:not(.pz-arr){--aC:pzNone;--aB:pzBob;--aR:pzSwingR;--aL:pzSwingL;--aG:pzLegA;--aG2:pzLegB;--aM:pzNone;--aF:pzNone;--n:var(--wn,3);--ln:var(--wn,3);--dur:var(--ws,500ms);--gd:var(--ws,500ms);--ease:linear;--d0:var(--wd0,0ms)}
+.am-play.am-in .pz[data-walk]:not(.pz-arr){--rR:-16deg;--rL:16deg;--rT:0deg;--aT:pzNone;--aC:pzNone;--aB:pzBob;--aR:pzSwingR;--aL:pzSwingL;--aG:pzLegA;--aG2:pzLegB;--aM:pzNone;--aF:pzNone;--n:var(--wn,3);--ln:var(--wn,3);--dur:var(--ws,500ms);--gd:var(--ws,500ms);--ease:linear;--d0:var(--wd0,0ms)}
 .am-play.am-in .pz[data-walk][data-wf=l]:not(.pz-arr) .pz-svg{transform:scaleX(-1)}
 .am-play.am-in .pz[data-walk][data-wf=r]:not(.pz-arr) .pz-svg{transform:none}
 .am-play.am-in .pz.pz-arr{--d0:0ms}
+/* na chegada, fora do “ao entrar”: a entrada toca uma vez (da pose neutra da caminhada até a pose) e depois o gatilho assume */
+.am-play.am-in .pz.pz-arr.pz-ent{--aC:var(--kC);--aB:var(--kB);--aR:var(--kR);--aL:var(--kL);--aG:var(--kG);--aG2:var(--kG2);--aM:var(--kM);--aF:var(--kF);--aT:var(--kT);--n:var(--n1,1);--d0:0ms}
 /* clique (player): o gesto (data-act2) toca uma vez, partindo da pose de repouso e voltando a ela */
-.am-stage .pz.pz-go[data-act2][data-act2]{--aC:var(--gC,pzNone);--aB:var(--gB,pzNone);--aR:var(--gR,pzNone);--aL:var(--gL,pzNone);--aG:var(--gG,pzNone);--aG2:var(--gG2,pzNone);--aM:var(--gM,pzNone);--aF:var(--gF,pzNone);--dur:var(--gdur,1.6s);--gd:var(--ggd,.5s);--ease:var(--gease,ease-in-out);--n:var(--gn1,1);--ln:var(--gn1,1);--d0:0ms}
+.am-stage .pz.pz-go[data-act2][data-act2]{--aT:var(--gT,pzNone);--aC:var(--gC,pzNone);--aB:var(--gB,pzNone);--aR:var(--gR,pzNone);--aL:var(--gL,pzNone);--aG:var(--gG,pzNone);--aG2:var(--gG2,pzNone);--aM:var(--gM,pzNone);--aF:var(--gF,pzNone);--dur:var(--gdur,1.6s);--gd:var(--ggd,.5s);--ease:var(--gease,ease-in-out);--n:var(--gn1,1);--ln:var(--gn1,1);--d0:0ms}
 .pz[data-act2=acenar]{--gR:pzWaveG;--gdur:1.8s}
 .pz[data-act2=apontar]{--gR:pzPointG;--gdur:2.4s}
-.pz[data-act2=andar]{--gG:pzLegA;--gG2:pzLegB;--gB:pzBob;--gL:pzSwingL;--gR:pzSwingR;--gdur:.5s;--ggd:.5s;--gease:linear;--gn1:4}
-.pz[data-act2=pular]{--gC:pzJump;--gG:pzTuck;--gG2:pzTuck;--gdur:.9s;--ggd:.9s;--gease:cubic-bezier(.3,.7,.4,1)}
+/* nomes exclusivos dos gestos: o mesmo nome do laço não reiniciaria (o Chrome só recomeça uma animação quando o nome muda) */
+.pz[data-act2=andar]{--gG:pzLegAG;--gG2:pzLegBG;--gB:pzBobG;--gL:pzSwingLG;--gR:pzSwingRG;--gdur:.5s;--ggd:.5s;--gease:linear;--gn1:4}
+.pz[data-act2=pular]{--gC:pzJumpG;--gG:pzTuckG;--gG2:pzTuckG;--gdur:.9s;--ggd:.9s;--gease:cubic-bezier(.3,.7,.4,1)}
 .pz[data-act2=pensar]{--gL:pzChinG;--gdur:2.2s}
-.pz[data-act2=comemorar]{--gL:pzCheerLG;--gR:pzCheerRG;--gC:pzHop;--gF:pzConf;--gdur:2.2s}
-.pz[data-act2=falar]{--gM:pzTalk;--gdur:2s}
-.pz[data-act2=concordar]{--gB:pzNod;--gdur:1.4s}
-.pz[data-act2=negar]{--gB:pzShake;--gdur:1.4s}
+.pz[data-act2=comemorar]{--gL:pzCheerLG;--gR:pzCheerRG;--gC:pzHopG;--gF:pzConfG;--gT:pzToolUpG;--gdur:2.2s}
+.pz[data-act2=falar]{--gM:pzTalkG;--gdur:2s}
+.pz[data-act2=concordar]{--gB:pzNodG;--gdur:1.4s}
+.pz[data-act2=negar]{--gB:pzShakeG;--gdur:1.4s}
 /* apresentação: só o desenho e o balão recebem o mouse; o vazio da caixa deixa o clique chegar às zonas de avançar/voltar */
 .am-play .am-k-persona,.am-play .am-k-persona>.am-rot,.am-play .am-k-persona>.am-rot>.am-fxw,.am-play .pz,.am-play .pz-mv,.am-play .pz-svg{pointer-events:none}
 .am-play .pz-char,.am-play .pz-say{pointer-events:auto}
+.am-play .pz-conf,.am-play .pz-shd{pointer-events:none} /* confete invisível e sombra não recebem o clique */
 /* linhas presas a quem anda: escondidas durante a caminhada; a cópia com a ponta na chegada aparece suave */
 .am-play .am-el.pz-lnw{visibility:hidden}
 .am-play .am-el.pz-lnx{animation:amFade .35s ease both}
@@ -135,6 +143,21 @@
 @keyframes pzNod{0%,100%{translate:0 0}25%{translate:0 6px}50%{translate:0 0}75%{translate:0 6px}}
 @keyframes pzShake{0%,100%{rotate:0deg}20%{rotate:-7deg}40%{rotate:7deg}60%{rotate:-5deg}80%{rotate:5deg}}
 @keyframes pzBlink{0%,92%,100%{scale:1 0}95%,97%{scale:1 1}}
+@keyframes pzToolUp{0%{rotate:0deg}25%,100%{rotate:var(--rT)}}
+@keyframes pzToolUpG{0%,100%{rotate:var(--rT)}20%,80%{rotate:160deg}}
+/* cópias para os gestos (nomes diferentes dos do laço) */
+@keyframes pzJumpG{0%{translate:0 0;scale:1 1}18%{scale:1.08 .9}40%{translate:0 -34px;scale:.96 1.06}62%{translate:0 0;scale:1.1 .88}80%{scale:1 1.02}100%{translate:0 0;scale:1 1}}
+@keyframes pzTuckG{0%,100%{scale:1 1}40%{scale:1 .8}}
+@keyframes pzHopG{0%,100%{translate:0 0}25%{translate:0 -14px}45%{translate:0 0}65%{translate:0 -10px}85%{translate:0 0}}
+@keyframes pzConfG{0%{translate:0 40px;opacity:0;scale:.4}20%{opacity:1}100%{translate:var(--cx,0px) -40px;opacity:0;scale:1}}
+@keyframes pzTalkG{0%,22%,46%,70%,100%{scale:1 1}10%,34%,58%,84%{scale:1.05 .3}}
+@keyframes pzNodG{0%,100%{translate:0 0}25%{translate:0 6px}50%{translate:0 0}75%{translate:0 6px}}
+@keyframes pzShakeG{0%,100%{rotate:0deg}20%{rotate:-7deg}40%{rotate:7deg}60%{rotate:-5deg}80%{rotate:5deg}}
+@keyframes pzLegAG{0%,100%{rotate:var(--rGL)}25%{rotate:calc(var(--rGL) - 18deg)}75%{rotate:calc(var(--rGL) + 18deg)}}
+@keyframes pzLegBG{0%,100%{rotate:var(--rGR)}25%{rotate:calc(var(--rGR) + 18deg)}75%{rotate:calc(var(--rGR) - 18deg)}}
+@keyframes pzBobG{0%,50%,100%{translate:0 0}25%,75%{translate:0 -4px}}
+@keyframes pzSwingLG{0%,100%{rotate:var(--rL)}25%{rotate:calc(var(--rL) - 22deg)}75%{rotate:calc(var(--rL) + 14deg)}}
+@keyframes pzSwingRG{0%,100%{rotate:var(--rR)}25%{rotate:calc(var(--rR) - 14deg)}75%{rotate:calc(var(--rR) + 22deg)}}
 @keyframes pzLed{0%,100%{opacity:1}50%{opacity:.35}}
 @keyframes pzHl{0%{box-shadow:0 0 0 0 rgba(247,140,22,.85)}100%{box-shadow:0 0 0 2.2cqh rgba(247,140,22,0)}}
 /* ===== balões (do personagem e do componente solto) ===== */
@@ -146,6 +169,7 @@
 .pz-s1,.pz-s2{max-width:100%;flex:0 0 auto;overflow:hidden}
 .pz-s1:empty{display:none}
 .pz-txt{white-space:pre-line;overflow-wrap:anywhere}
+.pz-over .pz-s1 .pz-txt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--lc,3);overflow:hidden} /* não coube nem com a menor letra: reticências */
 .pz-s2{display:none}.pz-on.pz-has2 .pz-s1{display:none}.pz-on.pz-has2 .pz-s2{display:block}
 .pz-chs{display:flex;flex-wrap:wrap;justify-content:center;gap:.3em;max-width:100%;flex:0 1 auto;min-height:0;overflow:hidden}
 .pz-ch{font:inherit;font-size:.78em;font-weight:600;line-height:1.2;padding:.28em .75em;border-radius:1em;border:.1em solid var(--c-line,#002A46);background:var(--c-line,#002A46);color:var(--c-bub,#fff);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

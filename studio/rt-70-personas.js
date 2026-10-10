@@ -133,6 +133,7 @@
   function selOf(dict, first) { return 'sel:' + (first ? '=' + first + '|' : '') + Object.keys(dict).map(function (k) { return k + '=' + dict[k][0]; }).join('|'); }
   function selList(list, first) { return 'sel:' + (first ? '=' + first + '|' : '') + list.map(function (o) { return o[0] + '=' + o[1]; }).join('|'); }
   function colSel(list, first) { return 'sel:' + (first ? '=' + first + '|' : '') + list.map(function (c) { return c[0] + '=' + c[1]; }).join('|'); }
+  function inPal(v, list, def) { v = hex(v, ''); for (var i = 0; i < list.length; i++) if (list[i][0] === v) return v; return def; }
   function presetOf(el) { var v = el && el.variant; for (var i = 0; i < PRESETS.length; i++) if (PRESETS[i][0] === v) return PRESETS[i]; return PRESETS[0]; }
   /* atraso do piscar por elemento (os personagens de um slide não piscam juntos) */
   function hashMs(id) { var s = String(id || ''), h = 7; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h) % 4600; }
@@ -140,7 +141,7 @@
   function resolve(d, el) {
     var P = presetOf(el)[2]; d = d || {};
     return { hat: tok(d.hat, HATS, P.hat), hair: tok(d.hair, HAIRS, P.hair), glasses: tok(d.glasses, GLASSES, P.glasses), outfit: tok(d.outfit, OUTFITS, P.outfit), tool: tok(d.tool, TOOLS, P.tool),
-      lashes: d.lashes === '1' ? true : d.lashes === '0' ? false : P.lashes === '1', c1: hex(d.c1, P.c1), c2: hex(d.c2, P.c2), mood: tok(d.mood, MOODS, P.mood) };
+      lashes: d.lashes === '1' ? true : d.lashes === '0' ? false : P.lashes === '1', c1: inPal(d.c1, COLS, P.c1), c2: inPal(d.c2, COLS2, P.c2), mood: tok(d.mood, MOODS, P.mood) };
   }
   /* decisões do balão: [{t, go, m}] (codec rows:t|go:n|m do painel; texto “Rótulo | slide | expressão” por linha num arquivo editado à mão) */
   function choicesOf(v) {
@@ -185,19 +186,36 @@
   }
   /* cabe? estimativa determinística (vale igual no editor, no player e nas imagens do PDF/PowerPoint) */
   var PAD = { fala: [1.94, 1.24, 1], nota: [1.94, 1.24, 1], pensa: [3.24, 2.04, 0.78], grita: [4.24, 2.84, 0.62] };
+  /* linhas que o texto ocupa com cpl caracteres por linha, quebrando por palavra (palavra maior que a linha quebra no meio) */
+  function wrapLines(t, cpl) {
+    var n = 0; String(t || '').split('\n').forEach(function (p) {
+      var len = 0, ln = 1; p.split(/\s+/).filter(Boolean).forEach(function (w) { var L = w.length; if (len && len + 1 + L > cpl) { ln++; len = 0; } while (L > cpl) { L -= cpl; ln++; } len += (len ? 1 : 0) + L; });
+      n += ln; });
+    return n;
+  }
+  /* altura que sobra para o texto (px) depois das decisões; negativo = nem as decisões cabem */
+  function room(f, bw, bh, ch, kind) {
+    var P = PAD[kind] || PAD.fala, iw = bw - f * P[0], ih = (bh - f * P[1]) * P[2];
+    if (ch && ch.length) { var rw = 0, rows = 1; ch.forEach(function (c) { var bwid = (Math.min(c.t.length, 40) * 0.58 + 1.6) * f * 0.78 + f * 0.3; if (rw + bwid > iw && rw > 0) { rows++; rw = 0; } rw += bwid; }); ih -= rows * (f * 0.78 * 1.96 + f * 0.3) + f * 0.35; }
+    return { iw: iw, ih: ih };
+  }
   function fits(f, bw, bh, t, ch, kind) {
-    var P = PAD[kind] || PAD.fala, iw = bw - f * P[0], ih = (bh - f * P[1]) * P[2]; if (iw <= f * 2 || ih <= f) return false;
-    var cpl = Math.max(1, Math.floor(iw / (f * 0.56))), lines = 0;
-    String(t || '').split('\n').forEach(function (p) { lines += Math.max(1, Math.ceil(p.length / cpl)); });
-    var need = (String(t || '').trim() ? lines * f * 1.22 : 0);
-    if (ch && ch.length) { var rw = 0, rows = 1; ch.forEach(function (c) { var bwid = (Math.min(c.t.length, 40) * 0.55 + 1.7) * f * 0.78 + f * 0.3; if (rw + bwid > iw && rw > 0) { rows++; rw = 0; } rw += bwid; }); need += rows * f * 0.78 * 1.75 + f * 0.35; }
-    return need <= ih;
+    var r = room(f, bw, bh, ch, kind); if (r.iw <= f * 2 || r.ih < 0) return false;
+    return !String(t || '').trim() || wrapLines(t, Math.max(1, Math.floor(r.iw / (f * 0.57)))) * f * 1.22 <= r.ih;
   }
   function fitFont(f, bw, bh, texts, ch, kind) { for (var s = f; s > 8; s -= 0.5) { if (texts.every(function (t) { return fits(s, bw, bh, t, ch, kind); })) return s; } return 8; }
+  /* nem com a menor letra coube: quantas linhas mostrar (o resto vira reticências) */
+  function clampLines(f, bw, bh, ch, kind) { var r = room(f, bw, bh, ch, kind); return Math.max(1, Math.floor(r.ih / (f * 1.22))); }
   function bubVars(k) { var c = has(BCOLS, k) ? BCOLS[k] : BCOLS.branco; return '--c-bub:' + c[1] + ';--c-ink:' + c[2] + ';--c-line:' + c[3] + ';--c-sbg:' + c[4] + ';--c-sink:' + c[5]; }
   function bubbleBox(kind, tail, pos, vars, inner) {
     return '<div class="pz-say pz-say-' + kind + ' pz-tl-' + tail + '"' + (pos ? ' style="' + pos + ';' + vars + '"' : ' style="' + vars + '"') + '>' + inner + '</div>';
   }
+
+  var PZ_NO = { 'loop:shimmer': 1, 'loop:beacon': 1, 'hover:inzoom': 1, 'hover:ring': 1, 'hover:sheen': 1, 'hover:uline': 1 },
+    PZ_NOWALK = { 'loop:pulse': 1, 'loop:beat': 1, 'loop:wiggle': 1, 'loop:drift': 1, 'hover:tilt': 1, 'hover:zoom': 1, 'hover:lean': 1, 'hover:spot': 1 };
+  function walksEl(el) { var d = el && el.data, w = d && d.walk; return w !== '' && w != null && typeof w !== 'boolean' && isFinite(+w) && el && isFinite(+el.x) && Math.abs(+w - el.x) >= 2; }
+  /* o efeito f:k (loop/hover) serve para este personagem? (editor: painel, vitrine, menu; safeEl: arquivo reaberto) */
+  function animOk(f, k, el) { var id = f + ':' + k; return !PZ_NO[id] && !(PZ_NOWALK[id] && walksEl(el)); }
 
   /* ---------- FX.persona ---------- */
   R.FX.persona = {
@@ -206,7 +224,7 @@
       PRESETS.map(function (p) { return p[1] + ' ' + p[3]; }).join(' ').toLowerCase(),
     variants: PRESETS.map(function (p) { return [p[0], p[1], p[3]]; }),
     label: function (el) { return 'Personagem · ' + presetOf(el)[1]; },
-    norm: norm,
+    norm: norm, animOk: animOk,
     tip: 'Na apresentação o personagem se move conforme o gatilho, os olhos seguem o mouse e um clique nele muda a expressão, a fala e acende o elemento para onde aponta. Prenda uma linha a ele para ligar o balão a um gráfico.',
     data: { hat: '', hair: '', lashes: '', glasses: '', outfit: '', tool: '', c1: '', c2: '', mood: '', act: 'acenar', trig: 'in', dir: 'auto', look: '1', say: 'Olá! Vamos ao plano.', bubble: 'fala', side: 'auto', bcol: 'branco', mood2: '', say2: '', act2: 'pular', aim: '', walk: '', choices: [] },
     fields: [['hat', 'Chapéu', selOf(HATS, 'Do personagem')], ['hair', 'Cabelo', selOf(HAIRS, 'Do personagem')], ['lashes', 'Cílios', 'sel:=Do personagem|1=Com cílios|0=Sem cílios'], ['glasses', 'Óculos', selOf(GLASSES, 'Do personagem')],
@@ -239,17 +257,18 @@
       var fx = el && el._pzAim; /* exportação PowerPoint editável: o elemento sai sozinho na imagem, com a mira medida no slide inteiro */
       if (fx && /^[lr]$/.test(fx.face) && /^-?\d{1,3}(\.\d+)?deg$/.test(fx.deg)) { face = fx.face; vars += '--aim:' + fx.deg + ';'; attrs += ' data-fix="1"'; }
       if (el && typeof el.id === 'string') vars += '--bk:-' + hashMs(el.id) + 'ms;';
-      var f = Math.max(10, Math.min(24, Math.min(w * .058, h * .052))), fb = f, bubHTML = '';
+      var f = Math.max(10, Math.min(24, Math.min(w * .058, h * .052))), fb = f, bubHTML = '', over = '';
       var L = layout(d.side, w, h, hasB, face, f);
       if (hasB) { /* rabicho apontando para a cabeça: x = centro do desenho (em cima) ou y da cabeça (dos lados) */
         var B = L.bub, bw = w * B[2], bh = h * B[3], D = L.D, headX = D.x + D.w / 2, headY = D.y + 100 * D.k;
         fb = fitFont(f, bw, bh, [say, say2], ch, bub);
+        if (![say, say2].every(function (t) { return fits(fb, bw, bh, t, ch, bub); })) { over = ' pz-over'; vars += '--lc:' + clampLines(fb, bw, bh, ch, bub) + ';'; } /* não cabe nem com 8 px: corta com reticências (e o editor marca o balão) */
         var tx = (headX - w * B[0]) / bw * 100, ty = (headY - h * B[1]) / bh * 100;
         var inner = '<div class="pz-s1">' + (say.trim() ? E('say', say, 'pz-txt') : '') + '</div>' + (say2.trim() ? '<div class="pz-s2">' + E('say2', say2, 'pz-txt') + '</div>' : '') +
           (ch.length ? '<div class="pz-chs">' + ch.map(function (c) { return '<button type="button" class="pz-ch" data-go="' + c.go + '"' + (c.m ? ' data-cm="' + c.m + '"' : '') + '>' + esc(c.t) + '</button>'; }).join('') + '</div>' : '');
         bubHTML = bubbleBox(bub, L.tail, 'left:' + pct(B[0]) + ';top:' + pct(B[1]) + ';width:' + pct(B[2]) + ';height:' + pct(B[3]) + ';--tx:' + Math.max(12, Math.min(88, tx)).toFixed(1) + '%;--ty:' + Math.max(15, Math.min(85, ty)).toFixed(1) + '%', bubVars(d.bcol), inner);
       }
-      return '<div class="fx pz am-ia' + (hasB ? ' pz-hasb' : '') + (say2.trim() ? ' pz-has2' : '') + '" data-act="' + act + '" data-act2="' + act2 + '" data-trig="' + trig + '" data-mood="' + p.mood + '" data-mood1="' + p.mood + '"' + (mood2 ? ' data-mood2="' + mood2 + '"' : '') +
+      return '<div class="fx pz am-ia' + over + (hasB ? ' pz-hasb' : '') + (say2.trim() ? ' pz-has2' : '') + '" data-act="' + act + '" data-act2="' + act2 + '" data-trig="' + trig + '" data-mood="' + p.mood + '" data-mood1="' + p.mood + '"' + (mood2 ? ' data-mood2="' + mood2 + '"' : '') +
         ' data-face="' + face + '" data-dir="' + dir + '" data-look="' + (d.look === '0' ? '0' : '1') + '"' + (aim ? ' data-aim="' + aim + '"' : '') + ' data-sb="' + L.svg.map(function (v) { return v.toFixed(3); }).join(' ') + '"' + attrs +
         ' style="' + vars + '--c1:' + p.c1 + ';--c2:' + p.c2 + ';font-size:' + CQ(fb) + '"><div class="pz-mv">' + bubHTML +
         '<svg class="pz-svg" viewBox="0 0 200 240" preserveAspectRatio="xMidYMax meet" aria-hidden="true" focusable="false" style="left:' + pct(L.svg[0]) + ';top:' + pct(L.svg[1]) + ';width:' + pct(L.svg[2]) + ';height:' + pct(L.svg[3]) + '">' + charSVG(p) + '</svg></div></div>';
@@ -268,8 +287,8 @@
     html: function (d, w, h) {
       d = d || {}; var st = inList(d.style, BUBS.slice(0, 4), 'fala'), tl = has(TAILS, d.tail) ? d.tail : 'bl', f = Math.max(10, Math.min(26, Math.min(w * .07, h * .17))), txt = str(d.text, 600);
       var rs = TAILS[tl] === 'n' ? 0 : f * (st === 'pensa' ? 2 : 1), bw = w - (TAILS[tl] === 'l' || TAILS[tl] === 'r' ? rs : 0), bh = h - (TAILS[tl] === 'b' || TAILS[tl] === 't' ? rs : 0);
-      f = fitFont(f, bw, bh, [txt], null, st);
-      return '<div class="fx pz-bub" style="font-size:' + CQ(f) + '">' + bubbleBox(st, TAILS[tl], null, bubVars(d.bcol) + ';--tx:' + (TAILX[tl] || 50) + '%;--ty:50%', '<div class="pz-s1">' + E('text', txt, 'pz-txt') + '</div>') + '</div>';
+      f = fitFont(f, bw, bh, [txt], null, st); var ov = !fits(f, bw, bh, txt, null, st); /* não cabe nem com 8 px: reticências (e o editor marca) */
+      return '<div class="fx pz-bub' + (ov ? ' pz-over' : '') + '" style="font-size:' + CQ(f) + (ov ? ';--lc:' + clampLines(f, bw, bh, null, st) : '') + '">' + bubbleBox(st, TAILS[tl], null, bubVars(d.bcol) + ';--tx:' + (TAILX[tl] || 50) + '%;--ty:50%', '<div class="pz-s1">' + E('text', txt, 'pz-txt') + '</div>') + '</div>';
     }
   };
 
@@ -296,9 +315,18 @@
   var baseEl = R.renderEl;
   R.renderEl = function (el, i) { var n = baseEl(el, i); if (el && el.kind === 'persona' && el.data && el.data.aim) setTimeout(function () { var pz = n.querySelector('.pz'); if (pz && n.isConnected) aimNode(pz); }, 0); return n; };
 
-  /* ---------- player ---------- */
+  /* ---------- chegada do “Andar até” (vale no player e na prévia do editor) ---------- */
   function flash(pz, cls, ms) { pz.classList.remove(cls); void pz.offsetWidth; pz.classList.add(cls); clearTimeout(pz['_t' + cls]); pz['_t' + cls] = setTimeout(function () { pz.classList.remove(cls); }, ms); }
   function walking(pz) { return !!pz.dataset.walk && !pz.classList.contains('pz-arr') && !!pz.closest('.am-in'); }
+  var ARR = []; /* players abertos: religam as linhas presas na chegada */
+  function arrive(pz) {
+    pz.classList.add('pz-arr'); aimNode(pz);
+    var act = pz.dataset.act; /* fora do “ao entrar”, a entrada toca uma vez na chegada (sai da pose neutra da caminhada sem salto) e então o gatilho assume */
+    if (pz.dataset.trig !== 'in' && act && act !== 'parado') flash(pz, 'pz-ent', ACT_MS[act] || 2000);
+    ARR.slice().forEach(function (f) { try { f(pz); } catch (err) { if (window.console) console.error(err); } });
+  }
+  document.addEventListener('animationend', function (e) { if (e.animationName !== 'pzWalkTo') return; var pz = e.target.closest && e.target.closest('.pz'); if (pz && pz.closest('.am-in') && !pz.classList.contains('pz-arr')) arrive(pz); });
+  /* ---------- player ---------- */
   function hilite(pz) {
     var st = pz.closest('.am-stage'), id = pz.dataset.aim, tn = id && st ? st.querySelector('.am-el[data-id="' + id + '"]') : null; if (!tn) return;
     var fw = tn.querySelector('.am-fxw'); tn.classList.remove('pz-hl'); void tn.offsetWidth; tn.classList.add('pz-hl'); if (fw) fw.classList.add('am-hov');
@@ -308,64 +336,70 @@
   function react(pz) {
     var on = pz.classList.toggle('pz-on'), m2 = pz.dataset.mood2;
     if (m2) pz.dataset.mood = on ? m2 : (pz.dataset.mood1 || pz.dataset.mood);
-    if (!walking(pz)) pz.classList.add('pz-done'); /* a entrada já tocou: não recomeça quando a reação termina */
+    if (!walking(pz)) pz.classList.add('pz-done'); /* a entrada já tocou: não recomeça quando a reação termina (laço: volta sem esperar) */
     gesture(pz); hilite(pz);
   }
   function visOf(hd, idx) { var m = hd.map || []; for (var k = 0; k < m.length; k++) if (m[k] >= idx) return k; return m.length - 1; }
   R.hooks.player.push(function (hd) {
     var deckEl = hd.deckEl; if (!deckEl) return;
     Array.prototype.forEach.call(deckEl.querySelectorAll('.am-stage'), aimStage);
-    var px = 0, py = 0, raf = 0, goT = 0;
+    var px = 0, py = 0, raf = 0, goT = 0, moved = false;
     function slideOf(st) { var i = Array.prototype.indexOf.call(deckEl.children, st.parentNode); return i >= 0 && hd.deck && hd.deck.slides ? hd.deck.slides[i] : null; }
-    /* linhas presas a um personagem que anda: somem durante a caminhada e reaparecem com a ponta no ponto de chegada */
-    function relink(st) {
+    /* linhas presas a um personagem que anda: somem durante a caminhada e reaparecem com a ponta no ponto de chegada.
+       only = id de quem acabou de chegar (só as linhas dele são refeitas; as outras cópias ficam como estão) */
+    function relink(st, only) {
       var s = slideOf(st); if (!s || !Array.isArray(s.els)) return;
       var wk = {}; Array.prototype.forEach.call(st.querySelectorAll('.pz[data-walk]'), function (pz) { var n = pz.closest('.am-el'); if (n) wk[n.dataset.id] = { pz: pz, d: parseFloat(pz.dataset.walk) || 0 }; });
       s.els.forEach(function (ln, i) {
         if (!ln || ln.type !== 'line') return; var ends = ['a1', 'a2'].filter(function (k) { return ln[k] && wk[ln[k].id]; }); if (!ends.length) return;
+        if (only && !ends.some(function (k) { return ln[k].id === only; })) return;
         var orig = st.querySelector('.am-el[data-id="' + ln.id + '"]'); if (!orig) return;
         var old = st.querySelector('.am-el[data-id="' + ln.id + '-pz"]'); if (old) old.remove();
         if (!st.classList.contains('am-in')) { orig.classList.remove('pz-lnw'); return; }
         orig.classList.add('pz-lnw');
         if (!ends.every(function (k) { return wk[ln[k].id].pz.classList.contains('pz-arr'); })) return;
-        var c = JSON.parse(JSON.stringify(ln)); c.id = ln.id + '-pz'; c.anim = { in: 'none' }; delete c.a1; delete c.a2;
+        var c = JSON.parse(JSON.stringify(ln)); c.id = ln.id + '-pz'; c.anim = Object.assign({}, ln.anim || {}, { in: 'none', delay: 0 }); delete c.a1; delete c.a2; /* mantém o efeito contínuo (Fluxo) e o de mouse da linha */
         ends.forEach(function (k) { c[k === 'a1' ? 'x1' : 'x2'] += wk[ln[k].id].d; });
         var nn = R.renderEl(c, i); nn.classList.add('pz-lnx'); orig.parentNode.insertBefore(nn, orig.nextSibling);
       });
     }
+    function eyes() { if (moved && !raf) raf = requestAnimationFrame(tick); }
     /* palco (re)entrou: todos recomeçam do estado inicial */
     function reset(st) {
-      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr'); if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
-      relink(st);
+      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-ent'); if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
+      relink(st); eyes();
     }
-    function arrive(pz) { pz.classList.add('pz-arr'); aimNode(pz); var st = pz.closest('.am-stage'); if (st) relink(st); }
+    function onArrive(pz) { if (!deckEl.contains(pz)) return; var st = pz.closest('.am-stage'), n = pz.closest('.am-el'); if (st && n) relink(st, n.dataset.id); eyes(); }
     function click(e) {
       var ch = e.target.closest ? e.target.closest('.pz-ch') : null;
       if (ch) {
         var pz = ch.closest('.pz'), m = ch.dataset.cm, go = +ch.dataset.go; e.stopPropagation();
         if (m) pz.dataset.mood = m; if (!walking(pz)) pz.classList.add('pz-done'); gesture(pz);
         Array.prototype.forEach.call(pz.querySelectorAll('.pz-ch'), function (b) { b.classList.toggle('pz-pick', b === ch); });
-        if (go > 0) { clearTimeout(goT); var at = hd.cur(); goT = setTimeout(function () { goT = 0; if (hd.cur() === at) hd.go(visOf(hd, go - 1)); }, 420); }
+        clearTimeout(goT); goT = 0; /* a decisão nova vale: cancela um salto ainda pendente */
+        if (go > 0) { var at = hd.cur(); goT = setTimeout(function () { goT = 0; if (hd.cur() === at) hd.go(visOf(hd, go - 1)); }, 420); }
         return;
       }
       var p = e.target.closest ? e.target.closest('.pz') : null; if (p) react(p);
     }
     function down(e) { if (e.target.closest && e.target.closest('.pz-ch')) e.preventDefault(); } /* clique não deixa o foco no botão: Espaço e Enter continuam avançando */
-    function ended(e) { if (e.animationName === 'pzWalkTo') { var pz = e.target.closest && e.target.closest('.pz'); if (pz && pz.closest('.am-in')) arrive(pz); } }
     function tick() {
       raf = 0; var sl = deckEl.children[hd.cur()]; if (!sl) return;
       Array.prototype.forEach.call(sl.querySelectorAll('.pz[data-look="1"]'), function (pz) {
         var ey = pz.querySelector('.pz-eyes'); if (!ey) return; var r = ey.getBoundingClientRect(); if (!r.width) return;
-        var cx = r.left + r.width / 2, cy = r.top + r.height / 2, dx = px - cx, dy = py - cy, d = Math.sqrt(dx * dx + dy * dy) || 1, m = Math.min(1, d / (r.width * 2.5)), fl = getComputedStyle(pz.querySelector('.pz-svg')).transform.indexOf('matrix(-1') === 0 ? -1 : 1;
+        var cx = r.left + r.width / 2, cy = r.top + r.height / 2, dx = px - cx, dy = py - cy, rt = (parseFloat(pz.dataset.rot) || 0) * Math.PI / 180;
+        if (rt) { var rx = dx * Math.cos(rt) + dy * Math.sin(rt), ry = -dx * Math.sin(rt) + dy * Math.cos(rt); dx = rx; dy = ry; } /* personagem girado: o mouse no referencial dele */
+        var d = Math.sqrt(dx * dx + dy * dy) || 1, m = Math.min(1, d / (r.width * 2.5)), fl = getComputedStyle(pz.querySelector('.pz-svg')).transform.indexOf('matrix(-1') === 0 ? -1 : 1;
         pz.style.setProperty('--lx', (dx / d * 4.5 * m * fl).toFixed(2) + 'px'); pz.style.setProperty('--ly', (dy / d * 3.5 * m).toFixed(2) + 'px');
       });
     }
-    function move(e) { px = e.clientX; py = e.clientY; if (!raf) raf = requestAnimationFrame(tick); }
+    function move(e) { px = e.clientX; py = e.clientY; moved = true; if (!raf) raf = requestAnimationFrame(tick); }
     var mo = null;
     if (window.MutationObserver) { mo = new MutationObserver(function (recs) { recs.forEach(function (r) { var st = r.target; if (st && st.classList && st.classList.contains('am-stage') && st.classList.contains('am-in') && !(r.oldValue && /\bam-in\b/.test(r.oldValue))) reset(st); }); }); mo.observe(deckEl, { attributes: true, subtree: true, attributeFilter: ['class'], attributeOldValue: true }); }
     Array.prototype.forEach.call(deckEl.querySelectorAll('.am-stage.am-in'), reset);
-    deckEl.addEventListener('click', click); deckEl.addEventListener('mousedown', down); deckEl.addEventListener('animationend', ended); hd.root.addEventListener('pointermove', move);
-    hd.onDestroy(function () { deckEl.removeEventListener('click', click); deckEl.removeEventListener('mousedown', down); deckEl.removeEventListener('animationend', ended); hd.root.removeEventListener('pointermove', move); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(goT); goT = 0; if (mo) mo.disconnect(); });
+    ARR.push(onArrive);
+    deckEl.addEventListener('click', click); deckEl.addEventListener('mousedown', down); hd.root.addEventListener('pointermove', move);
+    hd.onDestroy(function () { var k = ARR.indexOf(onArrive); if (k >= 0) ARR.splice(k, 1); deckEl.removeEventListener('click', click); deckEl.removeEventListener('mousedown', down); hd.root.removeEventListener('pointermove', move); if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(goT); goT = 0; if (mo) mo.disconnect(); });
   });
-  R.personas = { PRESETS: PRESETS, HATS: HATS, HAIRS: HAIRS, OUTFITS: OUTFITS, TOOLS: TOOLS, GLASSES: GLASSES, MOODS: MOODS, ACTS: ACTS, TRIGS: TRIGS, BUBS: BUBS, BCOLS: BCOLS, ACT_MS: ACT_MS, resolve: resolve, aimNode: aimNode, aimStage: aimStage, presetOf: presetOf, choices: choicesOf, norm: norm, fits: fits, layout: layout };
+  R.personas = { PRESETS: PRESETS, HATS: HATS, HAIRS: HAIRS, OUTFITS: OUTFITS, TOOLS: TOOLS, GLASSES: GLASSES, MOODS: MOODS, ACTS: ACTS, TRIGS: TRIGS, BUBS: BUBS, BCOLS: BCOLS, ACT_MS: ACT_MS, resolve: resolve, aimNode: aimNode, aimStage: aimStage, presetOf: presetOf, choices: choicesOf, norm: norm, fits: fits, layout: layout, animOk: animOk, arrive: arrive, PZ_NO: PZ_NO, PZ_NOWALK: PZ_NOWALK };
 })(window.AMRT);

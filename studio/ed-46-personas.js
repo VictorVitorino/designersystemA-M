@@ -16,13 +16,26 @@
     return (t ? base + ' “' + (t.length > 26 ? t.slice(0, 25) + '…' : t) + '”' : base).replace(/[|=]/g, ' ');
   }
   function aimOpts() {
-    var s = A.deck && A.deck.slides[A.cur], sel = A.selected(), me = sel.length === 1 ? sel[0] : null, out = ['=Nenhum'];
-    ((s && s.els) || []).forEach(function (e) { if (!e || e.id === me || e.type === 'line' || typeof e.id !== 'string') return; out.push(e.id + '=' + nameOf(e)); });
+    var s = A.deck && A.deck.slides[A.cur], sel = A.selected(), me = sel.length === 1 ? sel[0] : null, out = ['=Nenhum'], els = (s && s.els) || [];
+    var meEl = me && els.filter(function (e) { return e && e.id === me; })[0], cur = meEl && meEl.data && typeof meEl.data.aim === 'string' ? meEl.data.aim : '';
+    els.forEach(function (e) { if (!e || e.id === me || e.type === 'line' || typeof e.id !== 'string') return; out.push(e.id + '=' + nameOf(e)); });
+    /* alvo que não está mais neste slide (apagado, ou personagem colado em outro slide): aparece selecionado, para poder trocar ou limpar */
+    if (cur && /^[\w-]{1,40}$/.test(cur) && !els.some(function (e) { return e && e.id === cur; })) out.splice(1, 0, cur + '=(alvo que não está neste slide)');
     return 'sel:' + out.join('|');
   }
   Object.defineProperty(F, 'fields', { configurable: true, enumerable: true, get: function () { return BASE.map(function (f) { return f[0] === 'aim' ? ['aim', f[1], aimOpts()] : f; }); } });
   var t = 0;
-  function reaim() { clearTimeout(t); t = setTimeout(function () { var st = document.querySelector('#wrap .am-stage'); if (st && st.querySelector('.pz[data-aim]')) RT.personas.aimStage(st); }, 0); }
+  /* giro (alça, teclado, painel) e posição mudam o palco sem redesenhar o personagem: data-rot e data-walk (distância até o X de chegada)
+     vêm do modelo antes de remirar */
+  function sync(st) {
+    var s = A.deck && A.deck.slides[A.cur]; if (!s) return;
+    Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) {
+      var n = pz.closest('.am-el'), e = n && s.els.filter(function (x) { return x && x.id === n.dataset.id; })[0]; if (!e) return;
+      var r = +e.rot || 0; if (r) pz.dataset.rot = r.toFixed(2); else delete pz.dataset.rot;
+      var w = e.data && e.data.walk; if (pz.dataset.walk != null && w !== '' && w != null && isFinite(+w)) pz.dataset.walk = String(Math.round(+w - e.x));
+    });
+  }
+  function reaim() { clearTimeout(t); t = setTimeout(function () { var st = document.querySelector('#wrap .am-stage'); if (st && st.querySelector('.pz[data-aim]')) { sync(st); RT.personas.aimStage(st); } }, 0); }
   document.addEventListener('pointerup', reaim, true);
   document.addEventListener('keyup', function (e) { if (/^Arrow/.test(e.key)) reaim(); }, true);
   var pr = document.getElementById('props'); if (pr) pr.addEventListener('input', reaim);

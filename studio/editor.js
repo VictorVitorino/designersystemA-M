@@ -370,7 +370,7 @@
     if (o.grp != null && !(typeof o.grp === 'string' && /^[\w-]{1,40}$/.test(o.grp))) delete o.grp; /* S27: grupo = id compartilhado */
     if (o.type === 'image') { o.src = safeSrc(o.src); if (!o.src) return null; }
     var a = o.anim && typeof o.anim === 'object' ? o.anim : {}; o.anim = { in: TOKEN_RE.test(a.in || '') ? a.in || 'none' : 'none' };
-    ['loop', 'hover'].forEach(function (k) { if (typeof a[k] === 'string' && /^\w{1,20}$/.test(a[k])) o.anim[k] = a[k]; });
+    ['loop', 'hover'].forEach(function (k) { if (typeof a[k] === 'string' && /^\w{1,20}$/.test(a[k]) && (!F || typeof F.animOk !== 'function' || F.animOk(k, a[k], o))) o.anim[k] = a[k]; }); /* S35: efeito que o componente recusa sai ao abrir */
     ['delay', 'dur'].forEach(function (k) { if (a[k] != null && isFinite(+a[k])) o.anim[k] = +a[k]; });
     if (a.spd != null) o.anim.spd = pickN(a.spd, [0.5, 0.75, 1, 1.5, 2], 1);
     if (a.rep != null) o.anim.rep = pickN(a.rep, [0, 1, 3], 0);
@@ -523,7 +523,7 @@
   function remapBase(b, map) {
     if (!b || typeof b !== 'object') return;
     Object.keys(b.els || {}).forEach(function (k) { var sn = b.els[k]; if (!sn) return; ['a1', 'a2'].forEach(function (a) { if (sn[a] && map[sn[a].id]) sn[a] = { id: map[sn[a].id], s: sn[a].s }; }); if (sn.dsel && typeof sn.dsel.aim === 'string' && map[sn.dsel.aim]) sn.dsel.aim = map[sn.dsel.aim]; });
-    Object.keys(b.tpl || {}).forEach(function (k) { var t = b.tpl[k]; if (t && t.data && typeof t.data.aim === 'string' && map[t.data.aim]) t.data.aim = map[t.data.aim]; });
+    Object.keys(b.tpl || {}).forEach(function (k) { var t = b.tpl[k]; if (!t) return; if (map[t.id]) t.id = map[t.id]; ['a1', 'a2'].forEach(function (a) { if (t[a] && map[t[a].id]) t[a] = { id: map[t[a].id], s: t[a].s }; }); if (t.data && typeof t.data.aim === 'string' && map[t.data.aim]) t.data.aim = map[t.data.aim]; }); /* o elemento restaurado volta com o id da cópia */
   }
   /* alvo para prender a ponta arrastada: elemento (não linha) sob o ponteiro (até 12 px fora da caixa); a 22 px do meio de um lado = esse lado, senão automático; o menor elemento ganha */
   function snapTarget(x, y, selfId) {
@@ -910,10 +910,11 @@
   function canDraw(el) { return isStroke(el) || isIcon(el); }
   /* o efeito f:k serve para este elemento? ('ln' = só traços, 'tx' = só textos e formas com texto) */
   function hasText(el) { return el.type === 'text' || (el.type === 'shape' && /\S/.test(String(el.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' '))); }
-  var PZ_OFF = { 'loop:shimmer': 1, 'hover:inzoom': 1 }; /* S35: recortam o desenho do personagem (overflow da caixa) */
-  function animFits(el, f, k) { if (el && el.kind === 'persona' && PZ_OFF[f + ':' + k]) return false; var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
+  /* S35: o componente pode recusar efeitos (FX.animOk: o personagem recusa os que recortam o desenho, contornam a caixa vazia ou, com “Andar até”, giram/escalam em volta da caixa de origem) */
+  function fxAnimOk(el, f, k) { var F = el && el.type === 'fx' && RT.FX[el.kind]; return !(F && typeof F.animOk === 'function' && !F.animOk(f, k, el)); }
+  function animFits(el, f, k) { if (!fxAnimOk(el, f, k)) return false; var o = ANIM_ONLY[f + ':' + k]; return !o || (o === 'ln' ? (f === 'in' ? canDraw(el) : isStroke(el)) : o === 'tx' ? hasText(el) : true); }
   var ONLY_MSG = { ln: 'funciona em linhas, setas e Linhas A&M', lnIn: 'funciona em linhas, setas, Linhas A&M e ícones animados', tx: 'funciona em textos e formas com texto' };
-  function onlyMsg(it) { return ONLY_MSG[it.only === 'ln' && it.fam === 'in' ? 'lnIn' : it.only]; }
+  function onlyMsg(it) { return ONLY_MSG[it.only === 'ln' && it.fam === 'in' ? 'lnIn' : it.only] || 'não serve para personagens (recortaria, contornaria a caixa vazia ou deslocaria o desenho)'; }
   var holdProps = false;
   function animChips(el, f, v) { return RT.ANIMS[f].filter(function (o) { return o[0] === 'none' || animFits(el, f, o[0]) || o[0] === v; }).map(function (o) { return '<button class="chip' + ((v || 'none') === o[0] ? ' on' : '') + '" data-set="anim.' + f + '" data-v="' + o[0] + '" title="' + esc(o[2] || '') + '">' + esc(o[1]) + '</button>'; }).join(''); }
   function renderProps() { renderPropsBody(); galSync(); }
@@ -1330,13 +1331,16 @@
     /* ícone: a prévia mostra o movimento sem esperar o mouse ou o clique (só a prévia; o elemento guarda o gatilho escolhido) */
     if (c.kind === 'icon' && c.data && c.data.trig !== 'loop') c.data.trig = 'in-loop';
     if (c.kind === 'iconmorph') c.variant = 'loop';
+    var pzn = c.kind === 'persona' && stage.querySelector('.am-el[data-id="' + el.id + '"] .pz'); /* S35: personagem sozinho na prévia, com o lado e a mira do slide; o movimento toca como “ao entrar” */
+    if (pzn) { c._pzAim = { face: pzn.dataset.face, deg: pzn.style.getPropertyValue('--aim').trim() || '-100deg' }; c.data = clone(c.data || {}); if (c.data.trig !== 'loop') c.data.trig = 'in'; }
     st = RT.renderSlide({ bg: 'transparent', els: [c] }, { play: true });
     st.querySelector('.am-el').style.zIndex = slide().els.indexOf(el) + 1;
     ov.appendChild(st); wrap.insertBefore(ov, selLayer);
     var node = stage.querySelector('.am-el[data-id="' + el.id + '"]'); if (node) node.classList.add('previewing');
     void st.offsetWidth; st.classList.remove('am-pre'); st.classList.add('am-in'); ov._clean = RT.runFx(st);
     var cyc = !!st.querySelector('[data-cycle="g"],[data-cycle="1"]');
-    clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : 4200);
+    var pzw = pzn && st.querySelector('.pz[data-walk]'), pzMs = pzw ? (+((pzw.style.getPropertyValue('--wt') || '0').replace('ms', '')) || 0) + 3600 : 0; /* caminhada + movimento */
+    clearTimeout(pvTimer); pvTimer = setTimeout(stopPreview, cyc ? 7200 : isIcon(c) ? 6800 : Math.max(4200, (+((c.anim || {}).delay) || 0) + pzMs));
   }
 
   /* ---------------- ações ---------------- */
@@ -1396,9 +1400,9 @@
     var list = sels(), n = 0;
     list.forEach(function (e) {
       var ok = false, same = fmtClip.type === e.type, txt = /^(text|shape)$/.test(e.type) && /^(text|shape)$/.test(fmtClip.type);
-      (FMT[e.type] || []).forEach(function (k) { if (!(k in fmtClip)) return; if (same || (txt && FMT_TX.indexOf(k) >= 0)) { e[k] = clone(fmtClip[k]); ok = true; } });
+      (FMT[e.type] || []).forEach(function (k) { if (!(k in fmtClip)) return; if (k === 'pal' && !palOk(e)) return; /* S35: cores do componente só onde o painel as oferece (personagem, ícone e Marca A&M ficam fora) */ if (same || (txt && FMT_TX.indexOf(k) >= 0)) { e[k] = clone(fmtClip[k]); ok = true; } });
       if (same && !('bg' in fmtClip) && e.type === 'text') delete e.bg; if (same && e.type === 'shape' && !('look' in fmtClip)) delete e.look;
-      if (e.type === 'fx' && same) { e.data = e.data || {}; if (fmtClip.cols) { e.data.colors = fmtClip.cols.slice(); ok = true; } if (fmtClip.ds != null && fxStyleField(e.kind)) { e.data.style = fmtClip.ds; ok = true; } if ('pal' in fmtClip) ok = true; }
+      if (e.type === 'fx' && same) { e.data = e.data || {}; if (fmtClip.cols) { e.data.colors = fmtClip.cols.slice(); ok = true; } if (fmtClip.ds != null && fxStyleField(e.kind)) { e.data.style = fmtClip.ds; ok = true; } if ('pal' in fmtClip && palOk(e)) ok = true; }
       if (ok) { n++; rerenderEl(e); }
     });
     if (n) { renderProps(); commit(); toast('Formato aplicado em ' + (n > 1 ? n + ' elementos' : '1 elemento') + ' · Ctrl+Z desfaz'); } else toast('O formato copiado (' + fmtClip.name + ') não se aplica a esta seleção');
@@ -2914,11 +2918,19 @@
   }
   function gxApply() {
     var q = norm(gx.q).trim().split(/\s+/).filter(Boolean), n = 0;
-    $$('#drawerBody .gx-box').forEach(function (bx) { var ok = (gx.fam === 'all' || bx._it.fam === gx.fam) && q.every(function (w) { return bx.dataset.kw.indexOf(w) >= 0; }); bx.hidden = !ok; if (ok) n++; });
+    $$('#drawerBody .gx-box').forEach(function (bx) { var ok = (gx.fam === 'all' || bx._it.fam === gx.fam) && q.every(function (w) { return bx.dataset.kw.indexOf(w) >= 0; }); bx.hidden = !ok; if (ok) n++; if (bx._it.kind === 'persona' && bx._it.fam === 'cmp') gxPreset(bx, q); });
     $$('#drawerBody .gx-sec').forEach(function (s) { s.hidden = !$$('.gx-box', s).some(function (bx) { return !bx.hidden; }); });
     $$('#drawerBody [data-gf]').forEach(function (c) { var on = c.dataset.gf === gx.fam; c.classList.toggle('on', on); c.setAttribute('aria-pressed', on ? 'true' : 'false'); });
     $('#gxShown').textContent = n === gx.items.length ? '' : 'mostrando ' + n + ' de ' + gx.items.length;
     $('#gxEmpty').hidden = n > 0;
+  }
+  /* S35: a busca casou com um personagem do elenco (“mestre de obras”): o card mostra, prova e insere esse personagem */
+  function gxPreset(bx, q) {
+    var P = RT.personas, it = bx._it, v = '';
+    if (P && q.length) P.PRESETS.some(function (p) { var nm = norm(p[1] + ' ' + p[3]); if (q.every(function (w) { return nm.indexOf(w) >= 0; })) { v = p[0]; return true; } return false; });
+    if ((it.variant || '') === v) return;
+    var b = bx.querySelector('.gx-ins'); if (v) { it.variant = v; bx.dataset.v = v; if (b) b.dataset.v = v; } else { delete it.variant; delete bx.dataset.v; if (b) delete b.dataset.v; }
+    if (bx._st) { if (bx._clean) { bx._clean(); bx._clean = null; } bx._st.remove(); bx._st = null; gxRender(bx); }
   }
   function gxFilter(f) { gx.fam = f; gxApply(); $('#drawerBody').scrollTop = 0; }
   function gxNames(list) { var n = list.slice(0, 2).map(function (e) { return '<b>' + esc(elName(e)) + '</b>'; }).join(', '); return n + (list.length > 2 ? ' e mais ' + (list.length - 2) : ''); }

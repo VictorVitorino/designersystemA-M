@@ -62,6 +62,10 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
   menu Marca ▾ da faixa de ferramentas (`ed-46-personas.js/.css`).
 - Tokens novos de `data.*` entram em `DATA_TOKENS` (editor.js) **e** em `NOTEXT_KEYS` (runtime.js); texto livre (`say`, `say2`, `choices`) fica fora e sai
   sempre com `esc()`. A raiz leva `.am-ia`; o player não registra `hooks.show`.
+- Efeitos que o personagem recusa vêm do próprio componente (`FX.persona.animOk`, usado pelo painel, pela vitrine e pelo `safeEl`): nunca Reflexo, anéis,
+  Zoom interno, Contorno, Varrer luz, Sublinhar; com “Andar até”, também os que giram/escalam em volta da caixa de origem. A chegada da caminhada é tratada por
+  um ouvinte de `animationend` no documento (vale na prévia do editor); durante a caminhada os braços balançam em volta da pose neutra. Trilhas de gesto têm
+  nomes próprios (`…G`): o mesmo nome do laço não reiniciaria a animação. Pincel de formato não leva `pal` onde `palOk` é falso.
 
 ## Convenções
 

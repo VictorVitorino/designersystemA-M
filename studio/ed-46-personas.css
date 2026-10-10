@@ -1,3 +1,5 @@
 /* ---- ed-46 Personagens A&M: grade compacta no menu Marca ▾ ---- */
 #mBrand .pzm{display:grid;grid-template-columns:1fr 1fr;gap:2px}
 #mBrand .pzm button{padding:6px 10px;font-size:12.5px;white-space:nowrap}
+/* balão que não coube nem com a menor letra: contorno tracejado laranja no editor (o texto sai com reticências) */
+.am-edit .pz-over .pz-say,.am-edit .pz-bub.pz-over .pz-say{outline:.14em dashed #F78C16;outline-offset:.2em}
