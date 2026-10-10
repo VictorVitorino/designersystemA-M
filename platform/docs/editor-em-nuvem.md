@@ -11,7 +11,7 @@ e as provas de preservação. O contrato da API é `platform/docs/API.md` (fonte
     (`ORIGINAL_SHA256` = `dc93ceac9ab85f6cf5d233b94639ea2051e58d9f61da3a5d1a9b5148b5135099`). Ele **não** precisa ser igual ao build atual: `studio/` evolui, o original não.
   - **Build publicado**: `AM-Studio-Editor.html` e `Canteiro-AM.html` na raiz são o build que a última etapa de `studio/` publicou depois do portão
     (regra 5 do processo no `CLAUDE.md`). `python3 studio/assemble.py` tem de produzir esse arquivo **byte a byte** (`node tools/build-cloud-editor.js --verify-standalone`;
-    hoje sha256 `109aac4819759e4e…`, S36). O build em nuvem e a prova de paridade (lado A = `../AM-Studio-Editor.html`) seguem esse build, não o `original/`.
+    hoje sha256 `e0cc4c0845f80e90…`, S37). O build em nuvem e a prova de paridade (lado A = `../AM-Studio-Editor.html`) seguem esse build, não o `original/`.
   - Uma etapa nova em `studio/` muda o SHA-256 do build sem quebrar a plataforma: passa o portão de `studio/`, publica na raiz e roda de novo
     `--verify-standalone`, `tests/cloud/preservacao.test.js` e `npm run test:parity`. Os patches continuam sendo conferidos 1× cada (se o trecho mudou, o build falha).
 - O build cloud trabalha numa **cópia** (`platform/.tmp/cloud-build`): acrescenta `ed-49-cloud-core.js` e `ed-50-cloud.js/.css` e aplica **6 patches** de texto

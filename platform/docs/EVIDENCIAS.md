@@ -48,6 +48,7 @@ Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node te
 
 | Medida | Resultado |
 |---|---|
+| **Rodada da S37** (build autônomo `e0cc4c08…`, montagem sem comentários; build em nuvem `2a766423…`, 2026-10-10; `studio-cloud/patches.json` mudou → modo completo) | **GATE PASS — 38 de 38 baterias** (601 s) sobre o build em nuvem; PR-01…PR-15 e PR-11b: 16/16; `editor-cloud.test.js` 175/175; build em nuvem 1769 KB; paridade em [`evidencias/paridade.md`](evidencias/paridade.md) (equivalentes) |
 | **Rodada da S36** (build autônomo `109aac48…`, build em nuvem `cf3fe506…`, 2026-10-10; etapa só de `studio/`, modo rápido pela regra do CLAUDE.md) | PR-01…PR-15 e PR-11b: 16/16 (53 s, portão rápido de 4 baterias sobre o build em nuvem); `tests/cloud/editor-cloud.test.js`: 175/175; build em nuvem 1991 KB |
 | **Rodada da S35** (build autônomo `70a14b05…`, build em nuvem `85863901…`, 2026-10-10, com `NODE_OPTIONS=--require tools/pw-local.cjs`) | **GATE PASS — 36 de 36 baterias** (619 s); provas PR-01…PR-15 e PR-11b: 16/16 |
 | Rodada final da S34b (build `47a556b1…`, 2026-10-07 03:26, máquina sem outras cargas) | **GATE PASS — 35 de 35 baterias** (569 s); provas PR-01…PR-15: 15/15 (`.tmp/quality/preservacao.log`) |
@@ -55,11 +56,11 @@ Executado por mim (não só pelo agente construtor) com `PRESERVE_FULL=1 node te
 | Execução do agente construtor (mesmo comando, máquina ociosa) | GATE PASS 35/35 (530 s) |
 | Provas estruturais da mesma suíte (PR-01…PR-13) | cloud − extensão = autônomo + 6 patches (igualdade exata de texto); nenhum arquivo de `studio/`, `original/`, `am/` alterado; build autônomo com o SHA-256 do original (na S34b o build publicado era o próprio original) |
 
-Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as baterias do portão do editor (S34b: 35 de 35; S35: 36 de 36).
+Conclusão: o build em nuvem, sem a plataforma ativa, passa em todas as baterias do portão do editor (S34b: 35 de 35; S35: 36 de 36; S37: 38 de 38).
 
 ### 1.2 Prova de paridade (todos os efeitos, modelos, layouts, templates e quadros)
 
-A partir da S35 o lado A de `npm run test:parity` é o build autônomo publicado (`../AM-Studio-Editor.html`), não o `original/`. Rodada da S35: **não executável neste contêiner** — o harness usa o relógio falso (`page.clock`) do Playwright 1.63 de `platform/package.json`, cujo navegador não está instalado aqui; com o Playwright global (1.56) todos os slides animados divergem no mesmo retângulo de 26×40 px só no quadro de 400 ms, com CSS e JS do runtime idênticos em A e B (`cssSame`/`jsSame`), sinal de relógio e não de produto. Pendente: rodar `npm run test:parity` numa máquina com o navegador do 1.63 (como o job de e2e, que instala o Chromium do projeto).
+A partir da S35 o lado A de `npm run test:parity` é o build autônomo publicado (`../AM-Studio-Editor.html`), não o `original/`. Rodada da S37: **executada e equivalente** (ver o topo de `evidencias/paridade.md`; o harness ficou determinístico neste contêiner). Rodada da S35: **não executável neste contêiner na época** — o harness usa o relógio falso (`page.clock`) do Playwright 1.63 de `platform/package.json`, cujo navegador não está instalado aqui; com o Playwright global (1.56) todos os slides animados divergem no mesmo retângulo de 26×40 px só no quadro de 400 ms, com CSS e JS do runtime idênticos em A e B (`cssSame`/`jsSame`), sinal de relógio e não de produto. Pendente: rodar `npm run test:parity` numa máquina com o navegador do 1.63 (como o job de e2e, que instala o Chromium do projeto).
 A rodada registrada abaixo é a da S34b, quando o build publicado era o próprio original.
 
 `npm run test:parity` (`tools/parity.cjs`) com o original × build em nuvem final (sha `8e20f87c…`), executada em 2026-10-07 em duas passagens retomáveis (00:46–01:57, 311 slides; travamento transitório do navegador; retomada 02:19–02:52 a partir do checkpoint, com os 7 slides de transição recalculados pelo harness definitivo). Documento completo com método, envelope de ruído e lista de cada quadro fora da igualdade exata: [`evidencias/paridade.md`](evidencias/paridade.md).
