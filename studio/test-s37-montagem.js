@@ -30,7 +30,8 @@ const ntok=sm.reduce((s,b)=>s+(/text\/plain/.test(b.attrs)?0:toks(b.body).length
 check('S37-01: cada <script> do HTML montado tem a mesma sequência de tokens e as mesmas quebras de linha que a montagem com comentários (AM_NOSTRIP=1)', sm.length===sr.length && js.length===0, {blocos:sm.length, tokens:ntok, diferencas:js.slice(0,3)});
 /* 2. CSS: igual tirando comentários e espaços */
 const norm=s=>s.replace(/\/\*(?!%%)[\s\S]*?\*\//g,'').replace(/\s+/g,' ').trim();
-const noScripts=h=>h.replace(/<script[^>]*>[\s\S]*?<\/script>/g,''); /* <style> dentro de strings/comentários do JS não conta */
+/* <style> dentro de strings/comentários do JS não conta: corta cada bloco <script>…</script> por posição (sem replace de regex) */
+const noScripts=h=>{ let out='', i=0, a; while((a=h.indexOf('<script',i))>=0){ const b=h.indexOf('</script>',a); if(b<0) break; out+=h.slice(i,a); i=b+9; } return out+h.slice(i); };
 const cm=blocks(noScripts(MIN),'style'), cr=blocks(noScripts(RAW),'style'); const css=cm.map((b,i)=>cr[i]&&norm(b.body)===norm(cr[i].body)&&b.attrs===cr[i].attrs);
 check('S37-02: cada <style> é igual ao da montagem com comentários, tirando comentários e espaços', cm.length===cr.length && css.every(Boolean), {blocos:cm.length, iguais:css.filter(Boolean).length});
 /* 3. comentários que sobram */
