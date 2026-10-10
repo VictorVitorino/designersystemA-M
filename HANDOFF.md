@@ -86,7 +86,7 @@ npm run build:web
 
    Método: auditoria independente → reproduzir → teste que falha → menor correção → PR.
 
-   Candidato já visto, de baixa prioridade: em `saveContent`, um salvamento com conteúdo idêntico (caminho de idempotência) **ignora um `thumbSha` novo**, e a miniatura não atualiza até a próxima mudança real. Confirme e decida se vale a correção.
+   (Feito: o salvamento com conteúdo idêntico agora grava uma miniatura nova; regressão em `tests/api/versions.test.js`.)
 5. **Carga de 50 usuários (issue #29)**: rodar o workflow manual `load-isolated-pg17.yml` (Actions → *Run workflow*; banco descartável, sem serviços reais). Registrar p50/p95/p99, erros e throughput em `docs/evidencias/` e atualizar a issue.
 6. **Paridade visual completa** no CI ou numa máquina com o Chromium 1243: `npm run build:cloud && npm run test:parity`, com o resultado em `docs/evidencias/paridade.md`. Localmente, com o Chromium errado, não serve como prova.
 7. **Branches remotas antigas**: cerca de 35 branches `fix/*`, `feat/*`, `security/*`, `test/*` sobraram de PRs já integrados por squash. As diferenças que ainda mostram contra a `main` refletem a evolução posterior da `main`, não trabalho perdido, mas confira cada uma (PR correspondente fechado e integrado) antes de propor apagá-las ao dono. **Não apague sem autorização.**
@@ -94,7 +94,7 @@ npm run build:web
 ### P3 — depois do piloto no ar
 8. Homologação real: login, salvar, reabrir em um **segundo computador**, imagens, exportações e permissões entre dois usuários (etapas 4 e 5 do `STATUS-MVP.md`).
 9. Backup cifrado e restauração contra o R2/S3 real (issue #27). Hoje só foi ensaiado com o S3 falso (moto).
-10. Corrigir a documentação desatualizada: `platform/docs/00-ANALISE-ORIGINAL.md` diz que não há tela para as respostas de formulário/votação, mas o acervo já tem essa tela (`web/js/pages/acervo.js`: lista, CSV, apagar).
+10. Lacunas de código restantes (opcionais): o perfil Docker `completo` não autentica com o GoTrue próprio (`platform/docs/CONFIGURACAO.md`, seção Docker); comprimir o JSON no cliente para salvar apresentações acima de ~4 MB na Vercel (`docs/conteudo-e-versoes.md`). Já feitos: tela de respostas no acervo (existia; doc corrigida) e reconvite em lote (`tools/reinvite.js`).
 
 ---
 
