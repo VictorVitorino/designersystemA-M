@@ -86,6 +86,8 @@
 /* a entrada já tocou (houve clique ou decisão): não recomeça quando a reação termina */
 .am-play.am-in .pz.pz-done[data-trig=in]{--aC:pzNone;--aB:pzNone;--aR:pzNone;--aL:pzNone;--aG:pzNone;--aG2:pzNone;--aM:pzNone;--aF:pzNone;--aT:pzNone}
 .am-play.am-in .pz.pz-from{animation:pzFrom var(--wt,1.6s) linear var(--wd0,0ms) 1 backwards} /* S36: personagem guia, vem da posição do slide anterior */
+.am-play.am-in .pz.pz-here .pz-mv{animation:none;translate:var(--wq,0cqw) var(--wqy,0cqw)} /* S38: guia que já está no ponto de chegada do “Andar até” */
+.am-play.am-in .pz.pz-g1:is([data-trig=loop],[data-trig=hover]){--d0:0ms} /* S38: depois de um gesto o laço volta na hora (o gesto termina na pose de onde o laço parte) */
 /* andar até: balão e boneco (.pz-mv) deslizam até --wq/--wqy (cqw, no referencial do elemento) enquanto as pernas dão --wn passos de
    --ws; o lado da caminhada é data-wf. Na chegada (animationend → .pz-arr) o movimento escolhido toca e a mira vale */
 .pz[data-walk]{--wd0:calc(var(--d,0ms) + var(--t,0ms) + 150ms)}
@@ -110,7 +112,7 @@
 .pz[data-act2=negar]{--gB:pzShakeG;--gdur:1.4s}
 /* apresentação: só o desenho e o balão recebem o mouse; o vazio da caixa deixa o clique chegar às zonas de avançar/voltar */
 .am-play .am-k-persona,.am-play .am-k-persona>.am-rot,.am-play .am-k-persona>.am-rot>.am-fxw,.am-play .pz,.am-play .pz-mv,.am-play .pz-svg{pointer-events:none}
-.am-play .pz-char,.am-play .pz-say{pointer-events:auto}
+.am-play .pz-char,.am-play .pz-say{pointer-events:auto}.am-play .pz[data-trig=hover] .pz-svg{pointer-events:auto} /* S38: “ao passar o mouse” mede o mouse no quadro do desenho, que não pula: nada de piscar quando o boneco sai de baixo do ponteiro */
 .am-play .pz-conf,.am-play .pz-shd{pointer-events:none} /* confete invisível e sombra não recebem o clique */
 /* efeitos que o personagem recusa (FX.persona.animOk) também não agem aqui: arquivo exportado antes da regra, editado à mão ou com “Andar até” preenchido depois do efeito */
 .am-k-persona>.am-rot>.am-fxw::after{content:none!important}
@@ -212,4 +214,6 @@
 /* grito: estrela irregular; cores próprias por cor de balão (texto sempre legível) */
 .pz-say-grita{border:0;border-radius:0;padding:1.3em 2em;background:var(--c-sbg,#002A46);color:var(--c-sink,#fff);clip-path:polygon(50% 0%,59% 13%,74% 4%,76% 20%,93% 18%,86% 33%,100% 42%,88% 52%,98% 66%,82% 68%,86% 84%,70% 78%,66% 95%,54% 84%,42% 100%,36% 85%,20% 92%,24% 76%,6% 74%,16% 60%,0% 50%,14% 40%,4% 24%,22% 26%,20% 10%,36% 16%)}
 .pz-say-grita::before,.pz-say-grita::after{display:none}
+/* S38: o texto e as decisões ocupam a mesma faixa central que o cálculo da letra supõe (PAD: 74 % no grito, 80 % na nuvem): as linhas não chegam às pontas */
+.pz-say-grita>:is(.pz-s1,.pz-s2,.pz-chs){max-width:74%}.pz-say-pensa>:is(.pz-s1,.pz-s2,.pz-chs){max-width:80%}
 .pz-say-grita .pz-ch{background:var(--c-sink,#fff);color:var(--c-sbg,#002A46);border-color:var(--c-sink,#fff)}

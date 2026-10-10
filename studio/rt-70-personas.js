@@ -238,7 +238,7 @@
       ['look', 'Olhos na apresentação', 'sel:1=Seguem o mouse|0=Fixos'],
       ['say', 'Fala', 'area'], ['bubble', 'Balão', selList(BUBS)], ['side', 'Posição do balão', 'sel:auto=Automática|top=Em cima|right=À direita|left=À esquerda'], ['bcol', 'Cor do balão', 'sel:' + Object.keys(BCOLS).map(function (k) { return k + '=' + BCOLS[k][0]; }).join('|')],
       ['help', '<b>Ao clicar</b> na apresentação o personagem reage: muda a expressão, troca a fala, faz o movimento abaixo (com o gatilho “Só ao clicar”, faz o movimento principal) e acende o elemento para onde aponta. Um segundo clique volta ao normal.', 'help'],
-      ['mood2', 'Expressão ao clicar', selOf(MOODS, 'Não muda')], ['say2', 'Fala ao clicar', 'area'], ['act2', 'Movimento ao clicar (com o gatilho “Ao entrar”)', 'sel:none=Nenhum|' + ACTS.slice(1).map(function (o) { return o[0] + '=' + o[1]; }).join('|')],
+      ['mood2', 'Expressão ao clicar', selOf(MOODS, 'Não muda')], ['say2', 'Fala ao clicar', 'area'], ['act2', 'Movimento ao clicar', 'sel:none=Nenhum|' + ACTS.slice(1).map(function (o) { return o[0] + '=' + o[1]; }).join('|')],
       ['aim', 'Aponta para', 'sel:=Nenhum'], ['link', 'Ao clicar, ir para o slide (nº; vazio = fica no mesmo)', 'numopt'], ['walk', 'Andar até (X no slide, em px; vazio = fica onde está)', 'numopt'],
       ['choices', 'Decisões no balão — uma por linha: Botão | nº do slide | expressão (feliz, triste…)', 'rows:t|go:n|m'],
       ['help2', 'Cada decisão vira um botão no balão: na apresentação ele muda a expressão e leva ao slide indicado (0 = fica no mesmo). Com <b>Andar até</b>, o personagem caminha até esse X ao entrar no slide e só então faz o movimento e aponta; as linhas presas a ele reaparecem no ponto de chegada.', 'help']],
@@ -258,7 +258,6 @@
         attrs += ' data-walk="' + Math.round(dist) + '" data-wf="' + wf + '"';
       }
       if (trig === 'click' && act !== 'parado') act2 = act; /* “só ao clicar”: o clique toca o próprio movimento */
-      if (trig === 'loop' || trig === 'hover') act2 = 'none'; /* S36: em laço ou ao passar o mouse o clique muda expressão e fala, sem gesto por cima do movimento */
       var link = +d.link, grp = typeof d.grp === 'string' && /^[\w-]{1,40}$/.test(d.grp) ? d.grp : '';
       if (link >= 1 && link <= 999) attrs += ' data-link="' + Math.round(link) + '"'; if (grp) attrs += ' data-grp="' + grp + '"';
       if (rot) attrs += ' data-rot="' + rot.toFixed(2) + '"';
@@ -344,14 +343,32 @@
     var fw = tn.querySelector('.am-fxw'); tn.classList.remove('pz-hl'); void tn.offsetWidth; tn.classList.add('pz-hl'); if (fw) fw.classList.add('am-hov');
     clearTimeout(tn._pzT); tn._pzT = setTimeout(function () { tn.classList.remove('pz-hl'); if (fw) fw.classList.remove('am-hov'); }, 1800);
   }
-  function go(pz, a2) { pz.classList.remove('pz-pose'); flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
-  /* gesto do clique (só com “ao entrar” ou “só ao clicar”: em laço/mouse o html() zera o act2) */
-  function gesture(pz) { var a2 = pz.dataset.act2; if (a2 && a2 !== 'none' && !walking(pz)) go(pz, a2); }
+  /* S38: sem saltos. O gesto só começa com o personagem em repouso: nenhuma animação FINITA tocando dentro dele (entrada, chegada, pose,
+     caminhada, outro gesto); laços e piscar são infinitos e transições CSS (pupilas) não contam. Ocupado, o clique muda expressão e fala na
+     hora e o gesto não atropela o movimento. Em laço (“Sem parar”, “Ao passar o mouse”) o gesto entra na próxima virada do ciclo, medida no
+     próprio laço (braços, corpo, tronco e boca têm a mesma duração e o mesmo atraso: na virada estão todos na pose de onde o gesto parte). */
+  function anims(pz) { return pz.getAnimations ? pz.getAnimations({ subtree: true }) : []; }
+  function timing(a) { return a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null; }
+  function busy(pz) { return anims(pz).some(function (a) { var t = timing(a); return a.playState === 'running' && !!t && isFinite(t.endTime) && a.animationName !== 'pzNone' && !(window.CSSTransition && a instanceof CSSTransition); }); } /* pzNone = trilha inerte do motor */
+  function turn(pz) {
+    var w = -1; anims(pz).forEach(function (a) {
+      var t = timing(a), c = a.effect && a.effect.target && a.effect.target.getAttribute ? a.effect.target.getAttribute('class') || '' : '';
+      if (a.playState !== 'running' || !t || isFinite(t.endTime) || !(t.duration > 0) || !/\bpz-(aR|aL|char|torso|mouth)\b/.test(c)) return;
+      var l = (a.currentTime || 0) - (t.delay || 0), r = l < 0 ? -l : t.duration - (l % t.duration); if (r > w) w = r;
+    });
+    return w;
+  }
+  function go(pz, a2) { pz.classList.remove('pz-pose'); if (/^(loop|hover)$/.test(pz.dataset.trig)) pz.classList.add('pz-g1'); flash(pz, 'pz-go', ACT_MS[a2] || 2000); }
+  function gesture(pz) {
+    var a2 = pz.dataset.act2; if (!a2 || a2 === 'none' || walking(pz) || busy(pz) || pz._gw) return;
+    var w = turn(pz); if (w < 34) { go(pz, a2); return; }
+    pz._gw = setTimeout(function () { pz._gw = 0; if (pz.closest('.am-in') && !busy(pz)) go(pz, a2); }, w);
+  }
   function react(pz) {
     var on = pz.classList.toggle('pz-on'), m2 = pz.dataset.mood2;
     if (m2) pz.dataset.mood = on ? m2 : (pz.dataset.mood1 || pz.dataset.mood);
-    if (!walking(pz)) pz.classList.add('pz-done'); /* a entrada já tocou: não recomeça quando a reação termina (laço: volta sem esperar) */
-    gesture(pz); hilite(pz);
+    if (!walking(pz) && !busy(pz)) { pz.classList.add('pz-done'); gesture(pz); } /* em repouso: a entrada não recomeça depois do gesto; ocupado: nada é cortado no meio */
+    hilite(pz);
   }
   function visOf(hd, idx) { var m = hd.map || []; for (var k = 0; k < m.length; k++) if (m[k] >= idx) return k; return m.length - 1; }
   R.hooks.player.push(function (hd) {
@@ -380,7 +397,7 @@
     function eyes() { if (moved && !raf) raf = requestAnimationFrame(tick); }
     /* palco (re)entrou: todos recomeçam do estado inicial */
     function reset(st) {
-      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-pose', 'pz-from'); if (pz._gt) { delete pz.dataset.walk; delete pz.dataset.wf; pz._gt = 0; } if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
+      Array.prototype.forEach.call(st.querySelectorAll('.pz'), function (pz) { pz.classList.remove('pz-on', 'pz-go', 'pz-done', 'pz-arr', 'pz-pose', 'pz-from', 'pz-g1', 'pz-here'); clearTimeout(pz._gw); pz._gw = 0; if (pz._gt) { delete pz.dataset.walk; delete pz.dataset.wf; pz._gt = 0; } if (pz.dataset.mood1) pz.dataset.mood = pz.dataset.mood1; Array.prototype.forEach.call(pz.querySelectorAll('.pz-pick'), function (b) { b.classList.remove('pz-pick'); }); aimNode(pz); });
       relink(st); eyes();
     }
     /* S36: personagem guia — o mesmo grupo (data-grp) no slide de onde se veio: sai daquela posição (pés com pés) e anda até a sua. É uma caminhada
@@ -392,6 +409,8 @@
         var src = from.querySelector('.pz[data-grp="' + pz.dataset.grp + '"]'), a = src && boxOf(src.closest('.am-el')), b = boxOf(pz.closest('.am-el')); if (!a || !b) return;
         a.x += src._gt ? 0 : parseFloat(src.dataset.walk) || 0; /* lá ele tinha andado: sai do ponto de chegada */
         var dx = a.x + a.w / 2 - (b.x + b.w / 2), dy = a.y + a.h - (b.y + b.h), dist = Math.sqrt(dx * dx + dy * dy); if (!(dist >= 4)) return;
+        var own = pz.dataset.walk ? parseFloat(pz.dataset.walk) || 0 : 0; /* com “Andar até” próprio: se ele já está onde chegaria, não anda (nada de marchar no lugar) */
+        if (own && Math.abs(dx - own) < 4 && Math.abs(dy) < 4) { pz.classList.add('pz-here'); arrive(pz); return; }
         var t = (parseFloat(pz.dataset.rot) || 0) * Math.PI / 180, ms = Math.round(Math.max(600, Math.min(5000, dist * 3.2))), n = Math.max(1, Math.round(ms / 500));
         pz.style.setProperty('--gfx', CQ(dx * Math.cos(t) + dy * Math.sin(t))); pz.style.setProperty('--gfy', CQ(-dx * Math.sin(t) + dy * Math.cos(t)));
         if (!pz.dataset.walk) { pz._gt = 1; pz.dataset.walk = '0'; pz.dataset.wf = /^[lr]$/.test(pz.dataset.dir) ? pz.dataset.dir : dx > 0 ? 'l' : 'r'; pz.style.setProperty('--wt', ms + 'ms'); pz.style.setProperty('--wn', n); pz.style.setProperty('--ws', (ms / n).toFixed(1) + 'ms'); }
@@ -404,7 +423,7 @@
       var ch = e.target.closest ? e.target.closest('.pz-ch') : null;
       if (ch) {
         var pz = ch.closest('.pz'), m = ch.dataset.cm, go = +ch.dataset.go; e.stopPropagation();
-        if (m) pz.dataset.mood = m; if (!walking(pz)) pz.classList.add('pz-done'); gesture(pz);
+        if (m) pz.dataset.mood = m; if (!walking(pz) && !busy(pz)) { pz.classList.add('pz-done'); gesture(pz); }
         Array.prototype.forEach.call(pz.querySelectorAll('.pz-ch'), function (b) { b.classList.toggle('pz-pick', b === ch); });
         clearTimeout(goT); goT = 0; /* a decisão nova vale: cancela um salto ainda pendente */
         if (go > 0) { var at = hd.cur(); goT = setTimeout(function () { goT = 0; if (hd.cur() === at) hd.go(visOf(hd, go - 1)); }, 420); }

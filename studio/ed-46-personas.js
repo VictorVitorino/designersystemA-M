@@ -69,9 +69,12 @@
   var TABS = [['look', 'Visual'], ['cor', 'Cores'], ['mov', 'Movimento'], ['fala', 'Fala'], ['lig', 'Ligar']];
   function selEl() { var s = A.selected(), sl = A.deck && A.deck.slides[A.cur]; return s.length === 1 && sl ? sl.els.filter(function (x) { return x && x.id === s[0]; })[0] : null; }
   function opts(k) { var f = BASE.filter(function (x) { return x[0] === k; })[0], c = f && f[2]; return typeof c === 'string' && c.indexOf('sel:') === 0 ? c.slice(4).split('|').map(function (o) { var i = o.indexOf('='); return [o.slice(0, i), o.slice(i + 1)]; }) : []; }
+  var MEMO = {}, memoN = 0; /* S38: miniaturas em cache (o mesmo visual desenha o mesmo SVG): o painel abre e responde sem refazer dezenas de SVGs */
   function mini(e, ch, v, head) {
-    var d = Object.assign({}, e.data, ch, { bubble: 'none', walk: '', aim: '', link: '', grp: '', say: '', say2: '', choices: [] }), h = F.html(d, 100, 120, { id: 'pzs', variant: v || e.variant });
-    return head ? h.replace('viewBox="0 0 200 240"', 'viewBox="34 6 132 126"') : h;
+    var d = Object.assign({}, e.data, ch, { bubble: 'none', walk: '', aim: '', link: '', grp: '', say: '', say2: '', choices: [] }), k = (v || e.variant) + '|' + (head ? 1 : 0) + '|' + JSON.stringify(d);
+    if (MEMO[k]) return MEMO[k]; if (++memoN > 400) { MEMO = {}; memoN = 1; }
+    var h = F.html(d, 100, 120, { id: 'pzs', variant: v || e.variant });
+    return (MEMO[k] = head ? h.replace('viewBox="0 0 200 240"', 'viewBox="34 6 132 126"') : h);
   }
   function tile(attr, label, inner, on) { return '<button type="button" class="pzs-t' + (on ? ' on' : '') + '" ' + attr + ' title="' + esc(label) + '" aria-pressed="' + !!on + '"><span class="pzs-in">' + inner + '</span><i>' + esc(label) + '</i></button>'; }
   function chips(k, cur, list) { return '<div class="chips pzs-c">' + (list || opts(k)).map(function (o) { return '<button type="button" class="chip' + (o[0] === cur ? ' on' : '') + '" data-pzs="' + k + '" data-v="' + esc(o[0]) + '">' + esc(o[1]) + '</button>'; }).join('') + '</div>'; }
@@ -91,7 +94,7 @@
     } else if (tab === 'mov') {
       h += '<div class="pzs-g">' + opts('act').map(function (o) { return tile('data-pzs="act" data-v="' + o[0] + '"', o[1], mini(e, { act: o[0] }), (d.act || 'acenar') === o[0]); }).join('') + '</div>';
       h += lbl('Quando se move') + chips('trig', d.trig || 'in');
-      if ((d.trig || 'in') === 'in') h += lbl('Gesto ao clicar') + chips('act2', d.act2 || 'pular');
+      if ((d.trig || 'in') !== 'click') h += lbl('Gesto ao clicar') + chips('act2', d.act2 || 'pular'); /* S38: em todos os gatilhos (em laço entra na virada do ciclo) */
       h += '<label class="pzs-row">Andar até o X ' + proxy('data.walk', 'num', 'fica') + '</label><button type="button" class="btnw pri" data-pzs="pv">▶ Ver no slide</button>';
     } else if (tab === 'fala') {
       h += lbl('Balão') + chips('bubble', d.bubble || 'fala') + proxy('data.say', 'area', 'O que ele diz') + lbl('Cor do balão') + sw('bcol', d.bcol || 'branco', Object.keys(P.BCOLS).map(function (k) { return [k, P.BCOLS[k][0], P.BCOLS[k][1]]; }));
@@ -117,27 +120,33 @@
     var e = selEl(); if (!pr || !e || e.kind !== 'persona' || pr.querySelector('.pzs')) return;
     var secs = Array.prototype.slice.call(pr.querySelectorAll('.sec')), find = function (t) { return secs.filter(function (x) { var h = x.querySelector('h3'); return h && h.textContent === t; })[0]; };
     var per = find(F.vtitle), con = find('Conteúdo'), ch = per && per.querySelector('.chips'); if (!ch) return;
-    ch.insertAdjacentHTML('beforebegin', studio(e)); ch.remove();
+    ch.insertAdjacentHTML('beforebegin', studio(e)); ch.remove(); back();
     if (con) { var dt = document.createElement('details'); dt.className = 'pzs-fine'; dt.open = fine; dt.innerHTML = '<summary>Ajustes finos (todos os campos)</summary>'; while (con.children.length > 1) dt.appendChild(con.children[1]); con.appendChild(dt); dt.addEventListener('toggle', function () { fine = dt.open; }); }
   }
-  function rebuild() { var e = selEl(), o = pr && pr.querySelector('.pzs'); if (e && o) { o.insertAdjacentHTML('afterend', studio(e)); o.remove(); } }
+  function rebuild() { var e = selEl(), o = pr && pr.querySelector('.pzs'); keep(); if (e && o) { o.insertAdjacentHTML('afterend', studio(e)); o.remove(); back(); } }
+  function slidesOf(list) { var out = []; A.deck.slides.forEach(function (s, i) { if (list.some(function (x) { return s.els.indexOf(x) >= 0; })) out.push(i); }); return out; }
+  /* S38: o foco volta ao botão equivalente depois de redesenhar (teclado: Tab/Enter seguem do mesmo lugar) */
+  var focusKey = null;
+  function keyOf(n) { if (!n || !n.closest || !n.closest('.pzs')) return null; var a = ['data-var', 'data-pzs', 'data-v', 'data-pzs-tab', 'data-pzs-part', 'data-pzs-slide', 'data-pzs-proxy'].filter(function (k) { return n.hasAttribute(k); }); return a.length ? a.map(function (k) { return '[' + k + '="' + String(n.getAttribute(k)).replace(/["\\]/g, '\\$&') + '"]'; }).join('') : null; }
+  function keep() { focusKey = keyOf(document.activeElement) || focusKey; }
+  function back() { if (!focusKey || !pr) return; var n = pr.querySelector('.pzs ' + focusKey); focusKey = null; if (n && n.focus) n.focus({ preventScroll: true }); }
   function apply(e, ch) { /* peças e cores: o grupo inteiro; o resto: só este */
     var all = e.data.grp ? groupEls(e.data.grp) : [e]; Object.keys(ch).forEach(function (k) { (LOOK.indexOf(k) >= 0 ? all : [e]).forEach(function (x) { x.data[k] = ch[k]; }); });
-    A.renderAll(); A.commit();
+    keep(); A.commit(); A.refresh(e, all.length > 1 ? slidesOf(all) : []);
   }
   function toggleSlide(e, i) { /* o mesmo personagem (data.grp) no slide i: tira a cópia ou põe uma (sem entrada, sem alvo, sem caminhada própria) */
     var g = e.data.grp, m = member(i, g), s = A.deck.slides[i]; if (!s || i === A.cur) return;
     if (m && m.lock) { A.toast('O personagem do slide ' + (i + 1) + ' está bloqueado: desbloqueie para tirá-lo de lá.'); return; }
     if (m) { s.els.splice(s.els.indexOf(m), 1); if (groupEls(g).length < 2) e.data.grp = ''; }
     else { if (!g) g = e.data.grp = 'g' + A.uid(); var c = A.clone(e); c.id = A.uid(); delete c.lock; c.data.aim = ''; c.data.walk = ''; c.anim = Object.assign({}, c.anim || {}, { in: 'none', delay: 0 }); s.els.push(c); }
-    A.renderAll(); A.commit(); A.toast(m ? 'Personagem retirado do slide ' + (i + 1) + '.' : 'Personagem no slide ' + (i + 1) + ': na apresentação ele anda até lá. Mova-o no slide para escolher onde ele para.');
+    keep(); A.commit(); A.refresh(e, [i]); A.toast(m ? 'Personagem retirado do slide ' + (i + 1) + '.' : 'Personagem no slide ' + (i + 1) + ': na apresentação ele anda até lá. Mova-o no slide para escolher onde ele para.');
   }
   F.onCopy = function (el) { if (el.data) el.data.grp = ''; }; /* duplicar/colar um personagem do grupo cria outro personagem, solto (duplicar o slide mantém o grupo) */
   if (pr) {
     if (window.MutationObserver) new MutationObserver(inject).observe(pr, { childList: true });
     pr.addEventListener('click', function (ev) {
-      var b = ev.target.closest && ev.target.closest('[data-var],[data-pzs],[data-pzs-tab],[data-pzs-part],[data-pzs-slide]'), e = selEl(); if (!b || !pr.contains(b) || !e || e.kind !== 'persona' || !b.closest('.pzs')) return;
-      if (b.dataset.var) { var all = e.data.grp ? groupEls(e.data.grp) : [e]; all.forEach(function (x) { if (x !== e) x.variant = b.dataset.var; LOOK.forEach(function (k) { x.data[k] = ''; }); }); e.data.mood = ''; if (all.length > 1) setTimeout(A.renderAll, 0); return; } /* o editor troca a variante e grava (um passo de desfazer) */
+      var b = ev.target.closest && ev.target.closest('[data-var],[data-pzs],[data-pzs-tab],[data-pzs-part],[data-pzs-slide]'), e = selEl(); if (!b || !pr.contains(b) || !e || e.kind !== 'persona' || !b.closest('.pzs')) return; focusKey = keyOf(b);
+      if (b.dataset.var) { var all = e.data.grp ? groupEls(e.data.grp) : [e]; all.forEach(function (x) { if (x !== e) x.variant = b.dataset.var; LOOK.forEach(function (k) { x.data[k] = ''; }); }); e.data.mood = ''; if (all.length > 1) setTimeout(function () { A.refresh(null, slidesOf(all)); }, 0); return; } /* o editor troca a variante, grava (um passo de desfazer) e abre a prévia; aqui só as miniaturas dos outros slides */
       if (b.dataset.pzsTab) { tab = b.dataset.pzsTab; rebuild(); return; }
       if (b.dataset.pzsPart) { part = b.dataset.pzsPart; rebuild(); return; }
       if (b.dataset.pzsSlide) { toggleSlide(e, +b.dataset.pzsSlide); return; }
@@ -151,7 +160,7 @@
     var fwd = function (ev) { var t = ev.target, k = t.dataset && t.dataset.pzsProxy, o = k && pr.querySelector('[data-p="' + k + '"]'); if (!o) return; ev.stopPropagation(); o.value = t.value; o.dispatchEvent(new Event(ev.type, { bubbles: true })); };
     pr.addEventListener('input', fwd, true); pr.addEventListener('change', fwd, true);
     /* peça ou cor trocada em “Ajustes finos”: vale para o grupo, no mesmo passo de desfazer (antes do commit do editor) */
-    pr.addEventListener('change', function (ev) { var k = ev.target.dataset && (ev.target.dataset.p || '').replace(/^data\./, ''), e = selEl(); if (!e || e.kind !== 'persona' || !e.data.grp || LOOK.indexOf(k) < 0) return; groupEls(e.data.grp).forEach(function (x) { x.data[k] = e.data[k]; }); setTimeout(A.renderAll, 0); }, true);
+    pr.addEventListener('change', function (ev) { var k = ev.target.dataset && (ev.target.dataset.p || '').replace(/^data\./, ''), e = selEl(); if (!e || e.kind !== 'persona' || !e.data.grp || LOOK.indexOf(k) < 0) return; var all = groupEls(e.data.grp); all.forEach(function (x) { x.data[k] = e.data[k]; }); setTimeout(function () { A.refresh(null, slidesOf(all)); }, 0); }, true);
   }
   window.AMPersonas = { reaim: reaim, aimOpts: aimOpts, groupEls: groupEls };
 })();

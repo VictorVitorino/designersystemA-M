@@ -3722,6 +3722,8 @@
     safeDeck: safeDeck, exportDeck: function (d) { return exportHTML(d); }, slug: slug, download: download, openObras: goObras,
     setTitle: function (t) { t = String(t == null ? '' : t).slice(0, 300); if (editingId) endEdit(); deck.title = t; $('#title').value = t; commit(); },
     openDrawer: openDrawer, renderAll: renderAll, commit: commit,
+    /* S38: atualização leve para extensões — redesenha só o elemento (do slide atual) e o painel, e as miniaturas dos slides i (sem o renderAll inteiro) */
+    refresh: function (el, slides) { if (el && slide().els.indexOf(el) >= 0) rerenderEl(el); (slides || []).forEach(function (i) { if (deck.slides[i]) renderThumb(i); }); if (el) renderProps(); },
     /* vazia = intocada: um slide branco, sem elementos, título padrão e sem histórico (título, fundo e desfazer contam como obra) */
     isEmpty: isBlank, get cur() { return cur; }, HK: HK, save: save,
     getDraft: function () { try { var r = localStorage.getItem('amStudio.draft'), d = r && JSON.parse(r); return d && Array.isArray(d.slides) && d.slides.length ? d : null; } catch (e) { return null; } },

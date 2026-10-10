@@ -11,7 +11,7 @@ ed-42-import.* : test-core.js test-s24-import.js test-s34-institucional.js test-
 ed-43-brand.* : test-core.js test-s29-marca.js test-s34-institucional.js test-s20-recolor.js
 ed-44-batch.* : test-core.js test-s33-lote.js
 ed-45-institucional.js inst/* tools/inst-check.js : test-core.js test-s34-institucional.js test-s28-layouts.js test-cover.js test-s90-perf.js
-ed-46-personas.* rt-70-personas.* : test-s35-personagens.js test-s36-estudio.js
+ed-46-personas.* rt-70-personas.* : test-s35-personagens.js test-s36-estudio.js test-s38-acabamento.js
 ed-colors.* : test-core.js test-s19-cores.js test-s20-recolor.js test-s29-marca.js
 rt-05-pal.js : test-s20-recolor.js test-s29-marca.js test-s35-personagens.js test-s36-estudio.js
 rt-10-shapes.js : test-s04.js test-s17-girar.js test-s32-conectores.js
