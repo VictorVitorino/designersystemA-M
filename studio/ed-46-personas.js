@@ -99,6 +99,7 @@
     } else {
       var n = A.deck.slides.length, ln = '<select data-pzs-proxy="data.link"><option value="">Fica no mesmo slide</option>';
       for (var i = 1; i <= n; i++) ln += '<option value="' + i + '"' + (+d.link === i ? ' selected' : '') + '>Ir para o slide ' + i + '</option>';
+      if (+d.link > n) ln += '<option value="' + (+d.link) + '" selected>Slide ' + (+d.link) + ' (não existe: fica no mesmo)</option>';
       var am = pr && pr.querySelector('select[data-p="data.aim"]');
       h += lbl('Aponta para') + '<select data-pzs-proxy="data.aim">' + (am ? am.innerHTML : '') + '</select>' + lbl('Ao clicar nele') + ln + '</select>';
       h += lbl('Aparece nos slides') + '<div class="chips pzs-c">' + A.deck.slides.map(function (s, k) { var on = k === A.cur || !!member(k, d.grp); return '<button type="button" class="chip' + (on ? ' on' : '') + '" data-pzs-slide="' + k + '"' + (k === A.cur ? ' disabled' : '') + ' aria-pressed="' + on + '">' + (k + 1) + '</button>'; }).join('') + '</div>';
@@ -126,15 +127,17 @@
   }
   function toggleSlide(e, i) { /* o mesmo personagem (data.grp) no slide i: tira a cópia ou põe uma (sem entrada, sem alvo, sem caminhada própria) */
     var g = e.data.grp, m = member(i, g), s = A.deck.slides[i]; if (!s || i === A.cur) return;
+    if (m && m.lock) { A.toast('O personagem do slide ' + (i + 1) + ' está bloqueado: desbloqueie para tirá-lo de lá.'); return; }
     if (m) { s.els.splice(s.els.indexOf(m), 1); if (groupEls(g).length < 2) e.data.grp = ''; }
-    else { if (!g) g = e.data.grp = 'g' + A.uid(); var c = A.clone(e); c.id = A.uid(); c.data.aim = ''; c.data.walk = ''; c.anim = Object.assign({}, c.anim || {}, { in: 'none', delay: 0 }); s.els.push(c); }
+    else { if (!g) g = e.data.grp = 'g' + A.uid(); var c = A.clone(e); c.id = A.uid(); delete c.lock; c.data.aim = ''; c.data.walk = ''; c.anim = Object.assign({}, c.anim || {}, { in: 'none', delay: 0 }); s.els.push(c); }
     A.renderAll(); A.commit(); A.toast(m ? 'Personagem retirado do slide ' + (i + 1) + '.' : 'Personagem no slide ' + (i + 1) + ': na apresentação ele anda até lá. Mova-o no slide para escolher onde ele para.');
   }
+  F.onCopy = function (el) { if (el.data) el.data.grp = ''; }; /* duplicar/colar um personagem do grupo cria outro personagem, solto (duplicar o slide mantém o grupo) */
   if (pr) {
     if (window.MutationObserver) new MutationObserver(inject).observe(pr, { childList: true });
     pr.addEventListener('click', function (ev) {
       var b = ev.target.closest && ev.target.closest('[data-var],[data-pzs],[data-pzs-tab],[data-pzs-part],[data-pzs-slide]'), e = selEl(); if (!b || !pr.contains(b) || !e || e.kind !== 'persona' || !b.closest('.pzs')) return;
-      if (b.dataset.var) { var all = e.data.grp ? groupEls(e.data.grp) : [e]; all.forEach(function (x) { if (x !== e) x.variant = b.dataset.var; LOOK.forEach(function (k) { x.data[k] = ''; }); }); if (all.length > 1) setTimeout(A.renderAll, 0); return; } /* o editor troca a variante e grava (um passo de desfazer) */
+      if (b.dataset.var) { var all = e.data.grp ? groupEls(e.data.grp) : [e]; all.forEach(function (x) { if (x !== e) x.variant = b.dataset.var; LOOK.forEach(function (k) { x.data[k] = ''; }); }); e.data.mood = ''; if (all.length > 1) setTimeout(A.renderAll, 0); return; } /* o editor troca a variante e grava (um passo de desfazer) */
       if (b.dataset.pzsTab) { tab = b.dataset.pzsTab; rebuild(); return; }
       if (b.dataset.pzsPart) { part = b.dataset.pzsPart; rebuild(); return; }
       if (b.dataset.pzsSlide) { toggleSlide(e, +b.dataset.pzsSlide); return; }

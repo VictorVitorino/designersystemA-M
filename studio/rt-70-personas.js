@@ -335,6 +335,7 @@
        só toca pelo gatilho (laço, mouse ou clique) */
     if (pz.dataset.trig !== 'in' && POSED[act]) flash(pz, 'pz-pose', 520);
     ARR.slice().forEach(function (f) { try { f(pz); } catch (err) { if (window.console) console.error(err); } });
+    if (pz._gt) { delete pz.dataset.walk; delete pz.dataset.wf; pz._gt = 0; } /* S36: a caminhada do guia era emprestada; os efeitos do elemento voltam */
   }
   document.addEventListener('animationend', function (e) { if (e.animationName !== 'pzWalkTo') return; var pz = e.target.closest && e.target.closest('.pz'); if (pz && pz.closest('.am-in') && !pz.classList.contains('pz-arr')) arrive(pz); });
   /* ---------- player ---------- */
@@ -364,10 +365,10 @@
       var s = slideOf(st); if (!s || !Array.isArray(s.els)) return;
       var wk = {}; Array.prototype.forEach.call(st.querySelectorAll('.pz[data-walk]'), function (pz) { var n = pz.closest('.am-el'); if (n) wk[n.dataset.id] = { pz: pz, d: parseFloat(pz.dataset.walk) || 0 }; });
       s.els.forEach(function (ln, i) {
-        if (!ln || ln.type !== 'line') return; var ends = ['a1', 'a2'].filter(function (k) { return ln[k] && wk[ln[k].id]; }); if (!ends.length) return;
+        if (!ln || ln.type !== 'line') return; var ends = ['a1', 'a2'].filter(function (k) { return ln[k] && wk[ln[k].id]; });
         if (only && !ends.some(function (k) { return ln[k].id === only; })) return;
         var orig = st.querySelector('.am-el[data-id="' + ln.id + '"]'); if (!orig) return;
-        var old = st.querySelector('.am-el[data-id="' + ln.id + '-pz"]'); if (old) old.remove();
+        var old = st.querySelector('.am-el[data-id="' + ln.id + '-pz"]'); if (old) old.remove(); if (!ends.length) { orig.classList.remove('pz-lnw'); return; } /* ninguém andando: a linha original volta */
         if (!st.classList.contains('am-in')) { orig.classList.remove('pz-lnw'); return; }
         orig.classList.add('pz-lnw');
         if (!ends.every(function (k) { return wk[ln[k].id].pz.classList.contains('pz-arr'); })) return;
@@ -389,6 +390,7 @@
     function guide(from, st) {
       Array.prototype.forEach.call(st.querySelectorAll('.pz[data-grp]'), function (pz) {
         var src = from.querySelector('.pz[data-grp="' + pz.dataset.grp + '"]'), a = src && boxOf(src.closest('.am-el')), b = boxOf(pz.closest('.am-el')); if (!a || !b) return;
+        a.x += src._gt ? 0 : parseFloat(src.dataset.walk) || 0; /* lá ele tinha andado: sai do ponto de chegada */
         var dx = a.x + a.w / 2 - (b.x + b.w / 2), dy = a.y + a.h - (b.y + b.h), dist = Math.sqrt(dx * dx + dy * dy); if (!(dist >= 4)) return;
         var t = (parseFloat(pz.dataset.rot) || 0) * Math.PI / 180, ms = Math.round(Math.max(600, Math.min(5000, dist * 3.2))), n = Math.max(1, Math.round(ms / 500));
         pz.style.setProperty('--gfx', CQ(dx * Math.cos(t) + dy * Math.sin(t))); pz.style.setProperty('--gfy', CQ(-dx * Math.sin(t) + dy * Math.cos(t)));
@@ -396,7 +398,7 @@
         void pz.offsetWidth; pz.classList.add('pz-from');
       });
     }
-    function enter(st) { reset(st); var from = lastSt; lastSt = st; if (from && from !== st && deckEl.contains(from)) guide(from, st); }
+    function enter(st) { reset(st); var from = lastSt; lastSt = st; if (from && from !== st && deckEl.contains(from)) { guide(from, st); relink(st); } } /* linhas presas ao guia somem durante a caminhada, como em “Andar até” */
     function onArrive(pz) { if (!deckEl.contains(pz)) return; var st = pz.closest('.am-stage'), n = pz.closest('.am-el'); if (st && n) relink(st, n.dataset.id); eyes(); }
     function click(e) {
       var ch = e.target.closest ? e.target.closest('.pz-ch') : null;
