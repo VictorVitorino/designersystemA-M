@@ -30,7 +30,11 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // variações de cada modelo: screenshot do estado final na apresentação
   const nSlides=await p.evaluate(()=>AMStudio.deck.slides.length);
   await p.click('#bPlay'); await sleep(500);
-  for(let i=0;i<nSlides;i++){ await p.evaluate(()=>{}); await sleep(i===0?3500:3800); await p.screenshot({path:`shots/play-${String(i+1).padStart(2,'0')}.png`}); await p.keyboard.press('ArrowRight'); }
+  /* cada slide: piso de 2 s (contadores e ciclos do runFx correm por rAF/temporizador, fora do getAnimations) e depois só até as animações CSS
+     finitas terminarem, com o teto antigo (3,5 s no primeiro, 3,8 s nos outros) */
+  for(let i=0;i<nSlides;i++){ const cap=i===0?3500:3800, t0=Date.now(); await sleep(2000);
+    await p.waitForFunction(()=>document.getAnimations().every(a=>a.playState!=='running'||a.effect.getComputedTiming().iterations===Infinity),null,{timeout:Math.max(1,cap-(Date.now()-t0)),polling:100}).catch(()=>{});
+    await p.screenshot({path:`shots/play-${String(i+1).padStart(2,'0')}.png`}); await p.keyboard.press('ArrowRight'); }
   await p.keyboard.press('Escape'); await sleep(300);
   // variações alternativas: aplica cada variant e mede erros
   const varRes=await p.evaluate(async()=>{ const R=window.AMRT, out=[]; for(const k of Object.keys(R.FX).filter(k=>R.FX[k].model)){ out.push(k+':'+R.FX[k].variants.map(v=>v[0]).join('/')); } return out; });

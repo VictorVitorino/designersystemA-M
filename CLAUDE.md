@@ -39,7 +39,7 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
   `ed-*.js/.css` (extensões **só do editor**, um `<script>` por arquivo, depois de `editor.js`) · `cover.*` (tela inicial) · `history.js`.
 - Marcas A&M vêm de `am/brand/` (`%%LOGO_PERF_W%%` etc.). Os slides institucionais entram por `/*%%INST_SPECS%%*/null` em `ed-45-institucional.js`,
   substituído pelo JSON de `studio/inst/*.json` (imagens viram `data:` JPEG). **Não escreva esse marcador dentro de um comentário.**
-- Orçamento do arquivo do editor: **≤ 2000 KB** (`test-s90-perf.js`) — vale também para o editor em nuvem (`platform/tests/cloud/preservacao.test.js` PR-07), que soma ~146 KB ao autônomo. Hoje: autônomo ~1825 KB, nuvem ~1971 KB (artes institucionais recomprimidas em JPEG q64 na S35). Antes de subir o limite: deduplicar os logos embutidos (3× o mesmo PNG) ou recomprimir de novo, conferindo a fidelidade do S34.
+- Orçamento do arquivo do editor: **≤ 2000 KB** (`test-s90-perf.js`) — vale também para o editor em nuvem (`platform/tests/cloud/preservacao.test.js` PR-07), que soma ~146 KB ao autônomo. Hoje (S35 publicada): autônomo ~1833 KB, nuvem ~1988 KB, ou seja, ~12 KB de folga (artes institucionais já recomprimidas em JPEG q64 na S35). Antes de subir o limite: deduplicar os logos embutidos (3× o mesmo PNG) ou recomprimir de novo, conferindo a fidelidade do S34.
 
 ## Invariantes que não podem quebrar
 
