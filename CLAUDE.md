@@ -5,14 +5,33 @@ Editor de apresentações em arquivo único (HTML), interface em **pt-BR**. Tudo
 
 ## Processo de cada mudança (nesta ordem)
 
-1. Implementar nas fontes (`studio/`), nunca no HTML montado.
-2. `python3 assemble.py` (em `studio/`) e a bateria nova `test-sNN-*.js` (exit 0 = passou).
-3. Revisão adversarial (agentes independentes tentando refutar achados) para mudanças que tocam UI, menus ou dados.
-4. **Portão completo**: `./qa-gate.sh` precisa terminar em `GATE PASS` com todas as baterias. Não rodar o portão enquanto outro teste usa a pasta (o assemble sobrescreve o HTML).
-5. Publicar **exatamente o build que passou**: copiar `studio/AM-Studio-Editor.html` para `AM-Studio-Editor.html` e `Canteiro-AM.html` na raiz.
-6. Atualizar `studio/docs/ARCH.md` (seção de status da etapa) e `studio/docs/KEYMAP.md`; commit e push.
+1. Implementar nas fontes (`studio/`), nunca no HTML montado. Recurso novo mora no **próprio módulo** (`rt-NN-*.js/.css` no runtime,
+   `ed-NN-*.js/.css` no editor); em `editor.js`/`runtime.js` só entram pontos de extensão genéricos (ex.: `FX.animOk`, `FX.vlabel`, `FX.pvl`),
+   nunca código de um componente específico. Orçamento apertado (nuvem ~1988 KB de 2000): recurso novo precisa sair enxuto.
+2. Iterar com `./qa-gate.sh affected` (monta e roda `test.js`, `test2.js` e só as baterias ligadas aos arquivos alterados desde a última
+   publicação, pelo mapa `studio/qa-map.txt`; arquivo fora do mapa, `am/` ou `fonts2/` → portão completo). `./qa-gate.sh rerun` repete só
+   as reprovadas, sem remontar (uso: bateria sensível a carga, ex.: S20-18; registrar).
+3. **Revisão enxuta** (seção abaixo) para mudanças que tocam UI, menus ou dados.
+4. **Portão completo uma vez por etapa**, antes de publicar: `./qa-gate.sh` precisa terminar em `GATE PASS` com todas as baterias; ele grava
+   `.gate/APROVADO` (sha256 do HTML, modo, nº de baterias) e usa uma trava (dois portões não rodam juntos; nada de outro teste na pasta:
+   o assemble sobrescreve o HTML). Qualquer falha que não seja de carga se corrige e reabre o portão.
+5. Publicar **exatamente o build que passou**: `./publish.sh` (em `studio/`; recusa se o HTML não tiver o sha do `APROVADO` do portão completo;
+   copia para `AM-Studio-Editor.html` e `Canteiro-AM.html` na raiz, regenera `platform/vercel.json` e roda `build-cloud-editor --verify-standalone`).
+6. Atualizar `studio/docs/ARCH.md` (seção de status da etapa) e `studio/docs/KEYMAP.md`; commit e push. Depois do commit, em série e sem
+   outro Chromium: `node tests/cloud/preservacao.test.js` (rápido) e a prova de paridade (seção Plataforma).
 
-Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, rodar só ela de novo e registrar; qualquer outra falha se corrige e reabre o portão.
+## Revisão enxuta
+
+- Tamanho proporcional ao diff (sem testes e docs): até ~300 linhas, um revisor; acima, três lentes: (1) dados e editor (`safeEl/safeSnap/SNAP_K`,
+  `DATA_TOKENS/NOTEXT_KEYS`, desfazer, cópias); (2) runtime, player e CSS (trilhas de animação, ponteiro, classes com dois sentidos); (3) export
+  e as invariantes deste arquivo. A plataforma fica fora: seus comandos mecânicos rodam nos passos 5–6.
+- Cada achado é **BLOQUEANTE** (perda de dados, export ou player quebrado, erro de console, segurança, invariante deste arquivo quebrada,
+  recurso inutilizável) ou **POLIMENTO** (borda visual de combinação rara, texto, acabamento). A severidade “alta/média/baixa” do revisor não filtra.
+- Só BLOQUEANTE vai a cético: um cético de reprodução (o segundo só se o primeiro refutar); achados com a mesma causa são fundidos.
+- Cada correção de BLOQUEANTE ganha um teste dirigido na bateria da etapa; depois de cada lote de correções, uma passada curta só de BLOQUEANTE
+  sobre o diff das correções (um agente com Chromium por módulo tocado, chamadores incluídos, e um cético). Nada de nova rodada completa.
+- POLIMENTO vai para o backlog da etapa no `ARCH.md` (“Limits / next”, em inglês, por nome de função); só entra na etapa se for correção
+  local de poucas linhas. **Parada**: nenhum BLOQUEANTE aberto depois da passada curta.
 
 ## Estrutura do build (`assemble.py`)
 
@@ -82,7 +101,8 @@ Se uma bateria sensível a carga (ex.: S20-18, temporização) falhar sozinha, r
 
 - **`studio/` é intocável pela plataforma.** O editor em nuvem é construído por `platform/tools/build-cloud-editor.js` numa cópia temporária, com a extensão `studio-cloud/ed-50-cloud.js` e os patches de texto de `studio-cloud/patches.json` (cada "antes" precisa existir exatamente uma vez; se `studio/` mudar, o build falha em vez de produzir editor quebrado). Duas garantias separadas (`--verify-standalone`, `preservacao.test.js`): o build autônomo de `studio/` é byte-idêntico ao **build publicado na raiz** (`AM-Studio-Editor.html` = `Canteiro-AM.html`, atualizado a cada etapa depois do portão); `original/` é só a cópia preservada do upload S34b e confere com `original/SHA256SUMS`. Cada etapa de `studio/` também regenera `platform/vercel.json` (`node tools/build-web.js`: a CSP leva o hash de cada script inline do editor; o CI confere com `--check`).
 - **Prova de paridade obrigatória** antes de publicar qualquer mudança no build em nuvem: `npm run test:parity` (ou `:quick`) compara o build autônomo publicado (`../AM-Studio-Editor.html`) e o candidato em DOM, raster, quadros do player, transições e exportações, com o mesmo deck de prova (catálogo completo da gaveta). Resultado e envelope de ruído em `docs/evidencias/paridade.md`.
-- **Processo**: implementar → `npm test` (unit, banco com RLS, API), `npm run build:web` e `npm run test:security` (lê o site gerado) → suítes afetadas (`tests/web`, `tests/cloud`, `tests/ops`, `tests/e2e`) → `node tools/verify-deploy.js` → commit/push. Produção só pelo workflow com aprovação.
+- **Etapa só de `studio/`** (a plataforma não mudou): `./publish.sh` (passo 5) → commit → `node tests/cloud/preservacao.test.js` (rápido; mais `node tests/cloud/editor-cloud.test.js` se mudaram `editor.html`, `editor.js`, `ed-*` ou `cover.*`) → `npm run test:parity:quick` → evidências. `PRESERVE_FULL=1` só quando mudar `platform/studio-cloud/`; `npm test` e `test:security` rodam no CI a cada push e, localmente, só quando `platform/` mudar.
+- **Processo** (mudança em `platform/`): implementar → `npm test` (unit, banco com RLS, API), `npm run build:web` e `npm run test:security` (lê o site gerado) → suítes afetadas (`tests/web`, `tests/cloud`, `tests/ops`, `tests/e2e`) → `node tools/verify-deploy.js` → commit/push. Produção só pelo workflow com aprovação.
 - **Segurança**: o banco decide permissões (RLS; nunca `if` de papel no JS confiando no cliente); SQL só parametrizado; toda entrada passa por zod; nada de segredo/token/senha em log ou auditoria; CSP estrita (sem script/estilo inline nas páginas; editor com hashes + `strict-dynamic`); uploads validados por magic bytes; `app_api` nunca é membro de `app_system`.
 - **Regras do produto**: acervo comum visível a todos; só o dono (ou admin) altera; cópia para usar; sem cadastro aberto; lixeira reversível. Mudou o contrato → mude `platform/docs/API.md` primeiro.
 - **Nunca versionar**: `.env` reais, `platform/.data/`, `platform/.tmp/`, `platform/dist/` (gerado; só `vercel.json` é commitado), capturas de teste.
