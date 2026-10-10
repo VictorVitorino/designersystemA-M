@@ -94,7 +94,7 @@ npm run build:web
 ### P3 — depois do piloto no ar
 8. Homologação real: login, salvar, reabrir em um **segundo computador**, imagens, exportações e permissões entre dois usuários (etapas 4 e 5 do `STATUS-MVP.md`).
 9. Backup cifrado e restauração contra o R2/S3 real (issue #27). Hoje só foi ensaiado com o S3 falso (moto).
-10. Tela para o dono ler as respostas de formulário/votação (`GET …/interactions`, `…/interactions.csv`), ainda sem interface no acervo (`docs/00-ANALISE-ORIGINAL.md`).
+10. Corrigir a documentação desatualizada: `platform/docs/00-ANALISE-ORIGINAL.md` diz que não há tela para as respostas de formulário/votação, mas o acervo já tem essa tela (`web/js/pages/acervo.js`: lista, CSV, apagar).
 
 ---
 
